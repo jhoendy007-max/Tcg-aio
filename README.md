@@ -1,8 +1,8 @@
 # TCGAIO
 
-Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.1 monitors Target by TCIN, Walmart by item ID, and Best Buy by SKU, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. Pokémon Center, Amazon, and Crunchyroll are registered store modules with checkout still stubbed.
+Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.1 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, and Pokémon Center by SKU or product URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. Amazon and Crunchyroll are registered store modules with checkout still stubbed.
 
-Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target, Walmart, or Best Buy shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
+Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target, Walmart, Best Buy, or Pokémon Center shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
 
 ## What you get
 
@@ -12,13 +12,13 @@ Retailer terms often restrict automated purchasing. TCGAIO uses the account, pro
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
 - **Settings** — Discord webhook and Target monitor delay, store ID, ZIP, and state.
 
-On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Walmart's PIE key is fetched with a GET that does not include the card.
+On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Pokémon Center payment fetches a CyberSource Flex capture context with a GET that does not include the card, then posts the encrypted card only to `flex.cybersource.com`. Walmart's PIE key is fetched with a GET that does not include the card.
 
 ## Requirements
 
 - Windows 10 or 11 to run the packaged app
 - Node.js 22 to build from source
-- A Target, Walmart, or Best Buy account you control, plus a browser session if password sign-in is challenged
+- A Target, Walmart, Best Buy, or Pokémon Center account you control, plus a browser session if password sign-in is challenged
 
 ## Setup
 
@@ -62,8 +62,8 @@ App data lives in Electron's user data directory (`%APPDATA%\tcgaio` on Windows)
 ## Usage
 
 1. Open **Profiles** and save a US shipping address, billing address, and card. v0.1 ships inside the US only.
-2. Open **Accounts**. Add a Target, Walmart, or Best Buy account.
-   - Target password sign-in is attempted when no session is saved. Walmart and Best Buy password sign-in are not attempted, because PerimeterX and Akamai block them.
+2. Open **Accounts**. Add a Target, Walmart, Best Buy, or Pokémon Center account.
+   - Target password sign-in is attempted when no session is saved. Walmart, Best Buy, and Pokémon Center password sign-in are not attempted, because PerimeterX, Akamai, and Incapsula block them.
    - The reliable path is a browser session. Sign in on the retailer site, open DevTools, and copy the cookies into the session box.
    - Target:
 
@@ -83,9 +83,11 @@ App data lives in Electron's user data directory (`%APPDATA%\tcgaio` on Windows)
      ```text
      at=...; vt=...; SID=...
      ```
+
+   - Pokémon Center: paste the full cookie header from a signed-in `www.pokemoncenter.com` page. Two or more cookies are enough. A single `visitorId` cookie is not.
 3. Optionally import a proxy group and run **Test**. A task starts on one proxy from the group. A Walmart task rotates to the next proxy in that group when PerimeterX returns HTTP 412, waits with backoff, and pauses if the block continues.
 4. Open **Settings**. Set the Discord webhook (`https://discord.com/api/webhooks/...`), monitor delay, and the Target store ID / ZIP / state used for ship-to-home stock. Send the test webhook to confirm it.
-5. Open **Tasks**. Create a task with a Target TCIN (`88897904`) or product URL (`https://www.target.com/p/.../-/A-88897904`), a Walmart item ID (`13816151308`) or product URL (`https://www.walmart.com/ip/.../13816151308`), or a Best Buy SKU (`6606082`) or product URL (`https://www.bestbuy.com/product/.../sku/6606082`). Check the confirmation box. The checkbox is required before **Start** will run, because a successful monitor places a real order.
+5. Open **Tasks**. Create a task with a Target TCIN (`88897904`) or product URL (`https://www.target.com/p/.../-/A-88897904`), a Walmart item ID (`13816151308`) or product URL (`https://www.walmart.com/ip/.../13816151308`), a Best Buy SKU (`6606082`) or product URL (`https://www.bestbuy.com/product/.../sku/6606082`), or a Pokémon Center SKU (`10-10416-112`) or product URL (`https://www.pokemoncenter.com/product/10-10416-112/...`). Check the confirmation box. The checkbox is required before **Start** will run, because a successful monitor places a real order.
 6. Press **Start**. The log shows monitoring, add to cart, shipping, payment, and the order id when the retailer accepts it. **Stop** aborts the run. **Resume** continues a paused task after you update the account session.
 
 Stub stores can be selected. Starting one writes a clear failure: that module is registered, and checkout is not implemented in v0.1.
@@ -124,13 +126,25 @@ An expired session tries the refresh token, then the password. A challenge at an
 7. GET `/api/csiservice/v2/key/tas` for the public key (no card in that request). The PAN is RSA-OAEP SHA-1 encrypted as `00960001` plus the digits. `PUT /payment/api/v3/payment/{id}/creditCard` sends that ciphertext and the CVV only to `www.bestbuy.com`. Payments are refreshed, then `POST /checkout/v3/{orderId}` places the order.
 8. On success, failure, or pause, the app posts to the Discord webhook when one is saved.
 
+## Pokémon Center flow
+
+1. Require a pasted signed-in cookie header from `www.pokemoncenter.com`. Password sign-in is not attempted. A cart probe checks the session. HTTP 401 pauses for a fresh cookie header. A guest cart (`guest`, `isGuest`, `authenticated: false`, or `authStatus` `G`) pauses before monitoring.
+2. A product URL is requested as given. A bare SKU is read from `GET /tpci-ecommweb-api/search` (`availability_status`, `pid`, `price`, `title`, `url`). If that payload does not include the SKU, the task requests `https://www.pokemoncenter.com/product/{sku}`. Stock is read from search docs or from `__NEXT_DATA__` (`addToCartForm` and `availability_status`). `IN_STOCK`, `AVAILABLE`, `LOW_STOCK`, and `PRE_ORDER` continue. `OUT_OF_STOCK`, `SOLD_OUT`, `UNAVAILABLE`, and `COMING_SOON` stay on the monitor. HTTP 429 and 5xx retry on the monitor delay.
+3. DataDome (`var dd=`, `captcha-delivery.com`, "Please enable JS and disable any ad blocker"), Incapsula ("Pardon Our Interruption", "Request unsuccessful", `_Incapsula_Resource`), and an Imperva JSON block ("This request was blocked by our security service") pause the task. Discord is notified. TCGAIO does not solve captchas, DataDome cookies, or Imperva `reese84` challenges.
+4. A Queue-it waiting room (a redirect to `*.queue-it.net`, or a page with `customerId` and `eventId`) is a line, not a captcha. The task POSTs `/spa-api/queue/{customerId}/{eventId}/enqueue` with an empty `challengeSessions` list, then polls `/status`. The log reads `Pokémon Center waiting room. Ahead of you: N. Checking again in Xs.` The site's `updateInterval` is used when it is between 1 and 120 seconds. The pass redirect is followed only when the host is `www.pokemoncenter.com`, and `QueueITAccepted` is kept on the session. `challengeRequired`, a captcha, or a proof-of-work request pauses the task. The queue host has to end in `.queue-it.net`, and card data is not sent there.
+5. `POST /tpci-ecommweb-api/cart?type=product&format=nodatalinks` sends `productURI` from `addToCartForm`, the task quantity, and an empty `configuration`. An out-of-stock add to cart returns to the monitor.
+6. `POST /tpci-ecommweb-api/cart/shipping-address?format=nodatalinks` sends the profile address with `isDefault: false`. Shipping methods are taken from that response or from `GET /tpci-ecommweb-api/cart/shipping-methods?format=nodatalinks`. The first method that is not pickup is posted to `/tpci-ecommweb-api/cart/shipping-method`. Pickup-only checkout fails and does not request a payment key. These address and order paths are the storefront BFF shape used by the fixture tests. A live checkout page was not available to confirm the field names.
+7. `GET /tpci-ecommweb-api/get-payment-iframe-key?microform=true&locale=en-GB` returns a capture-context JWT and carries no card. The PAN, CVV, expiry, and card type (Visa `001`, Mastercard `002`, Amex `003`, Discover `004`) are encrypted as a CyberSource Flex compact JWE: RSA-OAEP with SHA-1 and A256GCM. The plaintext is `{ data: { CARD: { number, securityCode, type, expirationMonth, expirationYear } }, context, index: 0 }`. That JWE is posted only to the `flx.origin` + `flx.path` URL, and only when that host is `flex.cybersource.com` (normally `https://flex.cybersource.com/flex/v2/tokens`). The response JWT's `jti` is the payment token.
+8. `POST /tpci-ecommweb-api/order?format=nodatalinks` sends `paymentKey` (the capture JWT), `paymentToken` (the `jti`), and the profile email. The raw card number and CVV are not in that body. A declined card fails without an order id.
+9. On success, failure, or pause, the app posts to the Discord webhook when one is saved.
+
 ## Adding a store
 
-Each retailer is a `StoreModule` under `src/stores/<store>/`. The registry in `src/stores/registry.ts` is the only place that needs to know it exists. A module implements `run(ctx)` and returns `success`, `failed`, `paused`, or `stopped`. `ctx` provides the profile, account, the starting proxy, the proxy group, monitor settings, logger, and an HTTP client. The Pokémon Center, Amazon, and Crunchyroll files are the stubs to replace.
+Each retailer is a `StoreModule` under `src/stores/<store>/`. The registry in `src/stores/registry.ts` is the only place that needs to know it exists. A module implements `run(ctx)` and returns `success`, `failed`, `paused`, or `stopped`. `ctx` provides the profile, account, the starting proxy, the proxy group, monitor settings, logger, and an HTTP client. The Amazon and Crunchyroll files are the stubs to replace.
 
 ## What was tested, and what was not
 
-Automated tests cover TCIN and proxy parsing, local encryption, masked profiles, the task runner, Discord payload redaction, Walmart and Best Buy session cookies, Walmart PIE ciphertext against a fixed key, Walmart 412 proxy rotation, and the Target, Walmart, and Best Buy sequences against a fake HTTP client: in-stock shipping checkout, a Best Buy please-wait queue, a wait through an out-of-stock or marketplace reading, a captcha pause before add-to-cart, a declined card, a CVV resubmit, and a 3-D Secure pause that does not call Cardinal.
+Automated tests cover TCIN and proxy parsing, local encryption, masked profiles, the task runner, Discord payload redaction, Walmart, Best Buy, and Pokémon Center session cookies, Walmart PIE ciphertext against a fixed key, a Pokémon Center Flex JWE that decrypts back to the card, Walmart 412 proxy rotation, and the Target, Walmart, Best Buy, and Pokémon Center sequences against a fake HTTP client: in-stock shipping checkout, a Best Buy please-wait queue, a Pokémon Center Queue-it wait that logs the line position, a wait through an out-of-stock or marketplace reading, a captcha pause before add-to-cart, a declined card, a CVV resubmit, and a 3-D Secure pause that does not call Cardinal. Pokémon Center challenge fixtures are trimmed from live DataDome and Incapsula responses. The tests do not call the live sites.
 
 A direct Target request from the development network, without a proxy, returned HTTP 435 and a PerimeterX captcha payload. Through a residential proxy, `product_summary_with_fulfillment_v1` returned real JSON: HTTP 200 for a physical store, and HTTP 206 with `Parameter store_id cannot be digital store 3991` when the store id is the old default. The legacy `pdp_fulfillment_v1` path returned HTTP 410. With store `1881` and ZIP `10001`, shipping status was `IN_STOCK` for TCIN `1012916220` (Destined Rivals Elite Trainer Box) and `OUT_OF_STOCK` for TCIN `1010892076` (30th Celebration Elite Trainer Box). New installs use store `1881`. Target checkout against a live cart was not run.
 
@@ -163,4 +177,21 @@ The same proxy was used for read-only Best Buy product pages (undici, HTTP/2 thr
 
 Sibling ids `6685559` and `6665449` redirected to the same marketplace ETB pages. None of these Pokémon listings were Best Buy ship-to-home at the time of the check. These pages included `customerPrice` and no separate regular price. Best Buy add to cart, the please-wait queue, sign-in, TAS encryption, and checkout were not run live.
 
-Target, Walmart, and Best Buy change response shapes, and sign-in or cart calls can be blocked. Expect a paused task until you paste a fresh browser session. Confirm a small in-stock item you actually want before pointing a task at a drop.
+The same proxy was used for read-only Pokémon Center requests (undici through the proxy, redirects not followed). ipify was HTTP 200 and the exit IP was `69.85.83.159`. No add to cart, sign-in, queue, payment, or checkout was sent. No purchase was made. None of the responses included product JSON, a price, or an availability status. The challenge parser matches these bodies.
+
+| Request | HTTP | Body |
+| --- | --- | --- |
+| `www.pokemoncenter.com/` | 403 | DataDome HTML, 858 bytes. `var dd=`, "Please enable JS and disable any ad blocker", script `/vice-come-Soldenyson-it-non-Banquoh-Chare-Hart-C`, host `geo.captcha-delivery.com` |
+| Search `q=10-10416-112` (Mega Evolution Pitch Black ETB) | 403 | Same DataDome HTML, 858 bytes |
+| Search `q=pokemon tcg elite trainer box` | 403 | DataDome script plus an Incapsula iframe, 855 bytes. "Request unsuccessful. Incapsula incident ID" |
+| Search with `Accept: application/json` for `10-10416-112` and for `pokemon tcg` | 403 | Imperva JSON, `errorCode` `15`, "This request was blocked by our security service" |
+| `GET /tpci-ecommweb-api/cart?format=nodatalinks` | 403 | DataDome JSON whose `url` is `https://geo.captcha-delivery.com/interstitial/` |
+| `/product/10-10416-112/...` Mega Evolution Pitch Black ETB | 403 | DataDome HTML |
+| `/product/290-85466/...` Scarlet & Violet 151 ETB | 200 | Incapsula "Pardon Our Interruption", 6183 bytes, `_Incapsula_Resource` |
+| `/product/178-80980/...` Evolving Skies Pokémon Center ETB | 200 | Same Incapsula interstitial |
+| `/product/153-80123/...` Fates Collide ETB | 200 | Same Incapsula interstitial |
+| `/category/trading-card-game` | 200 | Same Incapsula interstitial |
+
+Pokémon Center add to cart, the Queue-it waiting room, sign-in, CyberSource Flex tokenization, and checkout were not run live. The shipping-address, shipping-method, and order requests are covered by the fake HTTP client only.
+
+Target, Walmart, Best Buy, and Pokémon Center change response shapes, and sign-in or cart calls can be blocked. Expect a paused task until you paste a fresh browser session. Confirm a small in-stock item you actually want before pointing a task at a drop.

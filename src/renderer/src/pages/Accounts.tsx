@@ -86,7 +86,7 @@ export function AccountsPage() {
       <header className="page-head">
         <div>
           <h1>Accounts</h1>
-          <p>Use your own store login. A pasted browser session is the reliable path for Target, Walmart, and Best Buy. If sign-in hits a challenge, the task pauses for you.</p>
+          <p>Use your own store login. A pasted browser session is the reliable path for Target, Walmart, Best Buy, and Pokémon Center. If sign-in hits a challenge, the task pauses for you.</p>
         </div>
         <button type="button" className="primary" onClick={() => { setForm(blank()); setError("") }}>New account</button>
       </header>
@@ -105,7 +105,7 @@ export function AccountsPage() {
               <TextInput type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
             </Field>
           </div>
-          <Field label="Browser session" hint="Target: accessToken, visitorId, and refreshToken. Walmart: auth and CID. Best Buy: the www.bestbuy.com cookie header, including at. Cookie strings or the same fields as JSON. Leave blank to keep a saved session.">
+          <Field label="Browser session" hint="Target: accessToken, visitorId, and refreshToken. Walmart: auth and CID. Best Buy: the www.bestbuy.com cookie header, including at. Pokémon Center: the full www.pokemoncenter.com cookie header. Cookie strings or the same fields as JSON. Leave blank to keep a saved session.">
             <textarea value={form.session} onChange={(event) => setForm({ ...form, session: event.target.value, clearSession: false })} rows={5} spellCheck={false} placeholder="accessToken=...; visitorId=...   or   auth=...; CID=...   or   at=...; vt=..." />
           </Field>
           {form.id ? (

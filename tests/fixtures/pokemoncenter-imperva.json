@@ -1,0 +1,9 @@
+{
+  "incidentId": "trimmed",
+  "hostName": "www.pokemoncenter.com",
+  "errorCode": "15",
+  "description": "This request was blocked by our security service",
+  "timeUtc": "2026-10-16 16:06:13 UTC",
+  "clientIp": "trimmed",
+  "proxyId": "trimmed"
+}

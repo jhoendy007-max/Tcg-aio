@@ -17,7 +17,7 @@ export function parseSession(text: string): SessionCookies {
     const cookie = stringField(record, ["cookie", "cookies"])
     if (!accessToken) {
       if (cookie) return parseSession(cookie)
-      throw new AppError("Session must include accessToken, auth, or a Best Buy at cookie.")
+      throw new AppError("Session must include accessToken, auth, a Best Buy at cookie, or a full cookie header.")
     }
     return {
       accessToken,
@@ -34,7 +34,18 @@ export function parseSession(text: string): SessionCookies {
     map.set(part.slice(0, eq).trim(), part.slice(eq + 1).trim())
   }
   const accessToken = map.get("accessToken") ?? map.get("access_token") ?? map.get("auth") ?? map.get("at")
-  if (!accessToken) throw new AppError("Session must include accessToken, auth, or a Best Buy at cookie.")
+  if (!accessToken) {
+    if (map.size >= 2) {
+      return {
+        accessToken: "session",
+        visitorId: map.get("visitorId") ?? map.get("visitorID") ?? map.get("visitor_id") ?? map.get("CID") ?? map.get("cid") ?? map.get("vt"),
+        refreshToken: map.get("refreshToken") ?? map.get("refresh_token"),
+        idToken: map.get("idToken") ?? map.get("id_token"),
+        cookie: trimmed
+      }
+    }
+    throw new AppError("Session must include accessToken, auth, a Best Buy at cookie, or a full cookie header.")
+  }
   return {
     accessToken,
     visitorId: map.get("visitorId") ?? map.get("visitorID") ?? map.get("visitor_id") ?? map.get("CID") ?? map.get("cid") ?? map.get("vt"),

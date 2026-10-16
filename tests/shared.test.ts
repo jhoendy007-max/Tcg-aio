@@ -82,6 +82,9 @@ describe("sessions and stock", () => {
     expect(bestbuy.accessToken).toBe("bb-token")
     expect(bestbuy.visitorId).toBe("visitor-9")
     expect(bestbuy.cookie).toContain("SID=abc")
+    const pokemon = parseSession("GlobalE_Consent=1; datadome=abc")
+    expect(pokemon.accessToken).toBe("session")
+    expect(pokemon.cookie).toContain("datadome=abc")
     expect(() => parseSession("visitorId=only")).toThrow(/accessToken/)
   })
 
