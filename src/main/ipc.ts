@@ -1,0 +1,77 @@
+import { ipcMain, type BrowserWindow } from "electron"
+import { postDiscord } from "../engine/discord"
+import type { Database } from "../engine/database"
+import { testProxies } from "../engine/proxy-test"
+import type { TaskService } from "../engine/task-runner"
+import { channels } from "../shared/ipc"
+import type { Result, Settings, TaskEvent } from "../shared/types"
+import { listStores } from "../stores/registry"
+import type { StoreId } from "../shared/types"
+import type { StoreModule } from "../stores/module"
+
+export function registerIpc(db: Database, runner: TaskService, registry: Map<StoreId, StoreModule>, getWindow: () => BrowserWindow | null): void {
+  handle(channels.tasksList, () => db.listTasks())
+  handle(channels.tasksSave, (input) => db.saveTask(input))
+  handle(channels.tasksDelete, (id: string) => {
+    if (runner.isRunning(id)) throw new Error("Stop the task before deleting it.")
+    db.deleteTask(id)
+    getWindow()?.webContents.send(channels.taskEvent, { type: "delete", id } satisfies TaskEvent)
+    return { id }
+  })
+  handle(channels.tasksStart, (id: string) => {
+    runner.start(id)
+    return { started: true as const }
+  })
+  handle(channels.tasksStop, (id: string) => {
+    runner.stop(id)
+    return { stopped: true as const }
+  })
+  handle(channels.profilesList, () => db.listProfiles())
+  handle(channels.profilesSave, (input) => db.saveProfile(input))
+  handle(channels.profilesDelete, (id: string) => {
+    db.deleteProfile(id)
+    return { id }
+  })
+  handle(channels.proxiesList, () => db.listProxyGroups())
+  handle(channels.proxiesSave, (input) => db.saveProxyGroup(input))
+  handle(channels.proxiesDelete, (id: string) => {
+    db.deleteProxyGroup(id)
+    return { id }
+  })
+  handle(channels.proxiesTest, (id: string) => testProxies(db.getProxyGroup(id).proxies))
+  handle(channels.accountsList, () => db.listAccounts())
+  handle(channels.accountsSave, (input) => db.saveAccount(input))
+  handle(channels.accountsDelete, (id: string) => {
+    db.deleteAccount(id)
+    return { id }
+  })
+  handle(channels.settingsGet, () => ({ settings: db.getSettings(), security: db.security() }))
+  handle(channels.settingsSave, (input: Settings) => {
+    db.saveSettings(input)
+    return { settings: db.getSettings(), security: db.security() }
+  })
+  handle(channels.settingsTest, async () => {
+    const webhook = db.getSettings().discordWebhook
+    if (!webhook) throw new Error("Save a Discord webhook first.")
+    await postDiscord(webhook, {
+      kind: "success",
+      storeName: "TCGAIO",
+      sku: "Webhook test",
+      profileName: "Settings",
+      detail: "Discord notifications are connected."
+    })
+    return { delivered: true as const }
+  })
+  handle(channels.storesList, () => listStores(registry))
+}
+
+function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {
+  ipcMain.handle(channel, async (_event, ...args) => {
+    try {
+      const data = await fn(...(args as never[]))
+      return { ok: true, data } satisfies Result<T>
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) } satisfies Result<never>
+    }
+  })
+}

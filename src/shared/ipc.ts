@@ -1,0 +1,22 @@
+export const channels = {
+  tasksList: "tasks:list",
+  tasksSave: "tasks:save",
+  tasksDelete: "tasks:delete",
+  tasksStart: "tasks:start",
+  tasksStop: "tasks:stop",
+  taskEvent: "tasks:event",
+  profilesList: "profiles:list",
+  profilesSave: "profiles:save",
+  profilesDelete: "profiles:delete",
+  proxiesList: "proxies:list",
+  proxiesSave: "proxies:save",
+  proxiesDelete: "proxies:delete",
+  proxiesTest: "proxies:test",
+  accountsList: "accounts:list",
+  accountsSave: "accounts:save",
+  accountsDelete: "accounts:delete",
+  settingsGet: "settings:get",
+  settingsSave: "settings:save",
+  settingsTest: "settings:test",
+  storesList: "stores:list"
+} as const
