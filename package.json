@@ -11,7 +11,7 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "test": "vitest run",
-    "dist:win": "electron-vite build && electron-builder --win nsis"
+    "dist:win": "electron-vite build && electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "undici": "^6.21.2"
