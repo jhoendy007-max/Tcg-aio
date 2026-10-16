@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
 import type { AioApi } from "../shared/api"
 import { channels } from "../shared/ipc"
 import type { PhoneStatus } from "../phone/protocol"
-import type { TaskEvent } from "../shared/types"
+import type { AlertsView, TaskEvent } from "../shared/types"
 
 const api: AioApi = {
   tasks: {
@@ -54,6 +54,21 @@ const api: AioApi = {
       const listener = (_event: IpcRendererEvent, payload: PhoneStatus) => cb(payload)
       ipcRenderer.on(channels.phoneEvent, listener)
       return () => ipcRenderer.removeListener(channels.phoneEvent, listener)
+    }
+  },
+  alerts: {
+    get: () => ipcRenderer.invoke(channels.alertsGet),
+    rotateToken: () => ipcRenderer.invoke(channels.alertsRotateToken),
+    saveDiscord: (input) => ipcRenderer.invoke(channels.alertsSaveDiscord, input),
+    saveRule: (input) => ipcRenderer.invoke(channels.alertsSaveRule, input),
+    deleteRule: (id) => ipcRenderer.invoke(channels.alertsDeleteRule, id),
+    saveWatch: (input) => ipcRenderer.invoke(channels.alertsSaveWatch, input),
+    deleteWatch: (id) => ipcRenderer.invoke(channels.alertsDeleteWatch, id),
+    resumeWatch: (id) => ipcRenderer.invoke(channels.alertsResumeWatch, id),
+    onEvent: (cb: (view: AlertsView) => void) => {
+      const listener = (_event: IpcRendererEvent, payload: AlertsView) => cb(payload)
+      ipcRenderer.on(channels.alertsEvent, listener)
+      return () => ipcRenderer.removeListener(channels.alertsEvent, listener)
     }
   }
 }

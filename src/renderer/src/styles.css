@@ -126,7 +126,18 @@ tbody tr { cursor: pointer; }
 .pill.failed { background: #3d2020; color: #ffc7c7; }
 .pill.paused { background: #3d3118; color: #ffe1a8; }
 .pill.stopped, .pill.idle { background: #2a303b; color: var(--muted); }
-.pill.tested, .pill.test { background: #1c3358; color: #d6e6ff; }
+.pill.tested, .pill.test, .pill.watching { background: #1c3358; color: #d6e6ff; }
+.pill.blocked { background: #3d2020; color: #ffc7c7; }
+.sample {
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #0e1014;
+  color: #d5e2ff;
+  font-family: "Cascadia Mono", "Segoe UI Mono", ui-monospace, monospace;
+  font-size: 12px;
+  overflow: auto;
+}
 .log-card { padding: 0; }
 .log-head { display: flex; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .log-head span { color: var(--muted); }

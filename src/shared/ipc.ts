@@ -25,5 +25,14 @@ export const channels = {
   phoneInvite: "phone:invite",
   phoneRevoke: "phone:revoke",
   phoneRelay: "phone:relay",
-  phoneEvent: "phone:event"
+  phoneEvent: "phone:event",
+  alertsGet: "alerts:get",
+  alertsRotateToken: "alerts:rotateToken",
+  alertsSaveDiscord: "alerts:saveDiscord",
+  alertsSaveRule: "alerts:saveRule",
+  alertsDeleteRule: "alerts:deleteRule",
+  alertsSaveWatch: "alerts:saveWatch",
+  alertsDeleteWatch: "alerts:deleteWatch",
+  alertsResumeWatch: "alerts:resumeWatch",
+  alertsEvent: "alerts:event"
 } as const

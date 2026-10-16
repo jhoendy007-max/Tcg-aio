@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { dirname } from "node:path"
 import type { Cipher } from "./cipher"
 import { parseSession } from "./session"
+import { parseKeywordQuery } from "./keywords"
 import { assertStore, cleanAddress, cleanCard, cleanEmail, cleanPhone, cleanSettings } from "./validate"
 import { AppError } from "../shared/errors"
 import { parseProxyList } from "../shared/proxy"
@@ -18,7 +19,13 @@ import type {
   ProxyGroupInput,
   PublicAccount,
   PublicProfile,
+  AlertLog,
+  DiscordWatchInput,
+  KeywordWatch,
+  KeywordWatchInput,
   PublicTask,
+  RestockRule,
+  RestockRuleInput,
   SecurityInfo,
   SessionCookies,
   Settings,
@@ -47,6 +54,17 @@ interface DeviceRecord {
   lastSeenAt: number
 }
 
+interface RestockFile {
+  tokenSecret?: string
+  discordBotSecret?: string
+  discordChannelId: string
+  discordWatch: boolean
+  lastDiscordMessageId: string
+  rules: RestockRule[]
+  watches: KeywordWatch[]
+  log: AlertLog[]
+}
+
 interface DbFile {
   version: 1
   pcId: string
@@ -56,6 +74,7 @@ interface DbFile {
   proxyGroups: ProxyGroup[]
   tasks: PublicTask[]
   devices: DeviceRecord[]
+  restock?: RestockFile
 }
 
 export class Database {
@@ -83,7 +102,8 @@ export class Database {
       accounts: parsed.accounts ?? [],
       proxyGroups: parsed.proxyGroups ?? [],
       tasks: parsed.tasks ?? [],
-      devices: Array.isArray(parsed.devices) ? parsed.devices : []
+      devices: Array.isArray(parsed.devices) ? parsed.devices : [],
+      restock: normalizeRestock(parsed.restock)
     }
     let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
     for (const task of this.data.tasks) {
@@ -418,6 +438,140 @@ export class Database {
     return cloneTask(task)
   }
 
+  restockToken(): string {
+    const secret = this.restock().tokenSecret
+    if (!secret) return ""
+    return this.cipher.decrypt(secret)
+  }
+
+  rotateRestockToken(): string {
+    const token = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "").slice(0, 16)
+    this.restock().tokenSecret = this.cipher.encrypt(token)
+    this.flush()
+    return token
+  }
+
+  discordWatchConfig(): { enabled: boolean; channelId: string; token: string; lastMessageId: string; hasBot: boolean } {
+    const restock = this.restock()
+    return {
+      enabled: restock.discordWatch,
+      channelId: restock.discordChannelId,
+      token: restock.discordBotSecret ? this.cipher.decrypt(restock.discordBotSecret) : "",
+      lastMessageId: restock.lastDiscordMessageId,
+      hasBot: Boolean(restock.discordBotSecret)
+    }
+  }
+
+  saveDiscordWatch(input: DiscordWatchInput): void {
+    const channelId = input.channelId.trim()
+    if (channelId && !/^\d{17,22}$/.test(channelId)) throw new AppError("Discord channel ID must be the numeric channel id.")
+    if (input.enabled && !channelId) throw new AppError("Enter the Discord channel ID before turning the watcher on.")
+    const restock = this.restock()
+    if (channelId !== restock.discordChannelId) restock.lastDiscordMessageId = ""
+    if (input.tokenAction === "clear") restock.discordBotSecret = undefined
+    if (input.tokenAction === "replace") {
+      const token = input.token.trim()
+      if (!token || token.length < 20) throw new AppError("Paste the Discord bot token.")
+      restock.discordBotSecret = this.cipher.encrypt(token)
+    }
+    if (input.enabled && !restock.discordBotSecret) throw new AppError("Save a Discord bot token before turning the watcher on.")
+    restock.discordChannelId = channelId
+    restock.discordWatch = input.enabled === true
+    if (!restock.discordWatch) restock.lastDiscordMessageId = ""
+    this.flush()
+  }
+
+  setDiscordEnabled(enabled: boolean): void {
+    this.restock().discordWatch = enabled
+    this.flush()
+  }
+
+  setDiscordCursor(id: string): void {
+    this.restock().lastDiscordMessageId = id
+    this.flush()
+  }
+
+  listRestockRules(): RestockRule[] {
+    return this.restock().rules.map(cloneRule)
+  }
+
+  saveRestockRule(input: RestockRuleInput): RestockRule {
+    const existing = input.id ? this.restock().rules.find((rule) => rule.id === input.id) : undefined
+    const rule = cleanRule(input, existing, this)
+    if (existing) this.restock().rules = this.restock().rules.map((item) => (item.id === rule.id ? rule : item))
+    else this.restock().rules.unshift(rule)
+    this.flush()
+    return cloneRule(rule)
+  }
+
+  deleteRestockRule(id: string): void {
+    const next = this.restock().rules.filter((rule) => rule.id !== id)
+    if (next.length === this.restock().rules.length) throw new AppError("That restock rule was not found.")
+    this.restock().rules = next
+    this.flush()
+  }
+
+  touchRestockRule(id: string, ts: number): void {
+    const rule = this.restock().rules.find((item) => item.id === id)
+    if (!rule) return
+    rule.lastFiredAt = ts
+    this.flush()
+  }
+
+  listWatches(): KeywordWatch[] {
+    return this.restock().watches.map(cloneWatch)
+  }
+
+  saveWatch(input: KeywordWatchInput): KeywordWatch {
+    const existing = input.id ? this.restock().watches.find((watch) => watch.id === input.id) : undefined
+    const watch = cleanWatch(input, existing, this)
+    if (existing) this.restock().watches = this.restock().watches.map((item) => (item.id === watch.id ? watch : item))
+    else this.restock().watches.unshift(watch)
+    this.flush()
+    return cloneWatch(watch)
+  }
+
+  deleteWatch(id: string): void {
+    const next = this.restock().watches.filter((watch) => watch.id !== id)
+    if (next.length === this.restock().watches.length) throw new AppError("That keyword watch was not found.")
+    this.restock().watches = next
+    this.flush()
+  }
+
+  patchWatch(id: string, patch: Partial<Pick<KeywordWatch, "status" | "detail" | "seenSkus" | "enabled">>): KeywordWatch {
+    const watch = this.restock().watches.find((item) => item.id === id)
+    if (!watch) throw new AppError("That keyword watch was not found.")
+    if (patch.status) watch.status = patch.status
+    if (patch.detail !== undefined) watch.detail = patch.detail.slice(0, 240)
+    if (patch.seenSkus) watch.seenSkus = patch.seenSkus.slice(-300)
+    if (patch.enabled !== undefined) watch.enabled = patch.enabled
+    this.flush()
+    return cloneWatch(watch)
+  }
+
+  resumeWatch(id: string): KeywordWatch {
+    const watch = this.patchWatch(id, { status: "idle", detail: "Resumed. The next search uses the next proxy.", enabled: true })
+    return watch
+  }
+
+  listAlertLog(): AlertLog[] {
+    return this.restock().log.map((entry) => ({ ...entry }))
+  }
+
+  appendAlertLog(entry: Omit<AlertLog, "id">): AlertLog {
+    const saved: AlertLog = { ...entry, id: randomUUID(), result: entry.result.slice(0, 300), title: entry.title.slice(0, 180), sku: entry.sku.slice(0, 80) }
+    const log = this.restock().log
+    log.unshift(saved)
+    if (log.length > 80) log.length = 80
+    this.flush()
+    return { ...saved }
+  }
+
+  private restock(): RestockFile {
+    if (!this.data.restock) this.data.restock = emptyRestock()
+    return this.data.restock
+  }
+
   private requireProfile(id: string): ProfileRecord {
     const profile = this.data.profiles.find((item) => item.id === id)
     if (!profile) throw new AppError("Profile not found.")
@@ -452,7 +606,21 @@ export class Database {
 }
 
 function emptyDb(): DbFile {
-  return { version: 1, pcId: randomUUID(), settings: { ...DEFAULT_SETTINGS }, profiles: [], accounts: [], proxyGroups: [], tasks: [], devices: [] }
+  return {
+    version: 1,
+    pcId: randomUUID(),
+    settings: { ...DEFAULT_SETTINGS },
+    profiles: [],
+    accounts: [],
+    proxyGroups: [],
+    tasks: [],
+    devices: [],
+    restock: emptyRestock()
+  }
+}
+
+function emptyRestock(): RestockFile {
+  return { discordChannelId: "", discordWatch: false, lastDiscordMessageId: "", rules: [], watches: [], log: [] }
 }
 
 function toPublicProfile(record: ProfileRecord): PublicProfile {
@@ -487,6 +655,131 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 
 function cloneTask(task: PublicTask): PublicTask {
   return { ...task, testMode: task.testMode === true, logs: task.logs.map((line) => ({ ...line })) }
+}
+
+function normalizeRestock(value: RestockFile | undefined): RestockFile {
+  const base = emptyRestock()
+  if (!value) return base
+  return {
+    tokenSecret: typeof value.tokenSecret === "string" ? value.tokenSecret : undefined,
+    discordBotSecret: typeof value.discordBotSecret === "string" ? value.discordBotSecret : undefined,
+    discordChannelId: typeof value.discordChannelId === "string" ? value.discordChannelId : "",
+    discordWatch: value.discordWatch === true,
+    lastDiscordMessageId: typeof value.lastDiscordMessageId === "string" ? value.lastDiscordMessageId : "",
+    rules: Array.isArray(value.rules) ? value.rules : [],
+    watches: Array.isArray(value.watches) ? value.watches : [],
+    log: Array.isArray(value.log) ? value.log : []
+  }
+}
+
+function cleanRule(input: RestockRuleInput, existing: RestockRule | undefined, db: Database): RestockRule {
+  const name = input.name.trim()
+  if (!name) throw new AppError("Rule name is required.")
+  const store = input.store ? assertStore(input.store) : ""
+  const sku = input.sku.trim()
+  const keywords = input.keywords.trim()
+  if (!sku && !parseKeywordQuery(keywords).positive.length && !keywords) {
+    throw new AppError("Enter a SKU or keywords. A rule cannot match every product.")
+  }
+  if (keywords && !parseKeywordQuery(keywords).positive.length && !sku) {
+    throw new AppError("Keywords need at least one term to include. Prefix a term with - to exclude it.")
+  }
+  const quantity = cleanQty(input.quantity, "Quantity")
+  const maxQuantity = cleanQty(input.maxQuantity, "Max quantity")
+  if (quantity > maxQuantity) throw new AppError("Quantity cannot be above the max quantity.")
+  const taskId = input.taskId || null
+  if (taskId) {
+    const task = db.getTask(taskId)
+    if (store && task.store !== store) throw new AppError("The template task is for a different store.")
+  } else {
+    if (!input.profileId) throw new AppError("Choose a profile, or pick a template task.")
+    db.readProfile(input.profileId)
+    const account = db.readAccount(input.accountId)
+    if (store && account.store !== store) throw new AppError("Choose an account for the same store as the rule.")
+  }
+  if (input.proxyGroupId) db.getProxyGroup(input.proxyGroupId)
+  return {
+    id: existing?.id ?? randomUUID(),
+    name: name.slice(0, 80),
+    enabled: input.enabled === true,
+    store,
+    sku: sku.slice(0, 200),
+    keywords: keywords.slice(0, 240),
+    taskId,
+    profileId: taskId ? "" : input.profileId,
+    accountId: taskId ? "" : input.accountId,
+    proxyGroupId: input.proxyGroupId || null,
+    quantity,
+    maxQuantity,
+    maxPrice: cleanMaxPrice(input.maxPrice),
+    cooldownSec: cleanCooldown(input.cooldownSec),
+    testMode: input.testMode === true,
+    confirmPurchase: input.confirmPurchase === true,
+    lastFiredAt: existing?.lastFiredAt ?? 0
+  }
+}
+
+function cleanWatch(input: KeywordWatchInput, existing: KeywordWatch | undefined, db: Database): KeywordWatch {
+  const name = input.name.trim()
+  if (!name) throw new AppError("Watch name is required.")
+  const store = assertStore(input.store)
+  const keywords = input.keywords.trim()
+  if (!parseKeywordQuery(keywords).positive.length) throw new AppError("Keywords need at least one term to include. Prefix a term with - to exclude it.")
+  const quantity = cleanQty(input.quantity, "Quantity")
+  const maxQuantity = cleanQty(input.maxQuantity, "Max quantity")
+  if (quantity > maxQuantity) throw new AppError("Quantity cannot be above the max quantity.")
+  db.readProfile(input.profileId)
+  const account = db.readAccount(input.accountId)
+  if (account.store !== store) throw new AppError("Choose an account for the same store as the watch.")
+  if (input.proxyGroupId) db.getProxyGroup(input.proxyGroupId)
+  const enabled = input.enabled === true
+  return {
+    id: existing?.id ?? randomUUID(),
+    name: name.slice(0, 80),
+    enabled,
+    store,
+    keywords: keywords.slice(0, 240),
+    maxPrice: cleanMaxPrice(input.maxPrice),
+    soldByRetailer: input.soldByRetailer !== false,
+    proxyGroupId: input.proxyGroupId || null,
+    profileId: input.profileId,
+    accountId: input.accountId,
+    quantity,
+    maxQuantity,
+    autoStart: input.autoStart === true,
+    testMode: input.testMode === true,
+    confirmPurchase: input.confirmPurchase === true,
+    seenSkus: input.resetSeen ? [] : existing?.seenSkus ?? [],
+    status: enabled ? existing?.status === "blocked" ? "blocked" : existing?.status === "watching" ? "watching" : "idle" : "paused",
+    detail: existing?.detail ?? ""
+  }
+}
+
+function cleanQty(value: number, label: string): number {
+  const quantity = Math.round(Number(value))
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError(`${label} must be from 1 to 12.`)
+  return quantity
+}
+
+function cleanCooldown(value: number): number {
+  const seconds = Math.round(Number(value))
+  if (!Number.isInteger(seconds) || seconds < 0 || seconds > 86400) throw new AppError("Cooldown must be from 0 to 86400 seconds.")
+  return seconds
+}
+
+function cleanMaxPrice(value: number | null): number | null {
+  if (value === null || value === undefined || (typeof value === "string" && value === "")) return null
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0 || number > 100000) throw new AppError("Max price must be blank or a dollar amount.")
+  return Math.round(number * 100) / 100
+}
+
+function cloneRule(rule: RestockRule): RestockRule {
+  return { ...rule }
+}
+
+function cloneWatch(watch: KeywordWatch): KeywordWatch {
+  return { ...watch, seenSkus: watch.seenSkus.slice() }
 }
 
 export function addressesEqual(a: Address, b: Address): boolean {

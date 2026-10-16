@@ -2,6 +2,8 @@ import { app, BrowserWindow, safeStorage, session } from "electron"
 import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
 import { Database } from "../engine/database"
+import { AlertService, relayRestockUrl as relayUrl } from "../engine/alerts"
+import { defaultHttp } from "../engine/http"
 import { postDiscord } from "../engine/discord"
 import { TaskService } from "../engine/task-runner"
 import { channels } from "../shared/ipc"
@@ -18,6 +20,7 @@ if (!gotLock) app.quit()
 let window: BrowserWindow | null = null
 let runner: TaskService | null = null
 let phone: PhoneServer | null = null
+let alerts: AlertService | null = null
 
 function createCipher(): Cipher {
   if (safeStorage.isEncryptionAvailable()) return createDpapiCipher(safeStorage)
@@ -65,7 +68,7 @@ if (gotLock) void app.whenReady().then(async () => {
   const db = new Database(join(app.getPath("userData"), "tcgaio.json"), createCipher())
   db.load()
   const registry = createRegistry()
-  phone = new PhoneServer(createPhoneHost(db, () => runner), {
+  phone = new PhoneServer(createPhoneHost(db, () => runner, () => alerts), {
     onDevices: () => {
       if (phone) window?.webContents.send(channels.phoneEvent, phone.status())
     }
@@ -96,7 +99,36 @@ if (gotLock) void app.whenReady().then(async () => {
       return true
     }
   )
-  registerIpc(db, runner, registry, () => window, desktop)
+  alerts = new AlertService(db, () => runner, async (notice) => {
+    desktop.publishNotice({
+      kind: notice.kind,
+      storeName: notice.storeName,
+      sku: notice.sku,
+      profileName: notice.profileName,
+      detail: notice.detail,
+      orderId: notice.orderId,
+      ts: Date.now()
+    })
+    const webhook = db.getSettings().discordWebhook
+    if (!webhook) return false
+    await postDiscord(webhook, notice)
+    return true
+  }, defaultHttp)
+  desktop.setRestock((authorization, alternate, body) => alerts!.ingestHttp(authorization, alternate, body))
+  alerts.onChange(() => {
+    const status = desktop.status()
+    alerts?.setUrls({
+      localUrl: `http://${status.host}:${status.port}/v1/restock`,
+      relayUrl: relayUrl(status.relay, db.pcId())
+    })
+    window?.webContents.send(channels.alertsEvent, alerts?.view({
+      localUrl: `http://${status.host}:${status.port}/v1/restock`,
+      relayUrl: relayUrl(status.relay, db.pcId())
+    }))
+    if (alerts) desktop.publishAlerts(alerts.phoneAlerts())
+  })
+  alerts.start()
+  registerIpc(db, runner, registry, () => window, desktop, alerts)
   createWindow()
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -110,6 +142,7 @@ app.on("second-instance", () => {
 })
 
 app.on("before-quit", () => {
+  alerts?.stop()
   runner?.stopAll()
   void phone?.stop()
 })

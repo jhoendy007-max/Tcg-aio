@@ -8,13 +8,14 @@ import {
   sessionKey,
   type ClientMessage,
   type PairingPayload,
+  type PhoneAlerts,
   type PhoneNotice,
   type PhoneSnapshot,
   type PhoneTask,
   type PhoneTaskDraft,
   type ServerMessage
 } from "./protocol"
-import type { StoreHealth } from "../shared/types"
+import type { KeywordWatchInput, RestockRuleInput, StoreHealth } from "../shared/types"
 
 export interface SavedPhoneLink {
   token: string
@@ -33,6 +34,7 @@ export interface PhoneCommandResult {
   errors?: { id: string; error: string }[]
   task?: PhoneTask
   health?: StoreHealth[]
+  alerts?: PhoneAlerts
 }
 
 export class PhoneRevoked extends Error {
@@ -75,6 +77,7 @@ export class PhoneSession {
   private onTaskCb: ((task: PhoneTask) => void) | null = null
   private onDeletedCb: ((id: string) => void) | null = null
   private onNoticeCb: ((notice: PhoneNotice) => void) | null = null
+  private onAlertsCb: ((alerts: PhoneAlerts) => void) | null = null
   private onOnlineCb: ((online: boolean) => void) | null = null
   constructor(private link: SavedPhoneLink | null = null) {}
 
@@ -96,6 +99,10 @@ export class PhoneSession {
 
   onNotice(cb: (notice: PhoneNotice) => void): void {
     this.onNoticeCb = cb
+  }
+
+  onAlerts(cb: (alerts: PhoneAlerts) => void): void {
+    this.onAlertsCb = cb
   }
 
   onOnline(cb: (online: boolean) => void): void {
@@ -204,6 +211,34 @@ export class PhoneSession {
     return this.request({ type: "task.delete", req: rid(), conn: this.conn, taskId })
   }
 
+  saveRule(rule: RestockRuleInput): Promise<PhoneCommandResult> {
+    return this.request({ type: "rule.save", req: rid(), conn: this.conn, rule })
+  }
+
+  deleteRule(ruleId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "rule.delete", req: rid(), conn: this.conn, ruleId })
+  }
+
+  toggleRule(ruleId: string, enabled: boolean): Promise<PhoneCommandResult> {
+    return this.request({ type: "rule.toggle", req: rid(), conn: this.conn, ruleId, enabled })
+  }
+
+  saveWatch(watch: KeywordWatchInput): Promise<PhoneCommandResult> {
+    return this.request({ type: "watch.save", req: rid(), conn: this.conn, watch })
+  }
+
+  deleteWatch(watchId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "watch.delete", req: rid(), conn: this.conn, watchId })
+  }
+
+  toggleWatch(watchId: string, enabled: boolean): Promise<PhoneCommandResult> {
+    return this.request({ type: "watch.toggle", req: rid(), conn: this.conn, watchId, enabled })
+  }
+
+  resumeWatch(watchId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "watch.resume", req: rid(), conn: this.conn, watchId })
+  }
+
   private async request(message: ClientMessage): Promise<PhoneCommandResult> {
     if (!("req" in message)) throw new Error("Phone request is missing an id.")
     const req = message.req
@@ -212,7 +247,7 @@ export class PhoneSession {
     const response = await pending
     if (response.type !== "result") throw new Error("The PC did not answer.")
     if (!response.ok) return { ok: false, error: response.error }
-    return { ok: true, started: response.started, errors: response.errors, task: response.task, health: response.health }
+    return { ok: true, started: response.started, errors: response.errors, task: response.task, health: response.health, alerts: response.alerts }
   }
 
   private send(message: ClientMessage): void {
@@ -337,6 +372,7 @@ export class PhoneSession {
     } else if (message.type === "task") this.onTaskCb?.(message.task)
     else if (message.type === "task.deleted") this.onDeletedCb?.(message.id)
     else if (message.type === "notice") this.onNoticeCb?.(message.notice)
+    else if (message.type === "alerts") this.onAlertsCb?.(message.alerts)
     else if (message.type === "presence") this.setOnline(true)
     const index = this.waiters.findIndex((waiter) => waiter.match(message))
     if (index < 0) {

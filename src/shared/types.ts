@@ -248,10 +248,123 @@ export interface StoreHealth {
 }
 
 export interface Notice {
-  kind: "success" | "failure" | "paused" | "tested"
+  kind: "success" | "failure" | "paused" | "tested" | "alert"
   storeName: string
   sku: string
   profileName: string
   detail: string
   orderId?: string
+}
+
+export interface RestockRule {
+  id: string
+  name: string
+  enabled: boolean
+  /** Empty matches every store. */
+  store: StoreId | ""
+  /** Empty matches by keywords only. */
+  sku: string
+  keywords: string
+  /** Existing task to start. Empty creates a task from the template below. */
+  taskId: string | null
+  profileId: string
+  accountId: string
+  proxyGroupId: string | null
+  quantity: number
+  maxQuantity: number
+  maxPrice: number | null
+  cooldownSec: number
+  testMode: boolean
+  confirmPurchase: boolean
+  lastFiredAt: number
+}
+
+export interface RestockRuleInput {
+  id?: string
+  name: string
+  enabled: boolean
+  store: StoreId | ""
+  sku: string
+  keywords: string
+  taskId: string | null
+  profileId: string
+  accountId: string
+  proxyGroupId: string | null
+  quantity: number
+  maxQuantity: number
+  maxPrice: number | null
+  cooldownSec: number
+  testMode: boolean
+  confirmPurchase: boolean
+}
+
+export type WatchStatus = "idle" | "watching" | "paused" | "blocked"
+
+export interface KeywordWatch {
+  id: string
+  name: string
+  enabled: boolean
+  store: StoreId
+  keywords: string
+  maxPrice: number | null
+  soldByRetailer: boolean
+  proxyGroupId: string | null
+  profileId: string
+  accountId: string
+  quantity: number
+  maxQuantity: number
+  autoStart: boolean
+  testMode: boolean
+  confirmPurchase: boolean
+  seenSkus: string[]
+  status: WatchStatus
+  detail: string
+}
+
+export interface KeywordWatchInput {
+  id?: string
+  name: string
+  enabled: boolean
+  store: StoreId
+  keywords: string
+  maxPrice: number | null
+  soldByRetailer: boolean
+  proxyGroupId: string | null
+  profileId: string
+  accountId: string
+  quantity: number
+  maxQuantity: number
+  autoStart: boolean
+  testMode: boolean
+  confirmPurchase: boolean
+  resetSeen?: boolean
+}
+
+export interface AlertLog {
+  id: string
+  ts: number
+  source: "webhook" | "discord" | "keyword"
+  store: string
+  sku: string
+  title: string
+  result: string
+}
+
+export interface AlertsView {
+  localUrl: string
+  relayUrl: string
+  token: string
+  discordWatch: boolean
+  hasBot: boolean
+  channelId: string
+  rules: RestockRule[]
+  watches: KeywordWatch[]
+  log: AlertLog[]
+}
+
+export interface DiscordWatchInput {
+  channelId: string
+  enabled: boolean
+  token: string
+  tokenAction: "keep" | "replace" | "clear"
 }

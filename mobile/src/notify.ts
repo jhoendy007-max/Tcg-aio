@@ -18,7 +18,15 @@ export async function ensureNotificationPermission(): Promise<void> {
 }
 
 export async function notify(notice: PhoneNotice): Promise<void> {
-  const title = notice.kind === "success" ? "Checkout finished" : notice.kind === "paused" ? "Task needs you" : "Checkout failed"
+  const title = notice.kind === "success"
+    ? "Checkout finished"
+    : notice.kind === "tested"
+      ? "Test finished"
+      : notice.kind === "alert"
+        ? "Restock match"
+        : notice.kind === "paused"
+          ? "Needs attention"
+          : "Checkout failed"
   await Notifications.scheduleNotificationAsync({
     content: {
       title,

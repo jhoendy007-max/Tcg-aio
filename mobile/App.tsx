@@ -4,12 +4,13 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, Tex
 import { CameraView, useCameraPermissions } from "expo-camera"
 import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from "../src/phone/client"
 import type { PhoneSnapshot, PhoneTask, PhoneTaskDraft } from "../src/phone/protocol"
+import type { KeywordWatchInput, RestockRuleInput } from "../src/shared/types"
 import { ensureNotificationPermission, notify } from "./src/notify"
 import { clearLink, loadLink, saveLink } from "./src/storage"
 import type { StoreHealth } from "../src/shared/types"
 import { colors, isActive, STATUS_LABEL } from "./src/theme"
 
-type Screen = "boot" | "pair" | "dash" | "edit"
+type Screen = "boot" | "pair" | "dash" | "edit" | "alerts"
 
 const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
   store: snap?.stores[0]?.id ?? "target",
@@ -56,6 +57,9 @@ export default function App() {
     })
     next.onNotice((notice) => {
       void notify(notice)
+    })
+    next.onAlerts((alerts) => {
+      setSnap((current) => current ? { ...current, alerts } : current)
     })
   }
 
@@ -180,7 +184,7 @@ export default function App() {
           ) : null}
         </ScrollView>
       ) : null}
-      {screen === "dash" || screen === "edit" ? (
+      {screen === "dash" || screen === "edit" || screen === "alerts" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <View style={styles.row}>
             <View>
@@ -191,7 +195,9 @@ export default function App() {
           </View>
           <Text style={styles.p}>Tasks run on the PC. This phone starts, stops, and watches them.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
-          {screen === "edit" && draft ? (
+          {screen === "alerts" ? (
+            <AlertsPanel snap={snap} onRun={run} session={session.current} onBack={() => setScreen("dash")} />
+          ) : screen === "edit" && draft ? (
             <View style={styles.card}>
               <Text style={styles.h2}>{draft.id ? "Edit task" : "New task"}</Text>
               <Text style={styles.label}>Store</Text>
@@ -261,6 +267,7 @@ export default function App() {
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => setScreen("alerts")}><Text style={styles.secondaryText}>Alerts</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(async () => {
                   const result = await session.current!.checkHealth(snap?.proxyGroups[0]?.id ?? null)
                   if (result.ok) setHealth(result.health ?? [])
@@ -329,6 +336,129 @@ function TaskDetail({ task, onRun, session, onEdit }: {
       {task.logs.map((line, index) => (
         <Text key={`${line.ts}-${index}`} style={styles.log}>{line.message}</Text>
       ))}
+    </View>
+  )
+}
+
+function AlertsPanel({ snap, onRun, session, onBack }: {
+  snap: PhoneSnapshot | null
+  session: PhoneSession | null
+  onRun: (action: () => Promise<{ ok: boolean; error?: string; alerts?: PhoneSnapshot["alerts"] }>) => Promise<void>
+  onBack: () => void
+}) {
+  const alerts = snap?.alerts
+  const [rule, setRule] = useState<RestockRuleInput | null>(null)
+  const [watch, setWatch] = useState<KeywordWatchInput | null>(null)
+  return (
+    <View style={styles.card}>
+      <Text style={styles.h2}>Alerts</Text>
+      <Text style={styles.p}>The webhook token stays on the PC. Post store, sku, title, and price. Test mode still stops before place order.</Text>
+      {alerts?.localUrl ? <Text style={styles.log}>{alerts.localUrl}</Text> : null}
+      {alerts?.relayUrl ? <Text style={styles.log}>{alerts.relayUrl}</Text> : null}
+      <Text style={styles.p}>Discord watcher {alerts?.discordWatch ? "on" : "off"}{alerts?.channelId ? ` · ${alerts.channelId}` : ""}</Text>
+      {(alerts?.rules ?? []).map((item) => (
+        <View key={item.id} style={styles.card}>
+          <View style={styles.row}>
+            <Text style={styles.h2}>{item.name}</Text>
+            {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
+            <Switch value={item.enabled} onValueChange={(enabled) => void onRun(() => session!.toggleRule(item.id, enabled))} trackColor={{ true: colors.accent, false: colors.line }} />
+          </View>
+          <Text style={styles.p}>{item.store || "Any store"} · {item.sku || item.keywords} · max {item.maxQuantity} · {item.maxPrice === null ? "no cap" : `$${item.maxPrice}`}</Text>
+          <Pressable onPress={() => void onRun(() => session!.deleteRule(item.id))}><Text style={styles.link}>Delete rule</Text></Pressable>
+        </View>
+      ))}
+      {rule ? (
+        <View>
+          <Text style={styles.label}>Rule name</Text>
+          <TextInput style={styles.input} value={rule.name} onChangeText={(name) => setRule({ ...rule, name })} placeholderTextColor={colors.muted} />
+          <Text style={styles.label}>SKU</Text>
+          <TextInput style={styles.input} value={rule.sku} onChangeText={(sku) => setRule({ ...rule, sku })} autoCapitalize="none" placeholderTextColor={colors.muted} />
+          <Text style={styles.label}>Keywords</Text>
+          <TextInput style={styles.input} value={rule.keywords} onChangeText={(keywords) => setRule({ ...rule, keywords })} autoCapitalize="none" placeholder="+elite +trainer -sleeves" placeholderTextColor={colors.muted} />
+          <View style={styles.switchRow}>
+            <Text style={styles.p}>Test mode</Text>
+            <Switch value={rule.testMode} onValueChange={(testMode) => setRule({ ...rule, testMode })} trackColor={{ true: colors.accent, false: colors.line }} />
+          </View>
+          <Pressable style={styles.primary} onPress={() => void onRun(async () => {
+            const result = await session!.saveRule(rule)
+            if (result.ok) setRule(null)
+            return result
+          })}><Text style={styles.primaryText}>Save rule</Text></Pressable>
+        </View>
+      ) : <Pressable style={styles.secondary} onPress={() => setRule({
+        name: "Restock",
+        enabled: true,
+        store: snap?.stores[0]?.id ?? "target",
+        sku: "",
+        keywords: "",
+        taskId: null,
+        profileId: snap?.profiles[0]?.id ?? "",
+        accountId: snap?.accounts[0]?.id ?? "",
+        proxyGroupId: null,
+        quantity: 1,
+        maxQuantity: 1,
+        maxPrice: null,
+        cooldownSec: 300,
+        testMode: true,
+        confirmPurchase: false
+      })}><Text style={styles.secondaryText}>New restock rule</Text></Pressable>}
+      <Text style={styles.h2}>Keyword watches</Text>
+      {(alerts?.watches ?? []).map((item) => (
+        <View key={item.id} style={styles.card}>
+          <View style={styles.row}>
+            <Text style={styles.h2}>{item.name}</Text>
+            <Text style={styles.pill}>{item.status}</Text>
+            {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
+          </View>
+          <Text style={styles.p}>{item.keywords}</Text>
+          {item.detail ? <Text style={styles.p}>{item.detail}</Text> : null}
+          <View style={styles.row}>
+            <Switch value={item.enabled} onValueChange={(enabled) => void onRun(() => session!.toggleWatch(item.id, enabled))} trackColor={{ true: colors.accent, false: colors.line }} />
+            {item.status === "blocked" ? <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.resumeWatch(item.id))}><Text style={styles.secondaryText}>Resume</Text></Pressable> : null}
+            <Pressable onPress={() => void onRun(() => session!.deleteWatch(item.id))}><Text style={styles.link}>Delete</Text></Pressable>
+          </View>
+        </View>
+      ))}
+      {watch ? (
+        <View>
+          <Text style={styles.label}>Watch name</Text>
+          <TextInput style={styles.input} value={watch.name} onChangeText={(name) => setWatch({ ...watch, name })} placeholderTextColor={colors.muted} />
+          <Text style={styles.label}>Keywords</Text>
+          <TextInput style={styles.input} value={watch.keywords} onChangeText={(keywords) => setWatch({ ...watch, keywords })} autoCapitalize="none" placeholderTextColor={colors.muted} />
+          <View style={styles.switchRow}>
+            <Text style={styles.p}>Auto-start</Text>
+            <Switch value={watch.autoStart === true} onValueChange={(autoStart) => setWatch({ ...watch, autoStart })} trackColor={{ true: colors.accent, false: colors.line }} />
+          </View>
+          <View style={styles.switchRow}>
+            <Text style={styles.p}>Test mode</Text>
+            <Switch value={watch.testMode === true} onValueChange={(testMode) => setWatch({ ...watch, testMode })} trackColor={{ true: colors.accent, false: colors.line }} />
+          </View>
+          <Pressable style={styles.primary} onPress={() => void onRun(async () => {
+            const result = await session!.saveWatch(watch)
+            if (result.ok) setWatch(null)
+            return result
+          })}><Text style={styles.primaryText}>Save watch</Text></Pressable>
+        </View>
+      ) : <Pressable style={styles.secondary} onPress={() => setWatch({
+        name: "Keywords",
+        enabled: true,
+        store: "target",
+        keywords: "+elite +trainer +box +pokemon -sleeves",
+        maxPrice: 60,
+        soldByRetailer: true,
+        proxyGroupId: null,
+        profileId: snap?.profiles[0]?.id ?? "",
+        accountId: snap?.accounts.find((account) => account.store === "target")?.id ?? "",
+        quantity: 1,
+        maxQuantity: 1,
+        autoStart: false,
+        testMode: true,
+        confirmPurchase: false
+      })}><Text style={styles.secondaryText}>New keyword watch</Text></Pressable>}
+      {(alerts?.log ?? []).slice(0, 12).map((entry) => (
+        <Text key={entry.id} style={styles.log}>{entry.source} · {entry.sku} · {entry.result}</Text>
+      ))}
+      <Pressable onPress={onBack}><Text style={styles.link}>Back to tasks</Text></Pressable>
     </View>
   )
 }

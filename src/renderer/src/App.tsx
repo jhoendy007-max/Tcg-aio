@@ -4,10 +4,12 @@ import { ProfilesPage } from "./pages/Profiles"
 import { ProxiesPage } from "./pages/Proxies"
 import { PhonePage } from "./pages/Phone"
 import { SettingsPage } from "./pages/Settings"
+import { AlertsPage } from "./pages/Alerts"
 import { TasksPage } from "./pages/Tasks"
 
 const PAGES = [
   { id: "tasks", label: "Tasks" },
+  { id: "alerts", label: "Alerts" },
   { id: "profiles", label: "Profiles" },
   { id: "proxies", label: "Proxies" },
   { id: "accounts", label: "Accounts" },
@@ -49,12 +51,13 @@ export function App() {
           ))}
         </nav>
         <footer>
-          <span>v0.2.1</span>
+          <span>v0.2.2</span>
           <span>Desktop + phone</span>
         </footer>
       </aside>
       <main>
         {page === "tasks" ? <TasksPage /> : null}
+        {page === "alerts" ? <AlertsPage /> : null}
         {page === "profiles" ? <ProfilesPage /> : null}
         {page === "proxies" ? <ProxiesPage /> : null}
         {page === "accounts" ? <AccountsPage /> : null}

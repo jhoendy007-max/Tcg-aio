@@ -9,6 +9,7 @@ import { PhoneSession } from "../src/phone/client"
 import { RelayServer } from "../src/phone/relay"
 import {
   INVITE_TTL_MS,
+  EMPTY_ALERTS,
   encodePairingPayload,
   maskUsername,
   openFrame,
@@ -106,7 +107,8 @@ function memoryHost() {
       proxyGroups: [projectProxyGroup({ id: "g1", name: "Home proxies", proxies: [{ password: PROXY_PASSWORD }] })],
       stores: [{ id: "target", name: "Target", skuHint: "TCIN", implemented: true }],
       testMode: false,
-      clearCartAfterTest: false
+      clearCartAfterTest: false,
+      alerts: EMPTY_ALERTS
     }),
     saveTask(draft) {
       const next = task({ ...draft, id: draft.id ?? `t${tasks.length + 1}`, detail: "" })

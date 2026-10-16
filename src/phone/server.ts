@@ -1,5 +1,6 @@
-import { createServer, type Server as HttpServer } from "node:http"
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http"
 import { WebSocket, WebSocketServer } from "ws"
+import { readHttpBody } from "../engine/body"
 import { redact } from "../shared/redact"
 import { lanIPv4 } from "./net"
 import {
@@ -16,6 +17,7 @@ import {
   type ClientMessage,
   type PairingPayload,
   type PhoneDevice,
+  type PhoneAlerts,
   type PhoneNotice,
   type PhoneSnapshot,
   type PhoneStatus,
@@ -41,6 +43,14 @@ export interface PhoneHost {
   saveDevice(device: { id: string; name: string; token: string }): void
   revokeDevice(id: string): void
   touchDevice(id: string): void
+  alerts?(): PhoneAlerts
+  saveRule?(input: import("../shared/types").RestockRuleInput): PhoneAlerts
+  deleteRule?(id: string): PhoneAlerts
+  toggleRule?(id: string, enabled: boolean): PhoneAlerts
+  saveWatch?(input: import("../shared/types").KeywordWatchInput): PhoneAlerts
+  deleteWatch?(id: string): PhoneAlerts
+  toggleWatch?(id: string, enabled: boolean): PhoneAlerts
+  resumeWatch?(id: string): PhoneAlerts
 }
 
 interface DeviceKey {
@@ -78,6 +88,7 @@ export class PhoneServer {
   private readonly bindHost: string
   private readonly advertiseHost: string
   private readonly now: () => number
+  private restock?: (authorization: string | undefined, alternate: string | undefined, body: string) => Promise<{ status: number; body: string }>
 
   constructor(
     private readonly host: PhoneHost,
@@ -101,9 +112,8 @@ export class PhoneServer {
   start(): Promise<void> {
     if (this.http) return Promise.resolve()
     this.refreshKeys()
-    const http = createServer((_req, res) => {
-      res.writeHead(404)
-      res.end()
+    const http = createServer((req, res) => {
+      void this.onRequest(req, res)
     })
     const wss = new WebSocketServer({ server: http, maxPayload: 256_000, perMessageDeflate: false })
     wss.on("connection", (ws) => {
@@ -163,6 +173,14 @@ export class PhoneServer {
       secret,
       ...(relay ? { relay } : {})
     }
+  }
+
+  setRestock(handler: (authorization: string | undefined, alternate: string | undefined, body: string) => Promise<{ status: number; body: string }>): void {
+    this.restock = handler
+  }
+
+  publishAlerts(alerts: PhoneAlerts): void {
+    this.broadcast({ type: "alerts", alerts })
   }
 
   status(): PhoneStatus {
@@ -237,10 +255,14 @@ export class PhoneServer {
   }
 
   private onRelay(text: string): void {
-    let value: { op?: string; from?: string; body?: string }
+    let value: { op?: string; from?: string; body?: string; id?: string; authorization?: string; token?: string }
     try {
       value = JSON.parse(text) as typeof value
     } catch {
+      return
+    }
+    if (value.op === "restock" && typeof value.id === "string") {
+      void this.answerRestock(value)
       return
     }
     if (value.op !== "deliver" || typeof value.body !== "string" || typeof value.from !== "string") return
@@ -377,16 +399,65 @@ export class PhoneServer {
         this.host.deleteTask(message.taskId)
         this.broadcast({ type: "task.deleted", id: message.taskId })
         this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "rule.save") {
+        const alerts = this.requireAlerts().saveRule?.(message.rule)
+        if (!alerts) throw new Error("Restock rules are not available.")
+        this.publishAlerts(alerts)
+        this.reply(conn, req, { ok: true, alerts })
+        return
+      }
+      if (message.type === "rule.delete") {
+        const alerts = this.requireAlerts().deleteRule?.(message.ruleId)
+        if (!alerts) throw new Error("Restock rules are not available.")
+        this.publishAlerts(alerts)
+        this.reply(conn, req, { ok: true, alerts })
+        return
+      }
+      if (message.type === "rule.toggle") {
+        const alerts = this.requireAlerts().toggleRule?.(message.ruleId, message.enabled)
+        if (!alerts) throw new Error("Restock rules are not available.")
+        this.publishAlerts(alerts)
+        this.reply(conn, req, { ok: true, alerts })
+        return
+      }
+      if (message.type === "watch.save") {
+        const alerts = this.requireAlerts().saveWatch?.(message.watch)
+        if (!alerts) throw new Error("Keyword watches are not available.")
+        this.publishAlerts(alerts)
+        this.reply(conn, req, { ok: true, alerts })
+        return
+      }
+      if (message.type === "watch.delete") {
+        const alerts = this.requireAlerts().deleteWatch?.(message.watchId)
+        if (!alerts) throw new Error("Keyword watches are not available.")
+        this.publishAlerts(alerts)
+        this.reply(conn, req, { ok: true, alerts })
+        return
+      }
+      if (message.type === "watch.toggle") {
+        const alerts = this.requireAlerts().toggleWatch?.(message.watchId, message.enabled)
+        if (!alerts) throw new Error("Keyword watches are not available.")
+        this.publishAlerts(alerts)
+        this.reply(conn, req, { ok: true, alerts })
+        return
+      }
+      if (message.type === "watch.resume") {
+        const alerts = this.requireAlerts().resumeWatch?.(message.watchId)
+        if (!alerts) throw new Error("Keyword watches are not available.")
+        this.publishAlerts(alerts)
+        this.reply(conn, req, { ok: true, alerts })
       }
     } catch (err) {
       this.reply(conn, req, { ok: false, error: safeError(err) })
     }
   }
 
-  private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: import("../shared/types").StoreHealth[] } | { ok: false; error: string }): void {
+  private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: import("../shared/types").StoreHealth[]; alerts?: PhoneAlerts } | { ok: false; error: string }): void {
     if (!conn.key) return
     this.send(conn, conn.key, "session", body.ok
-      ? { type: "result", req, ok: true, started: body.started, errors: body.errors, task: body.task, health: body.health }
+      ? { type: "result", req, ok: true, started: body.started, errors: body.errors, task: body.task, health: body.health, alerts: body.alerts }
       : { type: "result", req, ok: false, error: body.error })
   }
 
@@ -413,6 +484,46 @@ export class PhoneServer {
     if (conn.rid) this.relayConns.delete(conn.rid)
     if (conn.ws && conn.ws.readyState === WebSocket.OPEN) conn.ws.close(code)
   }
+
+  private requireAlerts(): PhoneHost {
+    if (!this.host.alerts) throw new Error("Alerts are not available.")
+    return this.host
+  }
+
+  private async onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    try {
+      const path = (req.url ?? "").split("?")[0]
+      if (req.method === "POST" && path === "/v1/restock") {
+        const raw = await readHttpBody(req, 32_000)
+        const result = this.restock
+          ? await this.restock(header(req, "authorization"), header(req, "x-tcgaio-token"), raw)
+          : { status: 503, body: JSON.stringify({ ok: false, error: "Restock webhook is not ready." }) }
+        res.writeHead(result.status, { "content-type": "application/json; charset=utf-8" })
+        res.end(result.body)
+        return
+      }
+      res.writeHead(404)
+      res.end()
+    } catch {
+      if (!res.headersSent) res.writeHead(400, { "content-type": "application/json; charset=utf-8" })
+      res.end(JSON.stringify({ ok: false, error: "Bad request." }))
+    }
+  }
+
+  private async answerRestock(value: { id?: string; authorization?: string; token?: string; body?: string }): Promise<void> {
+    const id = value.id ?? ""
+    const result = this.restock
+      ? await this.restock(value.authorization, value.token, value.body ?? "")
+      : { status: 503, body: JSON.stringify({ ok: false, error: "Restock webhook is not ready." }) }
+    if (this.relaySocket && this.relaySocket.readyState === WebSocket.OPEN) {
+      this.relaySocket.send(JSON.stringify({ op: "restock-result", id, pc: this.host.pcId, status: result.status, body: result.body }))
+    }
+  }
+}
+
+function header(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name]
+  return Array.isArray(value) ? value[0] : value
 }
 
 function safeError(err: unknown): string {

@@ -1,17 +1,19 @@
 import { hostname } from "node:os"
+import type { AlertService } from "../engine/alerts"
 import { checkStoreHealth } from "../engine/health"
 import { defaultHttp } from "../engine/http"
 import type { Database } from "../engine/database"
 import type { TaskService } from "../engine/task-runner"
 import { STORE_CATALOG } from "../shared/stores"
-import { projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneSnapshot, type PhoneTaskDraft } from "./protocol"
+import type { KeywordWatchInput, RestockRuleInput } from "../shared/types"
+import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneAlerts, type PhoneSnapshot, type PhoneTaskDraft } from "./protocol"
 import type { PhoneHost } from "./server"
 
 export function desktopName(): string {
   return hostname().slice(0, 60) || "TCGAIO"
 }
 
-export function createPhoneHost(db: Database, getRunner: () => TaskService | null): PhoneHost {
+export function createPhoneHost(db: Database, getRunner: () => TaskService | null, getAlerts: () => AlertService | null = () => null): PhoneHost {
   const pcName = desktopName()
   const snapshot = (): PhoneSnapshot => {
     const profiles = db.listProfiles()
@@ -26,8 +28,14 @@ export function createPhoneHost(db: Database, getRunner: () => TaskService | nul
       profiles: profiles.map(projectProfile),
       accounts: accounts.map(projectAccount),
       proxyGroups: groups.map(projectProxyGroup),
-      stores: STORE_CATALOG
+      stores: STORE_CATALOG,
+      alerts: alerts()
     }
+  }
+  const alerts = (): PhoneAlerts => getAlerts()?.phoneAlerts() ?? EMPTY_ALERTS
+  const changed = (): PhoneAlerts => {
+    getAlerts()?.refresh()
+    return alerts()
   }
   return {
     pcId: db.pcId(),
@@ -66,6 +74,39 @@ export function createPhoneHost(db: Database, getRunner: () => TaskService | nul
     deviceTokens: () => db.deviceTokens(),
     saveDevice: (device) => db.saveDevice(device),
     revokeDevice: (id) => db.revokeDevice(id),
-    touchDevice: (id) => db.touchDevice(id)
+    touchDevice: (id) => db.touchDevice(id),
+    alerts,
+    saveRule(input: RestockRuleInput) {
+      db.saveRestockRule(input)
+      return changed()
+    },
+    deleteRule(id: string) {
+      db.deleteRestockRule(id)
+      return changed()
+    },
+    toggleRule(id: string, enabled: boolean) {
+      const rule = db.listRestockRules().find((item) => item.id === id)
+      if (!rule) throw new Error("That restock rule was not found.")
+      db.saveRestockRule({ ...rule, enabled })
+      return changed()
+    },
+    saveWatch(input: KeywordWatchInput) {
+      db.saveWatch(input)
+      return changed()
+    },
+    deleteWatch(id: string) {
+      db.deleteWatch(id)
+      return changed()
+    },
+    toggleWatch(id: string, enabled: boolean) {
+      const watch = db.listWatches().find((item) => item.id === id)
+      if (!watch) throw new Error("That keyword watch was not found.")
+      db.saveWatch({ ...watch, enabled, maxPrice: watch.maxPrice })
+      return changed()
+    },
+    resumeWatch(id: string) {
+      db.resumeWatch(id)
+      return changed()
+    }
   }
 }

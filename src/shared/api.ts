@@ -14,6 +14,12 @@ import type {
   TaskEvent,
   TaskInput,
   ProfileInput,
+  AlertsView,
+  DiscordWatchInput,
+  KeywordWatch,
+  KeywordWatchInput,
+  RestockRule,
+  RestockRuleInput,
   StoreHealth
 } from "./types"
 import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
@@ -61,6 +67,17 @@ export interface AioApi {
     revoke: (id: string) => Promise<Result<PhoneStatus>>
     saveRelay: (url: string) => Promise<Result<PhoneStatus>>
     onEvent: (cb: (status: PhoneStatus) => void) => () => void
+  }
+  alerts: {
+    get: () => Promise<Result<AlertsView>>
+    rotateToken: () => Promise<Result<AlertsView>>
+    saveDiscord: (input: DiscordWatchInput) => Promise<Result<AlertsView>>
+    saveRule: (input: RestockRuleInput) => Promise<Result<RestockRule>>
+    deleteRule: (id: string) => Promise<Result<{ id: string }>>
+    saveWatch: (input: KeywordWatchInput) => Promise<Result<KeywordWatch>>
+    deleteWatch: (id: string) => Promise<Result<{ id: string }>>
+    resumeWatch: (id: string) => Promise<Result<KeywordWatch>>
+    onEvent: (cb: (view: AlertsView) => void) => () => void
   }
 }
 

@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2"
 import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils"
 import { redact } from "../shared/redact"
 import { isStoreId, storeName } from "../shared/stores"
-import type { LogLine, PublicAccount, PublicProfile, PublicTask, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
+import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, PublicAccount, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
 
 export const PHONE_PROTOCOL = 1
 export const INVITE_TTL_MS = 3 * 60 * 1000
@@ -98,16 +98,39 @@ export interface PhoneSnapshot {
   accounts: PhoneAccount[]
   proxyGroups: PhoneProxyGroup[]
   stores: StoreInfo[]
+  alerts: PhoneAlerts
 }
 
 export interface PhoneNotice {
-  kind: "success" | "failure" | "paused" | "tested"
+  kind: "success" | "failure" | "paused" | "tested" | "alert"
   storeName: string
   sku: string
   profileName: string
   detail: string
   orderId?: string
   ts: number
+}
+
+export interface PhoneAlerts {
+  localUrl: string
+  relayUrl: string
+  discordWatch: boolean
+  hasBot: boolean
+  channelId: string
+  rules: RestockRule[]
+  watches: KeywordWatch[]
+  log: AlertLog[]
+}
+
+export const EMPTY_ALERTS: PhoneAlerts = {
+  localUrl: "",
+  relayUrl: "",
+  discordWatch: false,
+  hasBot: false,
+  channelId: "",
+  rules: [],
+  watches: [],
+  log: []
 }
 
 export interface PhoneTaskDraft {
@@ -134,6 +157,13 @@ export type ClientMessage =
   | { type: "task.stopAll"; req: string; conn: string }
   | { type: "task.save"; req: string; conn: string; task: PhoneTaskDraft }
   | { type: "task.delete"; req: string; conn: string; taskId: string }
+  | { type: "rule.save"; req: string; conn: string; rule: RestockRuleInput }
+  | { type: "rule.delete"; req: string; conn: string; ruleId: string }
+  | { type: "rule.toggle"; req: string; conn: string; ruleId: string; enabled: boolean }
+  | { type: "watch.save"; req: string; conn: string; watch: KeywordWatchInput }
+  | { type: "watch.delete"; req: string; conn: string; watchId: string }
+  | { type: "watch.toggle"; req: string; conn: string; watchId: string; enabled: boolean }
+  | { type: "watch.resume"; req: string; conn: string; watchId: string }
 
 export type ServerMessage =
   | { type: "paired"; token: string; deviceId: string; pcName: string }
@@ -142,7 +172,8 @@ export type ServerMessage =
   | { type: "task"; task: PhoneTask }
   | { type: "task.deleted"; id: string }
   | { type: "notice"; notice: PhoneNotice }
-  | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: StoreHealth[] }
+  | { type: "alerts"; alerts: PhoneAlerts }
+  | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: StoreHealth[]; alerts?: PhoneAlerts }
   | { type: "result"; req: string; ok: false; error: string }
   | { type: "error"; error: string }
 
@@ -346,7 +377,70 @@ export function asClientMessage(value: unknown): ClientMessage {
     return { type: "health.check", req: message.req, conn: message.conn, proxyGroupId }
   }
   if (message.type === "task.save") return { type: "task.save", req: message.req, conn: message.conn, task: parseTaskDraft(message.task) }
+  if (message.type === "rule.save") return { type: "rule.save", req: message.req, conn: message.conn, rule: parseRuleInput(message.rule) }
+  if (message.type === "watch.save") return { type: "watch.save", req: message.req, conn: message.conn, watch: parseWatchInput(message.watch) }
+  if (message.type === "rule.delete" || message.type === "rule.toggle") {
+    if (typeof message.ruleId !== "string" || !message.ruleId) throw new Error("Choose a restock rule.")
+    if (message.type === "rule.toggle") return { type: "rule.toggle", req: message.req, conn: message.conn, ruleId: message.ruleId, enabled: message.enabled === true }
+    return { type: "rule.delete", req: message.req, conn: message.conn, ruleId: message.ruleId }
+  }
+  if (message.type === "watch.delete" || message.type === "watch.toggle" || message.type === "watch.resume") {
+    if (typeof message.watchId !== "string" || !message.watchId) throw new Error("Choose a keyword watch.")
+    if (message.type === "watch.toggle") return { type: "watch.toggle", req: message.req, conn: message.conn, watchId: message.watchId, enabled: message.enabled === true }
+    if (message.type === "watch.resume") return { type: "watch.resume", req: message.req, conn: message.conn, watchId: message.watchId }
+    return { type: "watch.delete", req: message.req, conn: message.conn, watchId: message.watchId }
+  }
   throw new Error("Unknown phone request.")
+}
+
+export function parseRuleInput(value: unknown): RestockRuleInput {
+  if (!value || typeof value !== "object") throw new Error("Rule is invalid.")
+  const input = value as Record<string, unknown>
+  const rawStore = input.store === undefined || input.store === null ? "" : input.store
+  if (typeof rawStore !== "string" || (rawStore !== "" && !isStoreId(rawStore))) throw new Error("Choose a store.")
+  const store: StoreId | "" = rawStore === "" ? "" : rawStore
+  return {
+    id: typeof input.id === "string" && input.id ? input.id : undefined,
+    name: typeof input.name === "string" ? input.name : "",
+    enabled: input.enabled === true,
+    store,
+    sku: typeof input.sku === "string" ? input.sku : "",
+    keywords: typeof input.keywords === "string" ? input.keywords : "",
+    taskId: typeof input.taskId === "string" && input.taskId ? input.taskId : null,
+    profileId: typeof input.profileId === "string" ? input.profileId : "",
+    accountId: typeof input.accountId === "string" ? input.accountId : "",
+    proxyGroupId: typeof input.proxyGroupId === "string" && input.proxyGroupId ? input.proxyGroupId : null,
+    quantity: Number(input.quantity),
+    maxQuantity: Number(input.maxQuantity),
+    maxPrice: input.maxPrice === null || input.maxPrice === "" ? null : Number(input.maxPrice),
+    cooldownSec: Number(input.cooldownSec),
+    testMode: input.testMode === true,
+    confirmPurchase: input.confirmPurchase === true
+  }
+}
+
+export function parseWatchInput(value: unknown): KeywordWatchInput {
+  if (!value || typeof value !== "object") throw new Error("Watch is invalid.")
+  const input = value as Record<string, unknown>
+  if (typeof input.store !== "string" || !isStoreId(input.store)) throw new Error("Choose a store.")
+  return {
+    id: typeof input.id === "string" && input.id ? input.id : undefined,
+    name: typeof input.name === "string" ? input.name : "",
+    enabled: input.enabled === true,
+    store: input.store,
+    keywords: typeof input.keywords === "string" ? input.keywords : "",
+    maxPrice: input.maxPrice === null || input.maxPrice === "" ? null : Number(input.maxPrice),
+    soldByRetailer: input.soldByRetailer !== false,
+    proxyGroupId: typeof input.proxyGroupId === "string" && input.proxyGroupId ? input.proxyGroupId : null,
+    profileId: typeof input.profileId === "string" ? input.profileId : "",
+    accountId: typeof input.accountId === "string" ? input.accountId : "",
+    quantity: Number(input.quantity),
+    maxQuantity: Number(input.maxQuantity),
+    autoStart: input.autoStart === true,
+    testMode: input.testMode === true,
+    confirmPurchase: input.confirmPurchase === true,
+    resetSeen: input.resetSeen === true
+  }
 }
 
 function derive(secret: string, info: Uint8Array): Uint8Array {

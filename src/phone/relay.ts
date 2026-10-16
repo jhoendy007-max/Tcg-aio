@@ -1,4 +1,6 @@
-import { createServer, type Server as HttpServer } from "node:http"
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http"
+import { randomUUID } from "node:crypto"
+import { readHttpBody } from "../engine/body"
 import { WebSocketServer, type WebSocket } from "ws"
 
 interface Peer {
@@ -18,6 +20,7 @@ export class RelayServer {
   private wss: WebSocketServer | null = null
   private peers = new Map<WebSocket, Peer>()
   private seq = 0
+  private pending = new Map<string, { resolve: (result: { status: number; body: string }) => void; timer: ReturnType<typeof setTimeout> }>()
 
   constructor(
     private readonly bindPort = 0,
@@ -29,9 +32,8 @@ export class RelayServer {
   }
 
   start(): Promise<void> {
-    const http = createServer((_req, res) => {
-      res.writeHead(404)
-      res.end()
+    const http = createServer((req, res) => {
+      void this.onHttp(req, res)
     })
     const wss = new WebSocketServer({ server: http, maxPayload: 256_000, perMessageDeflate: false })
     wss.on("connection", (socket) => {
@@ -52,6 +54,8 @@ export class RelayServer {
   }
 
   close(): Promise<void> {
+    for (const pending of this.pending.values()) clearTimeout(pending.timer)
+    this.pending.clear()
     for (const socket of this.peers.keys()) socket.close()
     this.peers.clear()
     this.wss?.close()
@@ -62,13 +66,70 @@ export class RelayServer {
     return new Promise((resolve) => http.close(() => resolve()))
   }
 
+  private async onHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const path = (req.url ?? "").split("?")[0]
+    const prefix = "/v1/restock/"
+    if (req.method !== "POST" || !path.startsWith(prefix)) {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    const pc = decodeURIComponent(path.slice(prefix.length))
+    if (!pc) {
+      res.writeHead(404)
+      res.end()
+      return
+    }
+    const desktop = [...this.peers.entries()].find(([, peer]) => peer.role === "pc" && peer.pc === pc)
+    if (!desktop) {
+      res.writeHead(503, { "content-type": "application/json; charset=utf-8" })
+      res.end(JSON.stringify({ ok: false, error: "The desktop is not connected to this relay." }))
+      return
+    }
+    try {
+      const body = await readHttpBody(req, 32_000)
+      const id = randomUUID()
+      const result = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.pending.delete(id)
+          reject(new Error("timeout"))
+        }, 8000)
+        this.pending.set(id, { resolve, timer })
+        desktop[0].send(JSON.stringify({
+          op: "restock",
+          id,
+          authorization: header(req, "authorization") ?? "",
+          token: header(req, "x-tcgaio-token") ?? "",
+          body
+        }))
+      })
+      res.writeHead(result.status, { "content-type": "application/json; charset=utf-8" })
+      res.end(result.body)
+    } catch (err) {
+      const timeout = err instanceof Error && err.message === "timeout"
+      if (!res.headersSent) res.writeHead(timeout ? 504 : 400, { "content-type": "application/json; charset=utf-8" })
+      res.end(JSON.stringify({ ok: false, error: timeout ? "The desktop did not answer." : "Bad request." }))
+    }
+  }
+
   private onMessage(socket: WebSocket, text: string): void {
     this.seen.push(text)
-    let value: { op?: string; role?: string; pc?: string; to?: string; body?: string }
+    let value: { op?: string; role?: string; pc?: string; to?: string; body?: string; id?: string; status?: number }
     try {
       value = JSON.parse(text) as typeof value
     } catch {
       socket.close(4000, "bad frame")
+      return
+    }
+    if (value.op === "restock-result" && typeof value.id === "string") {
+      const peer = this.peers.get(socket)
+      const pending = this.pending.get(value.id)
+      if (!peer || peer.role !== "pc" || !pending) return
+      clearTimeout(pending.timer)
+      this.pending.delete(value.id)
+      const status = typeof value.status === "number" ? value.status : 502
+      const body = typeof value.body === "string" ? value.body : JSON.stringify({ ok: false, error: "Empty response." })
+      pending.resolve({ status, body })
       return
     }
     if (value.op === "join") {
@@ -108,4 +169,9 @@ export class RelayServer {
       socket.send(frame)
     }
   }
+}
+
+function header(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name]
+  return Array.isArray(value) ? value[0] : value
 }

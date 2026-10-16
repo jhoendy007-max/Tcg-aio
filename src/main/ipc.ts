@@ -1,5 +1,6 @@
 import { ipcMain, type BrowserWindow } from "electron"
 import QRCode from "qrcode"
+import { relayRestockUrl, type AlertService } from "../engine/alerts"
 import { postDiscord } from "../engine/discord"
 import { checkStoreHealth } from "../engine/health"
 import { defaultHttp } from "../engine/http"
@@ -19,8 +20,23 @@ export function registerIpc(
   runner: TaskService,
   registry: Map<StoreId, StoreModule>,
   getWindow: () => BrowserWindow | null,
-  phone: PhoneServer
+  phone: PhoneServer,
+  alerts: AlertService
 ): void {
+  const publishAlerts = () => {
+    const status = phone.status()
+    alerts.setUrls({
+      localUrl: `http://${status.host}:${status.port}/v1/restock`,
+      relayUrl: relayRestockUrl(status.relay, db.pcId())
+    })
+    const view = alerts.view({
+      localUrl: `http://${status.host}:${status.port}/v1/restock`,
+      relayUrl: relayRestockUrl(status.relay, db.pcId())
+    })
+    getWindow()?.webContents.send(channels.alertsEvent, view)
+    phone.publishAlerts(alerts.phoneAlerts())
+    return view
+  }
   handle(channels.tasksList, () => db.listTasks())
   handle(channels.tasksSave, (input) => db.saveTask(input))
   handle(channels.tasksDelete, (id: string) => {
@@ -96,7 +112,48 @@ export function registerIpc(
   handle(channels.phoneRelay, (url: string) => {
     db.saveSettings({ ...db.getSettings(), phoneRelayUrl: url })
     phone.reconnectRelay()
+    publishAlerts()
     return phone.status()
+  })
+  handle(channels.alertsGet, () => publishAlerts())
+  handle(channels.alertsRotateToken, () => {
+    db.rotateRestockToken()
+    return publishAlerts()
+  })
+  handle(channels.alertsSaveDiscord, (input) => {
+    db.saveDiscordWatch(input)
+    alerts.refresh()
+    return publishAlerts()
+  })
+  handle(channels.alertsSaveRule, (input) => {
+    const rule = db.saveRestockRule(input)
+    alerts.refresh()
+    publishAlerts()
+    return rule
+  })
+  handle(channels.alertsDeleteRule, (id: string) => {
+    db.deleteRestockRule(id)
+    alerts.refresh()
+    publishAlerts()
+    return { id }
+  })
+  handle(channels.alertsSaveWatch, (input) => {
+    const watch = db.saveWatch(input)
+    alerts.refresh()
+    publishAlerts()
+    return watch
+  })
+  handle(channels.alertsDeleteWatch, (id: string) => {
+    db.deleteWatch(id)
+    alerts.refresh()
+    publishAlerts()
+    return { id }
+  })
+  handle(channels.alertsResumeWatch, (id: string) => {
+    const watch = db.resumeWatch(id)
+    alerts.refresh()
+    publishAlerts()
+    return watch
   })
 }
 
