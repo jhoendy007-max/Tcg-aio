@@ -1,0 +1,30 @@
+{
+  "data": {
+    "product": {
+      "name": "Pokemon Scarlet & Violet Elite Trainer Box",
+      "allOffers": [
+        {
+          "usItemId": "13816151308",
+          "offerId": "WALMART0FF3R0000000000000000001",
+          "availabilityStatus": "IN_STOCK",
+          "fulfillmentType": "FC",
+          "fulfillmentOptions": [
+            { "type": "SHIPPING", "availabilityStatus": "IN_STOCK" },
+            { "type": "PICKUP", "availabilityStatus": "NOT_AVAILABLE" }
+          ],
+          "catalogSellerId": 0,
+          "sellerName": "Walmart.com",
+          "sellerDisplayName": "Walmart.com",
+          "sellerType": "INTERNAL",
+          "wfsEnabled": false,
+          "priceInfo": {
+            "currentPrice": { "price": 49.99, "priceString": "$49.99" },
+            "wasPrice": { "price": 49.99, "priceString": "$49.99" },
+            "listPrice": { "price": 49.99, "priceString": "$49.99" }
+          },
+          "shippingOption": { "availabilityStatus": "AVAILABLE", "shipPrice": { "price": 0 } }
+        }
+      ]
+    }
+  }
+}

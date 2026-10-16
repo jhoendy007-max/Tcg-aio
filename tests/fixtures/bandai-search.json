@@ -1,0 +1,20 @@
+{
+  "productResults": {
+    "products": [
+      {
+        "productCode": "N2884152001",
+        "productName": { "en": "DIGIMON CARD GAME PREMIUM BATTLE SET Ver. Royal Knights [PB-27]" },
+        "productType": "PreOrder",
+        "saleStatus": "On",
+        "fixedListPrice": { "amount": 66, "currency": "USD" }
+      },
+      {
+        "productCode": "N2716225001",
+        "productName": { "en": "ONE PIECE CARD GAME Special Goods Set -Former Four Emperors-" },
+        "productType": "PreOrder",
+        "saleStatus": "End",
+        "fixedListPrice": { "amount": 42, "currency": "USD" }
+      }
+    ]
+  }
+}

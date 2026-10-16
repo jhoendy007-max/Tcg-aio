@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "TCGAIO",
+    "slug": "tcgaio",
+    "version": "0.2.6",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "tcgaio",
+    "ios": {
+      "bundleIdentifier": "com.tcgaio.phone",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "TCGAIO scans the pairing QR code shown on your PC.",
+        "NSLocalNetworkUsageDescription": "TCGAIO connects to the desktop app on your Wi-Fi.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.tcgaio.phone",
+      "versionCode": 7,
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#14161b",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TCGAIO scans the pairing QR code shown on your PC."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#e0b15a"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
+    }
+  }
+}

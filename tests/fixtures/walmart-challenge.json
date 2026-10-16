@@ -1,0 +1,7 @@
+{
+  "redirectUrl": "/blocked?url=https%3A%2F%2Fwww.walmart.com%2Forchestra%2Fhome%2Fgraphql",
+  "appId": "PXu6b0qd2S",
+  "jsClientSrc": "/px/PXu6b0qd2S/init.js",
+  "blockScript": "/px/PXu6b0qd2S/captcha/captcha.js",
+  "hostUrl": "/px/PXu6b0qd2S/xhr"
+}

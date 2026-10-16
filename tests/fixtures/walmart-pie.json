@@ -1,0 +1,13 @@
+{
+  "script": "var PIE = {};\nPIE.L = 6;\nPIE.E = 4;\nPIE.K = \"70E99B247C0E6B77679F65F1D721B120\";\nPIE.key_id = \"2595de71\";\nPIE.phase = 0;\n",
+  "pan": "4242424242424242",
+  "cvv": "123",
+  "encryptedPan": "424242fRDEXWyjA4242",
+  "encryptedCvv": "3i7d",
+  "integrityCheck": "a11ece24f35c04a5",
+  "phase1": {
+    "encryptedPan": "424242fRDEXWynq4242",
+    "encryptedCvv": "ixJh",
+    "integrityCheck": "16d6279e09015306"
+  }
+}
