@@ -9,6 +9,8 @@ export function SettingsPage() {
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
+  const [token, setToken] = useState("")
+  const [hasToken, setHasToken] = useState(false)
 
   useEffect(() => {
     void unwrap(window.aio.settings.get())
@@ -17,6 +19,7 @@ export function SettingsPage() {
         setForm(next.settings)
       })
       .catch((err) => setError(errorText(err)))
+    void unwrap(window.aio.updates.get()).then((status) => setHasToken(status.hasToken)).catch(() => undefined)
   }, [])
 
   async function save(event: React.FormEvent) {
@@ -76,9 +79,9 @@ export function SettingsPage() {
         </label>
         <label className="check span-2">
           <input type="checkbox" checked={form.sessionWarmup} onChange={(event) => setForm({ ...form, sessionWarmup: event.target.checked })} />
-          <span>Keep saved sessions warm in the real browser. The PC opens the store homepage and one product page, then saves the cookies that browser already has.</span>
+          <span>Session Keeper. The PC opens the store homepage and one product page in the real browser, then saves the cookies that browser already has. The Session Keeper page shows each account.</span>
         </label>
-        <Field label="Warm-up interval (minutes)" hint="How often each signed-in account is opened. 10–240. An expired session asks you to sign in again.">
+        <Field label="Session Keeper interval (minutes)" hint="How often each signed-in account is opened. 10–240. An expired session asks you to sign in again.">
           <TextInput type="number" min={10} max={240} value={form.sessionWarmupMin} onChange={(event) => setForm({ ...form, sessionWarmupMin: Number(event.target.value) })} required />
         </Field>
         <Field label="Monitor jitter (%)" hint="Random spread around each monitor wait. 0–40. Blocks (403, 412, 429, 435) also back off.">
@@ -99,6 +102,32 @@ export function SettingsPage() {
         <div className="actions span-2">
           <button className="primary" type="submit" disabled={busy}>Save settings</button>
           <button type="button" onClick={() => void testWebhook()} disabled={busy}>Send test webhook</button>
+        </div>
+      </form>
+      <form className="card stack" onSubmit={(event) => {
+        event.preventDefault()
+        setBusy(true)
+        setError("")
+        void unwrap(window.aio.updates.saveToken({ action: token ? "replace" : "clear", token }))
+          .then(async (status) => {
+            setHasToken(status.hasToken)
+            setToken("")
+            if (status.hasToken) await unwrap(window.aio.updates.check())
+            setMessage(status.hasToken ? "GitHub token saved on this PC. Checking releases." : "GitHub token removed.")
+          })
+          .catch((err) => setError(errorText(err)))
+          .finally(() => setBusy(false))
+      }}>
+        <div>
+          <h2>Updates</h2>
+          <p className="hint">The GitHub repo is private, so electron-updater needs a personal access token that can read releases. The token stays on this PC and is not sent to the phone. Leave the field blank and save to remove it. A newer desktop build shows a prompt with the release notes. The phone shows when a newer APK is on that release.</p>
+        </div>
+        <Field label="GitHub token" hint={hasToken ? "A token is saved. Paste a new one to replace it." : "No token saved yet."}>
+          <TextInput type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="github_pat_…" />
+        </Field>
+        <div className="actions">
+          <button className="primary" type="submit" disabled={busy}>{token ? "Save token" : "Remove token"}</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.updates.check()).then(() => setMessage("Update check finished.")).catch((err) => setError(errorText(err)))}>Check for updates</button>
         </div>
       </form>
     </section>

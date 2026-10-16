@@ -4,9 +4,10 @@ import { checkStoreHealth } from "../engine/health"
 import { defaultHttp } from "../engine/http"
 import type { Database } from "../engine/database"
 import type { TaskService } from "../engine/task-runner"
-import { STORE_CATALOG } from "../shared/stores"
+import { STORE_CATALOG, storeName } from "../shared/stores"
 import type { KeywordWatchInput, RestockRuleInput } from "../shared/types"
-import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneAlerts, type PhoneChallenge, type PhoneSnapshot, type PhoneTaskDraft } from "./protocol"
+import { parseBulkTasks } from "../engine/bulk"
+import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneAlerts, type PhoneAnalytics, type PhoneChallenge, type PhoneKeeper, type PhoneSchedule, type PhoneSnapshot, type PhoneTaskDraft, type PhoneUpdates } from "./protocol"
 import type { PhoneHost } from "./server"
 
 export function desktopName(): string {
@@ -43,7 +44,47 @@ export function createPhoneHost(
       accounts: accounts.map(projectAccount),
       proxyGroups: groups.map(projectProxyGroup),
       stores: STORE_CATALOG,
-      alerts: alerts()
+      alerts: alerts(),
+      schedules: schedules(),
+      analytics: analytics(),
+      updates: updates(),
+      keeper: keeper()
+    }
+  }
+  const schedules = (): PhoneSchedule[] => db.listSchedules().map((schedule) => ({
+    id: schedule.id,
+    name: schedule.name,
+    enabled: schedule.enabled,
+    startAt: schedule.startAt,
+    stopAt: schedule.stopAt,
+    warmupMin: schedule.warmupMin,
+    phase: schedule.phase,
+    taskCount: schedule.taskIds.length,
+    group: schedule.group
+  }))
+  const analytics = (): PhoneAnalytics => {
+    const report = db.analytics()
+    return {
+      attempts: report.attempts,
+      success: report.success,
+      failure: report.failure,
+      paused: report.paused,
+      tested: report.tested,
+      winRate: report.winRate,
+      spend: report.spend,
+      byStore: report.byStore.map((row) => ({ store: row.store, storeName: row.storeName, success: row.success, failure: row.failure, paused: row.paused, spend: row.spend })),
+      recent: report.recent.slice(0, 8).map((row) => ({ at: row.at, storeName: storeName(row.store), sku: row.sku, outcome: row.outcome, price: row.price }))
+    }
+  }
+  const updates = (): PhoneUpdates => db.updateNotice()
+  const keeper = (): PhoneKeeper => {
+    const settings = db.getSettings()
+    const accounts = db.listAccounts()
+    return {
+      enabled: settings.sessionWarmup,
+      intervalMin: settings.sessionWarmupMin,
+      saved: accounts.filter((account) => account.sessionState === "saved").length,
+      expired: accounts.filter((account) => account.sessionState === "expired").length
     }
   }
   const alerts = (): PhoneAlerts => getAlerts()?.phoneAlerts() ?? EMPTY_ALERTS
@@ -144,6 +185,44 @@ export function createPhoneHost(
     openAccountLogin(id: string) {
       if (!session) throw new Error("Browser sign-in is not available.")
       return session.open(id)
+    },
+    bulkTasks(input: { text: string; store: PhoneTaskDraft["store"]; quantity: number; profileId: string; accountId: string; proxyGroupId: string | null; confirmPurchase: boolean; testMode: boolean; group: string }) {
+      const parsed = parseBulkTasks({
+        store: input.store,
+        quantity: input.quantity,
+        profileId: input.profileId,
+        accountId: input.accountId,
+        proxyGroupId: input.proxyGroupId,
+        confirmPurchase: input.confirmPurchase,
+        testMode: input.testMode === true,
+        group: input.group,
+        text: input.text
+      })
+      if (!parsed.tasks.length) throw new Error(parsed.errors[0] ?? "No tasks were created.")
+      const created = db.createTasks(parsed.tasks)
+      return { created: created.length, errors: parsed.errors.map((error) => ({ id: "", error })) }
+    },
+    duplicateTask(id: string) {
+      const [copy] = db.duplicateTasks([id])
+      if (!copy) throw new Error("Task not found.")
+      return projectTask(copy, db.listProfiles(), db.listAccounts(), db.listProxyGroups())
+    },
+    saveSchedule(input: { name: string; startAt: string; stopAt: string; warmupMin: number; group: string; taskIds: string[] }) {
+      db.saveSchedule({
+        name: input.name,
+        enabled: true,
+        startAt: input.startAt,
+        stopAt: input.stopAt || null,
+        warmupMin: input.warmupMin,
+        taskIds: input.taskIds,
+        group: input.group
+      })
+    },
+    deleteSchedule(id: string) {
+      db.deleteSchedule(id)
+    },
+    analyticsCsv() {
+      return db.checkoutCsv()
     }
   }
 }

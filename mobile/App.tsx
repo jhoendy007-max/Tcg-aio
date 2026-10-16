@@ -10,8 +10,10 @@ import { ensureNotificationPermission, notify } from "./src/notify"
 import { clearLink, loadLink, saveLink } from "./src/storage"
 import type { StoreHealth } from "../src/shared/types"
 import { colors, isActive, STATUS_LABEL } from "./src/theme"
+import { countdown } from "../src/engine/time"
+import { isNewer, PHONE_VERSION } from "./src/version"
 
-type Screen = "boot" | "pair" | "dash" | "edit" | "alerts"
+type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats"
 
 const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
   store: snap?.stores[0]?.id ?? "target",
@@ -96,10 +98,9 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!challenge) return
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [challenge])
+  }, [])
 
   useEffect(() => {
     void loadLink().then((link) => {
@@ -146,14 +147,16 @@ export default function App() {
     setScreen("pair")
   }
 
-  async function run(action: () => Promise<{ ok: boolean; error?: string; errors?: { id: string; error: string }[] }>) {
+  async function run(action: () => Promise<{ ok: boolean; error?: string; errors?: { id: string; error: string }[]; csv?: string; created?: number }>) {
     setError("")
     try {
       const result = await action()
       if (!result.ok) setError(result.error || "The PC rejected that.")
       else if (result.errors && result.errors.length) setError(result.errors.map((item) => item.error).join(" "))
+      return result
     } catch (err) {
       setError(err instanceof Error ? err.message : "The PC is offline.")
+      return { ok: false as const, error: err instanceof Error ? err.message : "The PC is offline." }
     }
   }
 
@@ -194,7 +197,7 @@ export default function App() {
           ) : null}
         </ScrollView>
       ) : null}
-      {screen === "dash" || screen === "edit" || screen === "alerts" ? (
+      {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <View style={styles.row}>
             <View>
@@ -210,6 +213,10 @@ export default function App() {
           ) : null}
           {screen === "alerts" ? (
             <AlertsPanel snap={snap} onRun={run} session={session.current} onBack={() => setScreen("dash")} />
+          ) : screen === "drops" ? (
+            <DropsPanel snap={snap} now={now} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
+          ) : screen === "stats" ? (
+            <StatsPanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
           ) : screen === "edit" && draft ? (
             <View style={styles.card}>
               <Text style={styles.h2}>{draft.id ? "Edit task" : "New task"}</Text>
@@ -276,11 +283,16 @@ export default function App() {
           ) : (
             <>
               {snap?.testMode ? <Text style={styles.p}>Global test mode is on. Every task stops before place order.</Text> : null}
+              {snap && isNewer(snap.updates?.phoneVersion ?? null, PHONE_VERSION) ? <Text style={styles.p}>Phone {snap.updates.phoneVersion} is on the PC's GitHub release. Install that APK over this {PHONE_VERSION} build. The download stays on the PC.</Text> : null}
+              {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
+              {nextDrop(snap, now) ? <Text style={styles.p}>Next drop {nextDrop(snap, now)}</Text> : null}
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("alerts")}><Text style={styles.secondaryText}>Alerts</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => setScreen("drops")}><Text style={styles.secondaryText}>Drops</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => setScreen("stats")}><Text style={styles.secondaryText}>Stats</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(async () => {
                   const result = await session.current!.checkHealth(snap?.proxyGroups[0]?.id ?? null)
                   if (result.ok) setHealth(result.health ?? [])
@@ -326,10 +338,92 @@ export default function App() {
   )
 }
 
+function nextDrop(snap: PhoneSnapshot | null, now: number): string {
+  const next = (snap?.schedules ?? [])
+    .filter((schedule) => schedule.enabled && schedule.phase !== "stopped" && schedule.phase !== "started")
+    .sort((a, b) => a.startAt - b.startAt)[0]
+  if (!next) return ""
+  return `${next.name} · ${countdown(next.startAt, now)}`
+}
+
+function DropsPanel({ snap, now, session, onRun, onBack }: {
+  snap: PhoneSnapshot | null
+  now: number
+  session: PhoneSession | null
+  onRun: (action: () => Promise<{ ok: boolean; error?: string; created?: number }>) => Promise<{ ok: boolean; created?: number } | undefined>
+  onBack: () => void
+}) {
+  const [name, setName] = useState("Drop")
+  const [startAt, setStartAt] = useState("")
+  const [warmupMin, setWarmupMin] = useState("10")
+  const [group, setGroup] = useState("")
+  const [text, setText] = useState("")
+  const account = snap?.accounts[0]
+  const profile = snap?.profiles[0]
+  return (
+    <View style={styles.card}>
+      <Text style={styles.h2}>Drops</Text>
+      <Text style={styles.p}>Times are Atlantic Time (Puerto Rico, UTC−4), like 2026-11-13T09:00. Session Keeper warms accounts before the start. The phone is notified.</Text>
+      {(snap?.schedules ?? []).map((schedule) => (
+        <View key={schedule.id} style={styles.card}>
+          <Text style={styles.h2}>{schedule.name}</Text>
+          <Text style={styles.p}>{schedule.phase} · {countdown(schedule.startAt, now)} · warm {schedule.warmupMin} min{schedule.group ? ` · ${schedule.group}` : ""}</Text>
+          <Pressable onPress={() => void onRun(() => session!.deleteSchedule(schedule.id))}><Text style={styles.link}>Delete</Text></Pressable>
+        </View>
+      ))}
+      <Text style={styles.label}>Name</Text>
+      <TextInput style={styles.input} value={name} onChangeText={setName} />
+      <Text style={styles.label}>Start</Text>
+      <TextInput style={styles.input} value={startAt} onChangeText={setStartAt} placeholder="2026-11-13T09:00" placeholderTextColor={colors.muted} autoCapitalize="none" />
+      <Text style={styles.label}>Warm-up minutes</Text>
+      <TextInput style={styles.input} value={warmupMin} onChangeText={setWarmupMin} keyboardType="number-pad" />
+      <Text style={styles.label}>Task group</Text>
+      <TextInput style={styles.input} value={group} onChangeText={setGroup} placeholder="ETB" placeholderTextColor={colors.muted} />
+      <Pressable style={styles.primary} onPress={() => void onRun(() => session!.saveSchedule({ name, startAt, stopAt: "", warmupMin: Number(warmupMin), group, taskIds: [] }))}><Text style={styles.primaryText}>Schedule</Text></Pressable>
+      <Text style={styles.h2}>Paste SKUs</Text>
+      <TextInput style={[styles.input, styles.area]} value={text} onChangeText={setText} multiline placeholder="One SKU or URL per line" placeholderTextColor={colors.muted} />
+      <Pressable style={styles.secondary} onPress={() => void onRun(async () => {
+        if (!account || !profile) return { ok: false, error: "Save a profile and account on the PC first." }
+        return session!.bulkTasks({ text, store: account.store, quantity: 1, profileId: profile.id, accountId: account.id, proxyGroupId: null, confirmPurchase: false, testMode: snap?.testMode === true, group })
+      })}><Text style={styles.secondaryText}>Create tasks</Text></Pressable>
+      <Pressable onPress={onBack}><Text style={styles.link}>Back</Text></Pressable>
+    </View>
+  )
+}
+
+function StatsPanel({ snap, session, onRun, onBack }: {
+  snap: PhoneSnapshot | null
+  session: PhoneSession | null
+  onRun: (action: () => Promise<{ ok: boolean; error?: string; csv?: string }>) => Promise<{ ok: boolean; csv?: string } | undefined>
+  onBack: () => void
+}) {
+  const [csv, setCsv] = useState("")
+  const stats = snap?.analytics
+  return (
+    <View style={styles.card}>
+      <Text style={styles.h2}>Analytics</Text>
+      <Text style={styles.p}>Win rate {Math.round((stats?.winRate ?? 0) * 100)}% · spend ${ (stats?.spend ?? 0).toFixed(2) } · {stats?.success ?? 0} success · {stats?.failure ?? 0} failed · {stats?.paused ?? 0} paused · {stats?.tested ?? 0} tested</Text>
+      {(stats?.byStore ?? []).map((row) => (
+        <Text key={row.store} style={styles.p}>{row.storeName} · {row.success} won · {row.failure} failed · ${row.spend.toFixed(2)}</Text>
+      ))}
+      {(stats?.recent ?? []).map((row) => (
+        <Text key={`${row.at}-${row.sku}`} style={styles.log}>{row.outcome} · {row.storeName} · {row.sku}{row.price === null ? "" : ` · $${row.price.toFixed(2)}`}</Text>
+      ))}
+      <Pressable style={styles.secondary} onPress={() => void onRun(async () => {
+        const result = await session!.analyticsCsv()
+        if (result.ok && result.csv) setCsv(result.csv)
+        return result
+      })}><Text style={styles.secondaryText}>Show CSV</Text></Pressable>
+      {csv ? <Text style={styles.log} selectable>{csv.slice(0, 4000)}</Text> : null}
+      <Pressable onPress={onBack}><Text style={styles.link}>Back</Text></Pressable>
+    </View>
+  )
+}
+
 function TaskDetail({ task, onRun, session, onEdit }: {
   task: PhoneTask
   session: PhoneSession | null
-  onRun: (action: () => Promise<{ ok: boolean; error?: string }>) => Promise<void>
+  onRun: (action: () => Promise<{ ok: boolean; error?: string }>) => Promise<unknown>
   onEdit: () => void
 }) {
   return (
@@ -344,6 +438,7 @@ function TaskDetail({ task, onRun, session, onEdit }: {
           <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.runTest(task.id))}><Text style={styles.secondaryText}>Run test</Text></Pressable>
         ) : null}
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.openAccountLogin(task.accountId))}><Text style={styles.secondaryText}>Sign in on PC</Text></Pressable>
+        <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.duplicateTask(task.id))}><Text style={styles.secondaryText}>Duplicate</Text></Pressable>
         <Pressable style={styles.secondary} onPress={onEdit}><Text style={styles.secondaryText}>Edit</Text></Pressable>
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.deleteTask(task.id))}><Text style={styles.secondaryText}>Delete</Text></Pressable>
       </View>
@@ -357,7 +452,7 @@ function TaskDetail({ task, onRun, session, onEdit }: {
 function AlertsPanel({ snap, onRun, session, onBack }: {
   snap: PhoneSnapshot | null
   session: PhoneSession | null
-  onRun: (action: () => Promise<{ ok: boolean; error?: string; alerts?: PhoneSnapshot["alerts"] }>) => Promise<void>
+  onRun: (action: () => Promise<{ ok: boolean; error?: string; alerts?: PhoneSnapshot["alerts"] }>) => Promise<unknown>
   onBack: () => void
 }) {
   const alerts = snap?.alerts
@@ -496,6 +591,7 @@ const styles = StyleSheet.create({
   err: { color: "#ffd0d0", backgroundColor: "#3a1d1d", padding: 10, borderRadius: 8 },
   label: { color: colors.muted, fontSize: 12, marginTop: 8 },
   input: { backgroundColor: colors.card2, color: colors.text, borderColor: colors.line, borderWidth: 1, borderRadius: 8, padding: 10 },
+  area: { minHeight: 90, textAlignVertical: "top" },
   paste: { minHeight: 80, textAlignVertical: "top" },
   primary: { backgroundColor: colors.accent, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
   primaryText: { color: colors.accentInk, fontWeight: "700" },

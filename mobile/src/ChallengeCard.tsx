@@ -23,7 +23,7 @@ export function ChallengeCard({
   challenge: PhoneChallenge
   now: number
   session: PhoneSession | null
-  onRun: (action: () => Promise<{ ok: boolean; error?: string }>) => Promise<void>
+  onRun: (action: () => Promise<{ ok: boolean; error?: string }>) => Promise<unknown>
 }) {
   const web = useRef<WebView<{ marker?: undefined }>>(null)
   const [open, setOpen] = useState(false)

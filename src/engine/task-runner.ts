@@ -175,7 +175,7 @@ export class TaskService {
           }
           return
         }
-        await this.finishResult(update, result, module.displayName, task.sku, profile.name)
+        await this.finishResult(update, result, task, module.displayName, profile.name)
         return
       }
     } catch (err) {
@@ -267,12 +267,14 @@ export class TaskService {
   private async finishResult(
     update: (patch: Parameters<Database["patchTask"]>[1]) => void,
     result: StoreRunResult,
+    task: { store: StoreId; sku: string },
     storeNameText: string,
-    sku: string,
     profileNameText: string
   ): Promise<void> {
+    const sku = task.sku
     if (result.outcome === "success") {
       finish(update, "success", result.detail, "success")
+      this.remember(task, "success", profileNameText, result.detail, result.orderId)
       await this.safeNotify(update, {
         kind: "success",
         storeName: storeNameText,
@@ -285,6 +287,7 @@ export class TaskService {
     }
     if (result.outcome === "tested") {
       finish(update, "tested", "Test passed. Place order was not sent.", "success")
+      this.remember(task, "tested", profileNameText, result.detail)
       await this.safeNotify(update, {
         kind: "tested",
         storeName: storeNameText,
@@ -296,6 +299,7 @@ export class TaskService {
     }
     if (result.outcome === "paused") {
       finish(update, "paused", result.reason, "warn")
+      this.remember(task, "paused", profileNameText, result.reason)
       await this.safeNotify(update, {
         kind: "paused",
         storeName: storeNameText,
@@ -310,6 +314,7 @@ export class TaskService {
       return
     }
     finish(update, "failed", result.reason, "error")
+    this.remember(task, "failure", profileNameText, result.reason)
     await this.safeNotify(update, {
       kind: "failure",
       storeName: storeNameText,
@@ -317,6 +322,10 @@ export class TaskService {
       profileName: profileNameText,
       detail: result.reason
     })
+  }
+
+  private remember(task: { store: StoreId; sku: string }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string): void {
+    this.db.recordCheckout({ store: task.store, sku: task.sku, product: task.sku, outcome, profileName, detail, orderId })
   }
 
   private async safeNotify(update: (patch: Parameters<Database["patchTask"]>[1]) => void, notice: Notice): Promise<void> {

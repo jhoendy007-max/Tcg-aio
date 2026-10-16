@@ -22,7 +22,13 @@ import type {
   RestockRule,
   RestockRuleInput,
   StoreHealth,
-  PublicChallenge
+  PublicChallenge,
+  AnalyticsReport,
+  BulkEdit,
+  BulkShared,
+  DropSchedule,
+  DropScheduleInput,
+  UpdateStatus
 } from "./types"
 import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
 
@@ -92,6 +98,29 @@ export interface AioApi {
     submit: (cookie: string) => Promise<Result<{ saved: true }>>
     dismiss: () => Promise<Result<{ dismissed: true }>>
     onEvent: (cb: (challenge: PublicChallenge | null) => void) => () => void
+  }
+  schedules: {
+    list: () => Promise<Result<DropSchedule[]>>
+    save: (input: DropScheduleInput) => Promise<Result<DropSchedule>>
+    delete: (id: string) => Promise<Result<{ id: string }>>
+  }
+  analytics: {
+    get: () => Promise<Result<AnalyticsReport>>
+    csv: () => Promise<Result<{ csv: string }>>
+  }
+  bulk: {
+    create: (input: BulkShared) => Promise<Result<{ tasks: PublicTask[]; errors: string[] }>>
+    edit: (input: BulkEdit) => Promise<Result<{ updated: string[]; errors: { id: string; error: string }[] }>>
+    duplicate: (ids: string[]) => Promise<Result<PublicTask[]>>
+    delete: (ids: string[]) => Promise<Result<{ deleted: string[]; errors: { id: string; error: string }[] }>>
+  }
+  updates: {
+    get: () => Promise<Result<UpdateStatus>>
+    check: () => Promise<Result<UpdateStatus>>
+    download: () => Promise<Result<UpdateStatus>>
+    install: () => Promise<Result<{ installing: true }>>
+    saveToken: (input: { action: "keep" | "replace" | "clear"; token: string }) => Promise<Result<UpdateStatus>>
+    onEvent: (cb: (status: UpdateStatus) => void) => () => void
   }
 }
 

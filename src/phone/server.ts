@@ -58,6 +58,11 @@ export interface PhoneHost {
   submitChallenge?(cookie: string): void
   currentChallenge?(): PhoneChallenge | null
   openAccountLogin?(id: string): Promise<void> | void
+  bulkTasks?(input: { text: string; store: import("../shared/types").StoreId; quantity: number; profileId: string; accountId: string; proxyGroupId: string | null; confirmPurchase: boolean; testMode: boolean; group: string }): { created: number; errors?: { id: string; error: string }[] }
+  duplicateTask?(id: string): PhoneTask
+  saveSchedule?(input: { name: string; startAt: string; stopAt: string; warmupMin: number; group: string; taskIds: string[] }): void
+  deleteSchedule?(id: string): void
+  analyticsCsv?(): string
 }
 
 interface DeviceKey {
@@ -249,6 +254,10 @@ export class PhoneServer {
 
   publishDelete(id: string): void {
     this.broadcast({ type: "task.deleted", id })
+  }
+
+  publishSnapshot(): void {
+    this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
   }
 
   publishNotice(notice: PhoneNotice): void {
@@ -498,15 +507,48 @@ export class PhoneServer {
         this.reply(conn, req, { ok: true })
         return
       }
+      if (message.type === "task.bulk") {
+        if (!this.host.bulkTasks) throw new Error("Mass task creation is not available.")
+        const result = this.host.bulkTasks(message)
+        this.reply(conn, req, { ok: true, created: result.created, errors: result.errors })
+        this.publishSnapshot()
+        return
+      }
+      if (message.type === "task.duplicate") {
+        if (!this.host.duplicateTask) throw new Error("Duplicate is not available.")
+        const task = this.host.duplicateTask(message.taskId)
+        this.reply(conn, req, { ok: true, task, created: 1 })
+        this.broadcast({ type: "task", task })
+        return
+      }
+      if (message.type === "schedule.save") {
+        if (!this.host.saveSchedule) throw new Error("The drop scheduler is not available.")
+        this.host.saveSchedule(message)
+        this.reply(conn, req, { ok: true })
+        this.publishSnapshot()
+        return
+      }
+      if (message.type === "schedule.delete") {
+        if (!this.host.deleteSchedule) throw new Error("The drop scheduler is not available.")
+        this.host.deleteSchedule(message.scheduleId)
+        this.reply(conn, req, { ok: true })
+        this.publishSnapshot()
+        return
+      }
+      if (message.type === "analytics.csv") {
+        if (!this.host.analyticsCsv) throw new Error("Checkout history is not available.")
+        this.reply(conn, req, { ok: true, csv: this.host.analyticsCsv() })
+        return
+      }
     } catch (err) {
       this.reply(conn, req, { ok: false, error: safeError(err) })
     }
   }
 
-  private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: import("../shared/types").StoreHealth[]; alerts?: PhoneAlerts } | { ok: false; error: string }): void {
+  private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: import("../shared/types").StoreHealth[]; alerts?: PhoneAlerts; csv?: string; created?: number } | { ok: false; error: string }): void {
     if (!conn.key) return
     this.send(conn, conn.key, "session", body.ok
-      ? { type: "result", req, ok: true, started: body.started, errors: body.errors, task: body.task, health: body.health, alerts: body.alerts }
+      ? { type: "result", req, ok: true, started: body.started, errors: body.errors, task: body.task, health: body.health, alerts: body.alerts, csv: body.csv, created: body.created }
       : { type: "result", req, ok: false, error: body.error })
   }
 

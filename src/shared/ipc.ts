@@ -44,5 +44,20 @@ export const channels = {
   challengeEvent: "challenge:event",
   sessionOpen: "session:open",
   sessionCapture: "session:capture",
-  sessionWarm: "session:warm"
+  sessionWarm: "session:warm",
+  schedulesList: "schedules:list",
+  schedulesSave: "schedules:save",
+  schedulesDelete: "schedules:delete",
+  analyticsGet: "analytics:get",
+  analyticsCsv: "analytics:csv",
+  tasksBulk: "tasks:bulk",
+  tasksBulkEdit: "tasks:bulkEdit",
+  tasksDuplicate: "tasks:duplicate",
+  tasksDeleteMany: "tasks:deleteMany",
+  updatesGet: "updates:get",
+  updatesCheck: "updates:check",
+  updatesDownload: "updates:download",
+  updatesInstall: "updates:install",
+  updatesToken: "updates:token",
+  updatesEvent: "updates:event"
 } as const

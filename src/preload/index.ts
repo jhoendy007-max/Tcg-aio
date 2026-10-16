@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
 import type { AioApi } from "../shared/api"
 import { channels } from "../shared/ipc"
 import type { PhoneStatus } from "../phone/protocol"
-import type { AlertsView, PublicChallenge, TaskEvent } from "../shared/types"
+import type { AlertsView, PublicChallenge, TaskEvent, UpdateStatus } from "../shared/types"
 
 const api: AioApi = {
   tasks: {
@@ -85,6 +85,33 @@ const api: AioApi = {
       const listener = (_event: IpcRendererEvent, payload: PublicChallenge | null) => cb(payload)
       ipcRenderer.on(channels.challengeEvent, listener)
       return () => ipcRenderer.removeListener(channels.challengeEvent, listener)
+    }
+  },
+  schedules: {
+    list: () => ipcRenderer.invoke(channels.schedulesList),
+    save: (input) => ipcRenderer.invoke(channels.schedulesSave, input),
+    delete: (id) => ipcRenderer.invoke(channels.schedulesDelete, id)
+  },
+  analytics: {
+    get: () => ipcRenderer.invoke(channels.analyticsGet),
+    csv: () => ipcRenderer.invoke(channels.analyticsCsv)
+  },
+  bulk: {
+    create: (input) => ipcRenderer.invoke(channels.tasksBulk, input),
+    edit: (input) => ipcRenderer.invoke(channels.tasksBulkEdit, input),
+    duplicate: (ids) => ipcRenderer.invoke(channels.tasksDuplicate, ids),
+    delete: (ids) => ipcRenderer.invoke(channels.tasksDeleteMany, ids)
+  },
+  updates: {
+    get: () => ipcRenderer.invoke(channels.updatesGet),
+    check: () => ipcRenderer.invoke(channels.updatesCheck),
+    download: () => ipcRenderer.invoke(channels.updatesDownload),
+    install: () => ipcRenderer.invoke(channels.updatesInstall),
+    saveToken: (input) => ipcRenderer.invoke(channels.updatesToken, input),
+    onEvent: (cb: (status: UpdateStatus) => void) => {
+      const listener = (_event: IpcRendererEvent, payload: UpdateStatus) => cb(payload)
+      ipcRenderer.on(channels.updatesEvent, listener)
+      return () => ipcRenderer.removeListener(channels.updatesEvent, listener)
     }
   }
 }

@@ -5,6 +5,8 @@ import type { ChallengeController } from "./challenge-window"
 import { postDiscord } from "../engine/discord"
 import { checkStoreHealth } from "../engine/health"
 import type { SessionBrowser } from "./session-window"
+import type { UpdateController } from "./auto-update"
+import { parseBulkTasks } from "../engine/bulk"
 import { defaultHttp } from "../engine/http"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
@@ -25,7 +27,8 @@ export function registerIpc(
   phone: PhoneServer,
   alerts: AlertService,
   challenge: ChallengeController,
-  sessions: SessionBrowser
+  sessions: SessionBrowser,
+  updates: UpdateController
 ): void {
   const publishAlerts = () => {
     const status = phone.status()
@@ -185,6 +188,33 @@ export function registerIpc(
   handle(channels.challengeDismiss, () => {
     challenge.dismiss()
     return { dismissed: true as const }
+  })
+  handle(channels.schedulesList, () => db.listSchedules())
+  handle(channels.schedulesSave, (input) => db.saveSchedule(input))
+  handle(channels.schedulesDelete, (id: string) => {
+    db.deleteSchedule(id)
+    return { id }
+  })
+  handle(channels.analyticsGet, () => db.analytics())
+  handle(channels.analyticsCsv, () => ({ csv: db.checkoutCsv() }))
+  handle(channels.tasksBulk, (input) => {
+    const parsed = parseBulkTasks(input)
+    const tasks = parsed.tasks.length ? db.createTasks(parsed.tasks) : []
+    return { tasks, errors: parsed.errors }
+  })
+  handle(channels.tasksBulkEdit, (input) => db.bulkEdit(input))
+  handle(channels.tasksDuplicate, (ids: string[]) => db.duplicateTasks(ids))
+  handle(channels.tasksDeleteMany, (ids: string[]) => db.deleteTasks(ids))
+  handle(channels.updatesGet, () => updates.current())
+  handle(channels.updatesCheck, () => updates.check())
+  handle(channels.updatesDownload, () => updates.download())
+  handle(channels.updatesInstall, () => {
+    updates.install()
+    return { installing: true as const }
+  })
+  handle(channels.updatesToken, (input: { action: "keep" | "replace" | "clear"; token: string }) => {
+    db.setUpdateToken(input.action, input.token ?? "")
+    return updates.current()
   })
 }
 

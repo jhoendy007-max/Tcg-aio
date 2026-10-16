@@ -83,10 +83,48 @@ export interface PhoneTask {
   proxyGroupName: string | null
   confirmPurchase: boolean
   testMode: boolean
+  group: string
   status: TaskStatus
   detail: string
   logs: LogLine[]
   createdAt: number
+}
+
+export interface PhoneSchedule {
+  id: string
+  name: string
+  enabled: boolean
+  startAt: number
+  stopAt: number | null
+  warmupMin: number
+  phase: string
+  taskCount: number
+  group: string
+}
+
+export interface PhoneAnalytics {
+  attempts: number
+  success: number
+  failure: number
+  paused: number
+  tested: number
+  winRate: number
+  spend: number
+  byStore: { store: StoreId; storeName: string; success: number; failure: number; paused: number; spend: number }[]
+  recent: { at: number; storeName: string; sku: string; outcome: string; price: number | null }[]
+}
+
+export interface PhoneUpdates {
+  desktopVersion: string | null
+  phoneVersion: string | null
+  notes: string
+}
+
+export interface PhoneKeeper {
+  enabled: boolean
+  intervalMin: number
+  saved: number
+  expired: number
 }
 
 export interface PhoneSnapshot {
@@ -99,6 +137,10 @@ export interface PhoneSnapshot {
   proxyGroups: PhoneProxyGroup[]
   stores: StoreInfo[]
   alerts: PhoneAlerts
+  schedules: PhoneSchedule[]
+  analytics: PhoneAnalytics
+  updates: PhoneUpdates
+  keeper: PhoneKeeper
 }
 
 /** Challenge handoff for the paired phone. The cookie is only on this message. */
@@ -107,7 +149,7 @@ export interface PhoneChallenge extends PublicChallenge {
 }
 
 export interface PhoneNotice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop"
   storeName: string
   sku: string
   profileName: string
@@ -138,6 +180,22 @@ export const EMPTY_ALERTS: PhoneAlerts = {
   log: []
 }
 
+export const EMPTY_ANALYTICS: PhoneAnalytics = {
+  attempts: 0,
+  success: 0,
+  failure: 0,
+  paused: 0,
+  tested: 0,
+  winRate: 0,
+  spend: 0,
+  byStore: [],
+  recent: []
+}
+
+export const EMPTY_UPDATES: PhoneUpdates = { desktopVersion: null, phoneVersion: null, notes: "" }
+
+export const EMPTY_KEEPER: PhoneKeeper = { enabled: false, intervalMin: 30, saved: 0, expired: 0 }
+
 export interface PhoneTaskDraft {
   id?: string
   store: StoreId
@@ -148,6 +206,7 @@ export interface PhoneTaskDraft {
   proxyGroupId: string | null
   confirmPurchase: boolean
   testMode?: boolean
+  group?: string
 }
 
 export type ClientMessage =
@@ -174,6 +233,11 @@ export type ClientMessage =
   | { type: "challenge.dismiss"; req: string; conn: string }
   | { type: "challenge.submit"; req: string; conn: string; cookie: string }
   | { type: "account.login"; req: string; conn: string; accountId: string }
+  | { type: "task.bulk"; req: string; conn: string; text: string; store: StoreId; quantity: number; profileId: string; accountId: string; proxyGroupId: string | null; confirmPurchase: boolean; testMode: boolean; group: string }
+  | { type: "task.duplicate"; req: string; conn: string; taskId: string }
+  | { type: "schedule.save"; req: string; conn: string; name: string; startAt: string; stopAt: string; warmupMin: number; group: string; taskIds: string[] }
+  | { type: "schedule.delete"; req: string; conn: string; scheduleId: string }
+  | { type: "analytics.csv"; req: string; conn: string }
 
 export type ServerMessage =
   | { type: "paired"; token: string; deviceId: string; pcName: string }
@@ -184,7 +248,7 @@ export type ServerMessage =
   | { type: "notice"; notice: PhoneNotice }
   | { type: "alerts"; alerts: PhoneAlerts }
   | { type: "challenge"; challenge: PhoneChallenge | null }
-  | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: StoreHealth[]; alerts?: PhoneAlerts }
+  | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: StoreHealth[]; alerts?: PhoneAlerts; csv?: string; created?: number }
   | { type: "result"; req: string; ok: false; error: string }
   | { type: "error"; error: string }
 
@@ -340,6 +404,7 @@ export function projectTask(task: PublicTask, profiles: PublicProfile[], account
     proxyGroupName: task.proxyGroupId ? groups.find((group) => group.id === task.proxyGroupId)?.name ?? "Missing" : null,
     confirmPurchase: task.confirmPurchase,
     testMode: task.testMode === true,
+    group: task.group ?? "",
     status: task.status,
     detail: redact(task.detail).slice(0, 240),
     logs: task.logs.slice(-LOG_LIMIT).map((line) => ({ ...line, message: redact(line.message).slice(0, 500) })),
@@ -366,7 +431,8 @@ export function parseTaskDraft(value: unknown): PhoneTaskDraft {
     accountId: input.accountId,
     proxyGroupId,
     confirmPurchase: input.confirmPurchase === true,
-    testMode: input.testMode === true
+    testMode: input.testMode === true,
+    group: typeof input.group === "string" ? input.group.trim().slice(0, 40) : ""
   }
 }
 
@@ -411,6 +477,50 @@ export function asClientMessage(value: unknown): ClientMessage {
   if (message.type === "account.login") {
     if (typeof message.accountId !== "string" || !message.accountId) throw new Error("Choose an account.")
     return { type: "account.login", req: message.req, conn: message.conn, accountId: message.accountId }
+  }
+  if (message.type === "task.duplicate") {
+    if (typeof message.taskId !== "string" || !message.taskId) throw new Error("Choose a task.")
+    return { type: "task.duplicate", req: message.req, conn: message.conn, taskId: message.taskId }
+  }
+  if (message.type === "analytics.csv") return { type: "analytics.csv", req: message.req, conn: message.conn }
+  if (message.type === "schedule.delete") {
+    if (typeof message.scheduleId !== "string" || !message.scheduleId) throw new Error("Choose a drop.")
+    return { type: "schedule.delete", req: message.req, conn: message.conn, scheduleId: message.scheduleId }
+  }
+  if (message.type === "schedule.save") {
+    if (typeof message.name !== "string" || !message.name.trim()) throw new Error("Name the drop.")
+    if (typeof message.startAt !== "string" || !message.startAt) throw new Error("Choose a start time.")
+    return {
+      type: "schedule.save",
+      req: message.req,
+      conn: message.conn,
+      name: message.name,
+      startAt: message.startAt,
+      stopAt: typeof message.stopAt === "string" ? message.stopAt : "",
+      warmupMin: Number(message.warmupMin),
+      group: typeof message.group === "string" ? message.group : "",
+      taskIds: Array.isArray(message.taskIds) ? message.taskIds.filter((id) => typeof id === "string") : []
+    }
+  }
+  if (message.type === "task.bulk") {
+    if (typeof message.text !== "string" || !message.text.trim()) throw new Error("Paste at least one SKU or URL.")
+    if (typeof message.store !== "string" || !isStoreId(message.store)) throw new Error("Choose a store.")
+    if (typeof message.profileId !== "string" || !message.profileId) throw new Error("Choose a profile.")
+    if (typeof message.accountId !== "string" || !message.accountId) throw new Error("Choose an account.")
+    return {
+      type: "task.bulk",
+      req: message.req,
+      conn: message.conn,
+      text: message.text.slice(0, 20_000),
+      store: message.store,
+      quantity: Number(message.quantity),
+      profileId: message.profileId,
+      accountId: message.accountId,
+      proxyGroupId: typeof message.proxyGroupId === "string" && message.proxyGroupId ? message.proxyGroupId : null,
+      confirmPurchase: message.confirmPurchase === true,
+      testMode: message.testMode === true,
+      group: typeof message.group === "string" ? message.group.slice(0, 40) : ""
+    }
   }
   throw new Error("Unknown phone request.")
 }

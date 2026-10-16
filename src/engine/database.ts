@@ -10,11 +10,20 @@ import { parseProxyList } from "../shared/proxy"
 import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
+import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
+import { parseAstLocal } from "./time"
 import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
+import { redact } from "../shared/redact"
 import type {
   AccountInput,
   Address,
+  AnalyticsReport,
+  BulkEdit,
   CardSecret,
+  CheckoutOutcome,
+  CheckoutRecord,
+  DropSchedule,
+  DropScheduleInput,
   FullAccount,
   FullProfile,
   ProfileInput,
@@ -33,6 +42,7 @@ import type {
   PublicTask,
   RestockRule,
   RestockRuleInput,
+  SchedulePhase,
   SecurityInfo,
   SessionCookies,
   Settings,
@@ -82,6 +92,14 @@ interface RestockFile {
   log: AlertLog[]
 }
 
+interface UpdateFile {
+  tokenSecret?: string
+  desktopVersion: string | null
+  phoneVersion: string | null
+  notes: string
+  checkedAt: number
+}
+
 interface DbFile {
   version: 1
   pcId: string
@@ -93,6 +111,9 @@ interface DbFile {
   devices: DeviceRecord[]
   restock?: RestockFile
   hygiene?: HygieneFile
+  schedules?: DropSchedule[]
+  checkouts?: CheckoutRecord[]
+  updates?: UpdateFile
 }
 
 export class Database {
@@ -122,10 +143,14 @@ export class Database {
       tasks: parsed.tasks ?? [],
       devices: Array.isArray(parsed.devices) ? parsed.devices : [],
       restock: normalizeRestock(parsed.restock),
-      hygiene: normalizeHygiene(parsed.hygiene)
+      hygiene: normalizeHygiene(parsed.hygiene),
+      schedules: normalizeSchedules(parsed.schedules),
+      checkouts: normalizeCheckouts(parsed.checkouts),
+      updates: normalizeUpdates(parsed.updates)
     }
     let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
     for (const task of this.data.tasks) {
+      task.group = typeof task.group === "string" ? task.group : ""
       if (isActiveStatus(task.status)) {
         task.status = "paused"
         task.detail = "App closed while this task was running. Resume to continue."
@@ -417,6 +442,97 @@ export class Database {
 
   saveTask(input: TaskInput): PublicTask {
     const existing = input.id ? this.requireTask(input.id) : undefined
+    const task = this.taskFrom(input, existing)
+    if (existing) this.data.tasks = this.data.tasks.map((item) => (item.id === task.id ? task : item))
+    else this.data.tasks.unshift(task)
+    this.flush()
+    return cloneTask(task)
+  }
+
+  createTasks(inputs: TaskInput[]): PublicTask[] {
+    if (!inputs.length) throw new AppError("Paste at least one SKU or URL.")
+    if (inputs.length > 50) throw new AppError("Create at most 50 tasks at once.")
+    const tasks = inputs.map((input) => this.taskFrom(input, undefined))
+    this.data.tasks.unshift(...tasks)
+    this.flush()
+    return tasks.map(cloneTask)
+  }
+
+  duplicateTasks(ids: string[]): PublicTask[] {
+    const copies = ids.map((id) => {
+      const task = this.requireTask(id)
+      return {
+        ...cloneTask(task),
+        id: randomUUID(),
+        status: "idle" as const,
+        detail: "",
+        logs: [],
+        createdAt: Date.now(),
+        startedAt: undefined,
+        finishedAt: undefined
+      }
+    })
+    if (!copies.length) throw new AppError("Choose at least one task.")
+    this.data.tasks.unshift(...copies)
+    this.flush()
+    return copies.map(cloneTask)
+  }
+
+  deleteTasks(ids: string[]): { deleted: string[]; errors: { id: string; error: string }[] } {
+    const deleted: string[] = []
+    const errors: { id: string; error: string }[] = []
+    for (const id of ids) {
+      const task = this.data.tasks.find((item) => item.id === id)
+      if (!task) errors.push({ id, error: "Task not found." })
+      else if (isActiveStatus(task.status)) errors.push({ id, error: "Stop the task before deleting it." })
+      else deleted.push(id)
+    }
+    if (deleted.length) {
+      const gone = new Set(deleted)
+      this.data.tasks = this.data.tasks.filter((task) => !gone.has(task.id))
+      this.flush()
+    }
+    return { deleted, errors }
+  }
+
+  bulkEdit(input: BulkEdit): { updated: string[]; errors: { id: string; error: string }[] } {
+    const updated: string[] = []
+    const errors: { id: string; error: string }[] = []
+    const account = input.accountId ? this.requireAccount(input.accountId) : undefined
+    if (input.profileId) this.requireProfile(input.profileId)
+    if (input.proxyGroupId) this.getProxyGroup(input.proxyGroupId)
+    const quantity = input.quantity === undefined ? undefined : Math.round(Number(input.quantity))
+    if (quantity !== undefined && (!Number.isInteger(quantity) || quantity < 1 || quantity > 12)) {
+      throw new AppError("Quantity must be from 1 to 12.")
+    }
+    for (const id of input.ids) {
+      const task = this.data.tasks.find((item) => item.id === id)
+      if (!task) {
+        errors.push({ id, error: "Task not found." })
+        continue
+      }
+      if (isActiveStatus(task.status)) {
+        errors.push({ id, error: "Stop the task before editing it." })
+        continue
+      }
+      if (account && account.store !== task.store) {
+        errors.push({ id, error: "Choose an account for the same store as the task." })
+        continue
+      }
+      if (quantity !== undefined) task.quantity = quantity
+      if (input.profileId) task.profileId = input.profileId
+      if (account) task.accountId = account.id
+      if (input.proxyGroupId !== undefined) task.proxyGroupId = input.proxyGroupId || null
+      if (input.confirmPurchase !== undefined) task.confirmPurchase = input.confirmPurchase
+      if (input.testMode !== undefined) task.testMode = input.testMode
+      if (input.group !== undefined) task.group = input.group.trim().slice(0, 40)
+      updated.push(id)
+    }
+    if (updated.length) this.flush()
+    return { updated, errors }
+  }
+
+  private taskFrom(input: TaskInput, existing: PublicTask | undefined): PublicTask {
     if (existing && isActiveStatus(existing.status)) throw new AppError("Stop the task before editing it.")
     const store = assertStore(input.store)
     const sku = input.sku.trim()
@@ -427,7 +543,7 @@ export class Database {
     const account = this.requireAccount(input.accountId)
     if (account.store !== store) throw new AppError("Choose an account for the same store as the task.")
     if (input.proxyGroupId) this.getProxyGroup(input.proxyGroupId)
-    const task: PublicTask = {
+    return {
       id: existing?.id ?? randomUUID(),
       store,
       sku,
@@ -437,6 +553,7 @@ export class Database {
       proxyGroupId: input.proxyGroupId || null,
       confirmPurchase: Boolean(input.confirmPurchase),
       testMode: input.testMode === true,
+      group: (input.group ?? existing?.group ?? "").trim().slice(0, 40),
       status: existing?.status === "paused" ? "paused" : "idle",
       detail: existing?.detail ?? "",
       logs: existing?.logs ?? [],
@@ -444,10 +561,130 @@ export class Database {
       startedAt: existing?.startedAt,
       finishedAt: existing?.finishedAt
     }
-    if (existing) this.data.tasks = this.data.tasks.map((item) => (item.id === task.id ? task : item))
-    else this.data.tasks.unshift(task)
+  }
+
+  listSchedules(): DropSchedule[] {
+    return (this.data.schedules ?? []).map((schedule) => ({ ...schedule, taskIds: [...schedule.taskIds] }))
+  }
+
+  saveSchedule(input: DropScheduleInput): DropSchedule {
+    const name = input.name.trim()
+    if (!name) throw new AppError("Schedule name is required.")
+    const startAt = typeof input.startAt === "number" ? input.startAt : parseAstLocal(String(input.startAt))
+    if (!Number.isFinite(startAt)) throw new AppError("Start time is required.")
+    const stopRaw = input.stopAt
+    const stopAt = stopRaw === null || stopRaw === undefined || stopRaw === "" ? null : typeof stopRaw === "number" ? stopRaw : parseAstLocal(String(stopRaw))
+    if (stopAt !== null && (!Number.isFinite(stopAt) || stopAt <= startAt)) throw new AppError("Stop time has to be after the start time.")
+    const warmupMin = Math.round(Number(input.warmupMin))
+    if (!Number.isInteger(warmupMin) || warmupMin < 0 || warmupMin > 180) throw new AppError("Warm-up has to be from 0 to 180 minutes.")
+    const taskIds = [...new Set((input.taskIds ?? []).filter((id) => typeof id === "string" && id))]
+    const group = (input.group ?? "").trim().slice(0, 40)
+    if (!taskIds.length && !group) throw new AppError("Choose tasks or a task group.")
+    for (const id of taskIds) this.requireTask(id)
+    if (taskIds.length > 100) throw new AppError("A drop can include at most 100 tasks.")
+    const existing = input.id ? this.data.schedules?.find((schedule) => schedule.id === input.id) : undefined
+    const schedule: DropSchedule = {
+      id: existing?.id ?? randomUUID(),
+      name: name.slice(0, 80),
+      enabled: input.enabled !== false,
+      startAt,
+      stopAt,
+      warmupMin,
+      taskIds,
+      group,
+      phase: existing && existing.startAt === startAt ? existing.phase : "waiting"
+    }
+    if (!this.data.schedules) this.data.schedules = []
+    if (existing) this.data.schedules = this.data.schedules.map((item) => (item.id === schedule.id ? schedule : item))
+    else this.data.schedules.push(schedule)
     this.flush()
-    return cloneTask(task)
+    return { ...schedule, taskIds: [...schedule.taskIds] }
+  }
+
+  deleteSchedule(id: string): void {
+    const next = (this.data.schedules ?? []).filter((schedule) => schedule.id !== id)
+    if (next.length === (this.data.schedules ?? []).length) throw new AppError("That drop was not found.")
+    this.data.schedules = next
+    this.flush()
+  }
+
+  setSchedulePhase(id: string, phase: SchedulePhase): void {
+    const schedule = this.data.schedules?.find((item) => item.id === id)
+    if (!schedule || schedule.phase === phase) return
+    schedule.phase = phase
+    this.flush()
+  }
+
+  recordCheckout(input: Omit<CheckoutRecord, "id" | "at" | "price" | "detail"> & { detail: string; price?: number | null }): CheckoutRecord {
+    const detail = redact(input.detail).slice(0, 240)
+    const record: CheckoutRecord = {
+      id: randomUUID(),
+      at: Date.now(),
+      store: input.store,
+      sku: input.sku.slice(0, 180),
+      product: (input.product || input.sku).slice(0, 180),
+      price: input.price === undefined ? priceFromDetail(detail) : input.price,
+      outcome: input.outcome,
+      profileName: input.profileName.slice(0, 80),
+      orderId: input.orderId?.slice(0, 80),
+      detail
+    }
+    if (!this.data.checkouts) this.data.checkouts = []
+    this.data.checkouts.unshift(record)
+    this.data.checkouts = this.data.checkouts.slice(0, 400)
+    this.flush()
+    return { ...record }
+  }
+
+  analytics(): AnalyticsReport {
+    return summarize(this.data.checkouts ?? [])
+  }
+
+  checkoutCsv(): string {
+    return checkoutCsv(this.data.checkouts ?? [])
+  }
+
+  setUpdateToken(action: "keep" | "replace" | "clear", token: string): void {
+    const updates = this.updates()
+    if (action === "clear") updates.tokenSecret = undefined
+    if (action === "replace") {
+      const trimmed = token.trim()
+      if (trimmed.length < 8 || /[\r\n\s]/.test(trimmed)) throw new AppError("GitHub token is invalid.")
+      updates.tokenSecret = this.cipher.encrypt(trimmed)
+    }
+    this.flush()
+  }
+
+  hasUpdateToken(): boolean {
+    return Boolean(this.data.updates?.tokenSecret)
+  }
+
+  updateToken(): string {
+    const secret = this.data.updates?.tokenSecret
+    return secret ? this.cipher.decrypt(secret) : ""
+  }
+
+  saveUpdateNotice(notice: { desktopVersion: string | null; phoneVersion: string | null; notes: string }): void {
+    const updates = this.updates()
+    updates.desktopVersion = notice.desktopVersion
+    updates.phoneVersion = notice.phoneVersion
+    updates.notes = notice.notes.slice(0, 4000)
+    updates.checkedAt = Date.now()
+    this.flush()
+  }
+
+  updateNotice(): { desktopVersion: string | null; phoneVersion: string | null; notes: string } {
+    const updates = this.data.updates
+    return {
+      desktopVersion: updates?.desktopVersion ?? null,
+      phoneVersion: updates?.phoneVersion ?? null,
+      notes: updates?.notes ?? ""
+    }
+  }
+
+  private updates(): UpdateFile {
+    if (!this.data.updates) this.data.updates = emptyUpdates()
+    return this.data.updates
   }
 
   pcId(): string {
@@ -697,7 +934,10 @@ function emptyDb(): DbFile {
     tasks: [],
     devices: [],
     restock: emptyRestock(),
-    hygiene: emptyHygiene()
+    hygiene: emptyHygiene(),
+    schedules: [],
+    checkouts: [],
+    updates: emptyUpdates()
   }
 }
 
@@ -754,7 +994,44 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 }
 
 function cloneTask(task: PublicTask): PublicTask {
-  return { ...task, testMode: task.testMode === true, logs: task.logs.map((line) => ({ ...line })) }
+  return { ...task, group: task.group ?? "", testMode: task.testMode === true, logs: task.logs.map((line) => ({ ...line })) }
+}
+
+function emptyUpdates(): UpdateFile {
+  return { desktopVersion: null, phoneVersion: null, notes: "", checkedAt: 0 }
+}
+
+function normalizeUpdates(value: UpdateFile | undefined): UpdateFile {
+  const base = emptyUpdates()
+  if (!value) return base
+  return {
+    tokenSecret: typeof value.tokenSecret === "string" ? value.tokenSecret : undefined,
+    desktopVersion: typeof value.desktopVersion === "string" ? value.desktopVersion : null,
+    phoneVersion: typeof value.phoneVersion === "string" ? value.phoneVersion : null,
+    notes: typeof value.notes === "string" ? value.notes : "",
+    checkedAt: typeof value.checkedAt === "number" ? value.checkedAt : 0
+  }
+}
+
+function normalizeSchedules(value: DropSchedule[] | undefined): DropSchedule[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((schedule) => schedule && typeof schedule.id === "string" && typeof schedule.startAt === "number").map((schedule) => ({
+    id: schedule.id,
+    name: typeof schedule.name === "string" ? schedule.name : "Drop",
+    enabled: schedule.enabled !== false,
+    startAt: schedule.startAt,
+    stopAt: typeof schedule.stopAt === "number" ? schedule.stopAt : null,
+    warmupMin: typeof schedule.warmupMin === "number" ? schedule.warmupMin : 0,
+    taskIds: Array.isArray(schedule.taskIds) ? schedule.taskIds.filter((id) => typeof id === "string") : [],
+    group: typeof schedule.group === "string" ? schedule.group : "",
+    phase: schedule.phase === "warming" || schedule.phase === "started" || schedule.phase === "stopped" ? schedule.phase : "waiting"
+  }))
+}
+
+function normalizeCheckouts(value: CheckoutRecord[] | undefined): CheckoutRecord[] {
+  if (!Array.isArray(value)) return []
+  const outcomes = new Set<CheckoutOutcome>(["success", "failure", "paused", "tested"])
+  return value.filter((record) => record && typeof record.id === "string" && outcomes.has(record.outcome)).slice(0, 400)
 }
 
 function normalizeRestock(value: RestockFile | undefined): RestockFile {

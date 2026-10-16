@@ -16,7 +16,7 @@ import { FinalSubmitBlocked, finishTest } from "../src/engine/test-mode"
 import { TaskService } from "../src/engine/task-runner"
 import { RelayServer } from "../src/phone/relay"
 import { PhoneServer, type PhoneHost } from "../src/phone/server"
-import { EMPTY_ALERTS } from "../src/phone/protocol"
+import { EMPTY_ALERTS, EMPTY_ANALYTICS, EMPTY_KEEPER, EMPTY_UPDATES } from "../src/phone/protocol"
 import type { Notice, ProxyEndpoint } from "../src/shared/types"
 import type { StoreModule } from "../src/stores/module"
 
@@ -331,7 +331,7 @@ describe("restock and keyword alerts", () => {
       pcId: "pc-1",
       pcName: "Test",
       relayUrl: () => "",
-      snapshot: () => ({ pcName: "Test", testMode: false, clearCartAfterTest: false, tasks: [], profiles: [], accounts: [], proxyGroups: [], stores: [], alerts: EMPTY_ALERTS }),
+      snapshot: () => ({ pcName: "Test", testMode: false, clearCartAfterTest: false, tasks: [], profiles: [], accounts: [], proxyGroups: [], stores: [], alerts: EMPTY_ALERTS, schedules: [], analytics: EMPTY_ANALYTICS, updates: EMPTY_UPDATES, keeper: EMPTY_KEEPER }),
       saveTask: () => { throw new Error("no") },
       deleteTask: () => undefined,
       start: () => undefined,

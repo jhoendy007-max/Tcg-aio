@@ -24,9 +24,11 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
     ? 0x3cba8b
     : notice.kind === "tested" || notice.kind === "alert"
       ? 0x6aa6ff
-      : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session"
-        ? 0xe0a045
-        : 0xe25b5b
+      : notice.kind === "drop"
+        ? 0x6aa6ff
+        : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session"
+          ? 0xe0a045
+          : 0xe25b5b
   const title =
     notice.kind === "success"
       ? `${notice.storeName} checkout succeeded`
@@ -38,9 +40,11 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
             ? `${notice.storeName} needs a person`
             : notice.kind === "session"
               ? `${notice.storeName} needs a sign-in`
-              : notice.kind === "paused"
-                ? `${notice.storeName} needs attention`
-                : `${notice.storeName} checkout failed`
+              : notice.kind === "drop"
+                ? `${notice.sku} drop`
+                : notice.kind === "paused"
+                  ? `${notice.storeName} needs attention`
+                  : `${notice.storeName} checkout failed`
   const lines = [
     `Product: ${notice.sku}`,
     `Profile: ${notice.profileName}`,
@@ -55,6 +59,9 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
   }
   if (notice.kind === "session") {
     lines.push("Open the account browser and sign in again. TCGAIO does not create a session for you.")
+  }
+  if (notice.kind === "drop") {
+    lines.push("Times are Atlantic Time (Puerto Rico, UTC−4).")
   }
   if (notice.kind === "tested") {
     lines.push("Place order was not sent.")

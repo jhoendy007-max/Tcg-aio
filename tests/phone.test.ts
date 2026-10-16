@@ -10,6 +10,9 @@ import { RelayServer } from "../src/phone/relay"
 import {
   INVITE_TTL_MS,
   EMPTY_ALERTS,
+  EMPTY_ANALYTICS,
+  EMPTY_KEEPER,
+  EMPTY_UPDATES,
   encodePairingPayload,
   maskUsername,
   openFrame,
@@ -83,6 +86,7 @@ function task(partial: Partial<PublicTask> = {}): PublicTask {
     proxyGroupId: null,
     confirmPurchase: partial.confirmPurchase ?? true,
     testMode: partial.testMode === true,
+    group: partial.group ?? "",
     status: "idle",
     detail: partial.detail ?? "",
     logs: partial.logs ?? [],
@@ -111,7 +115,11 @@ function memoryHost() {
       stores: [{ id: "target", name: "Target", skuHint: "TCIN", implemented: true }],
       testMode: false,
       clearCartAfterTest: false,
-      alerts: EMPTY_ALERTS
+      alerts: EMPTY_ALERTS,
+      schedules: [],
+      analytics: EMPTY_ANALYTICS,
+      updates: EMPTY_UPDATES,
+      keeper: EMPTY_KEEPER
     }),
     saveTask(draft) {
       const next = task({ ...draft, id: draft.id ?? `t${tasks.length + 1}`, detail: "" })

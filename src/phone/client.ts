@@ -16,7 +16,7 @@ import {
   type PhoneTaskDraft,
   type ServerMessage
 } from "./protocol"
-import type { KeywordWatchInput, RestockRuleInput, StoreHealth } from "../shared/types"
+import type { KeywordWatchInput, RestockRuleInput, StoreHealth, StoreId } from "../shared/types"
 
 export interface SavedPhoneLink {
   token: string
@@ -36,6 +36,8 @@ export interface PhoneCommandResult {
   task?: PhoneTask
   health?: StoreHealth[]
   alerts?: PhoneAlerts
+  csv?: string
+  created?: number
 }
 
 export class PhoneRevoked extends Error {
@@ -265,6 +267,26 @@ export class PhoneSession {
     return this.request({ type: "account.login", req: rid(), conn: this.conn, accountId })
   }
 
+  bulkTasks(input: { text: string; store: StoreId; quantity: number; profileId: string; accountId: string; proxyGroupId: string | null; confirmPurchase: boolean; testMode: boolean; group: string }): Promise<PhoneCommandResult> {
+    return this.request({ type: "task.bulk", req: rid(), conn: this.conn, ...input })
+  }
+
+  duplicateTask(taskId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "task.duplicate", req: rid(), conn: this.conn, taskId })
+  }
+
+  saveSchedule(input: { name: string; startAt: string; stopAt: string; warmupMin: number; group: string; taskIds: string[] }): Promise<PhoneCommandResult> {
+    return this.request({ type: "schedule.save", req: rid(), conn: this.conn, ...input })
+  }
+
+  deleteSchedule(scheduleId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "schedule.delete", req: rid(), conn: this.conn, scheduleId })
+  }
+
+  analyticsCsv(): Promise<PhoneCommandResult> {
+    return this.request({ type: "analytics.csv", req: rid(), conn: this.conn })
+  }
+
   private async request(message: ClientMessage): Promise<PhoneCommandResult> {
     if (!("req" in message)) throw new Error("Phone request is missing an id.")
     const req = message.req
@@ -273,7 +295,7 @@ export class PhoneSession {
     const response = await pending
     if (response.type !== "result") throw new Error("The PC did not answer.")
     if (!response.ok) return { ok: false, error: response.error }
-    return { ok: true, started: response.started, errors: response.errors, task: response.task, health: response.health, alerts: response.alerts }
+    return { ok: true, started: response.started, errors: response.errors, task: response.task, health: response.health, alerts: response.alerts, csv: response.csv, created: response.created }
   }
 
   private send(message: ClientMessage): void {

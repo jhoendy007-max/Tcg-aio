@@ -203,6 +203,8 @@ export interface PublicTask {
   proxyGroupId: string | null
   confirmPurchase: boolean
   testMode: boolean
+  /** Optional label so a drop can start every task in the group. */
+  group: string
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -221,6 +223,7 @@ export interface TaskInput {
   proxyGroupId: string | null
   confirmPurchase: boolean
   testMode?: boolean
+  group?: string
 }
 
 export interface Settings {
@@ -305,7 +308,7 @@ export interface PublicChallenge {
 }
 
 export interface Notice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop"
   storeName: string
   sku: string
   profileName: string
@@ -424,4 +427,127 @@ export interface DiscordWatchInput {
   enabled: boolean
   token: string
   tokenAction: "keep" | "replace" | "clear"
+}
+
+export type SchedulePhase = "waiting" | "warming" | "started" | "stopped"
+
+export interface DropSchedule {
+  id: string
+  name: string
+  enabled: boolean
+  startAt: number
+  stopAt: number | null
+  warmupMin: number
+  taskIds: string[]
+  group: string
+  phase: SchedulePhase
+}
+
+export interface DropScheduleInput {
+  id?: string
+  name: string
+  enabled: boolean
+  /** Epoch milliseconds, or `YYYY-MM-DDTHH:mm` interpreted as Atlantic Time. */
+  startAt: number | string
+  stopAt?: number | string | null
+  warmupMin: number
+  taskIds: string[]
+  group: string
+}
+
+export type CheckoutOutcome = "success" | "failure" | "paused" | "tested"
+
+export interface CheckoutRecord {
+  id: string
+  at: number
+  store: StoreId
+  sku: string
+  product: string
+  price: number | null
+  outcome: CheckoutOutcome
+  profileName: string
+  orderId?: string
+  detail: string
+}
+
+export interface StoreAnalytics {
+  store: StoreId
+  storeName: string
+  success: number
+  failure: number
+  paused: number
+  tested: number
+  spend: number
+}
+
+export interface ProductAnalytics {
+  store: StoreId
+  sku: string
+  product: string
+  success: number
+  failure: number
+  paused: number
+  spend: number
+}
+
+export interface TimelinePoint {
+  day: string
+  success: number
+  failure: number
+  paused: number
+}
+
+export interface AnalyticsReport {
+  attempts: number
+  success: number
+  failure: number
+  paused: number
+  tested: number
+  winRate: number
+  spend: number
+  byStore: StoreAnalytics[]
+  byProduct: ProductAnalytics[]
+  timeline: TimelinePoint[]
+  recent: CheckoutRecord[]
+}
+
+export interface BulkShared {
+  store: StoreId
+  quantity: number
+  profileId: string
+  accountId: string
+  proxyGroupId: string | null
+  confirmPurchase: boolean
+  testMode: boolean
+  group: string
+  text: string
+}
+
+export interface BulkEdit {
+  ids: string[]
+  quantity?: number
+  profileId?: string
+  accountId?: string
+  proxyGroupId?: string | null
+  confirmPurchase?: boolean
+  testMode?: boolean
+  group?: string
+}
+
+export interface UpdateStatus {
+  current: string
+  status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "current" | "error"
+  version: string | null
+  notes: string
+  phoneVersion: string | null
+  error: string
+  hasToken: boolean
+}
+
+export interface ReleaseAsset {
+  version: string
+  tag: string
+  notes: string
+  exe: string | null
+  apk: string | null
 }

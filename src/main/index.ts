@@ -17,6 +17,8 @@ import { warmupDue } from "../engine/session-care"
 import { storeName } from "../shared/stores"
 import { createChallengeController } from "./challenge-window"
 import { createSessionBrowser, type SessionBrowser } from "./session-window"
+import { createUpdateController } from "./auto-update"
+import { planDrops } from "../engine/drops"
 import { registerIpc } from "./ipc"
 
 const gotLock = app.requestSingleInstanceLock()
@@ -28,6 +30,8 @@ let phone: PhoneServer | null = null
 let alerts: AlertService | null = null
 let sessions: SessionBrowser | null = null
 let sessionTimer: ReturnType<typeof setInterval> | null = null
+let dropTimer: ReturnType<typeof setInterval> | null = null
+let dropBusy = false
 
 function createCipher(): Cipher {
   if (safeStorage.isEncryptionAvailable()) return createDpapiCipher(safeStorage)
@@ -145,10 +149,17 @@ if (gotLock) void app.whenReady().then(async () => {
     }
     else void challenge.close()
   })
-  registerIpc(db, runner, registry, () => window, desktop, alerts, challenge, sessions)
+  const updates = createUpdateController(db, (status) => {
+    window?.webContents.send(channels.updatesEvent, status)
+  })
+  registerIpc(db, runner, registry, () => window, desktop, alerts, challenge, sessions, updates)
   sessionTimer = setInterval(() => {
     void warmNext(db, publish)
   }, 60_000)
+  dropTimer = setInterval(() => {
+    void tickDrops(db, publish, desktop)
+  }, 15_000)
+  if (db.hasUpdateToken()) void updates.check()
   createWindow()
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -163,11 +174,63 @@ app.on("second-instance", () => {
 
 app.on("before-quit", () => {
   if (sessionTimer) clearInterval(sessionTimer)
+  if (dropTimer) clearInterval(dropTimer)
   void sessions?.close()
   alerts?.stop()
   runner?.stopAll()
   void phone?.stop()
 })
+
+async function tickDrops(db: Database, publish: (notice: Notice) => Promise<boolean>, desktop: { publishSnapshot(): void }): Promise<void> {
+  if (dropBusy || !runner || !sessions) return
+  dropBusy = true
+  try {
+    const plans = planDrops(db.listSchedules(), db.listTasks(), Date.now())
+    for (const plan of plans) {
+      if (plan.action === "missed") {
+        db.setSchedulePhase(plan.id, "stopped")
+        await publish({ kind: "drop", storeName: "Drop", sku: plan.name, profileName: "Scheduler", detail: "The start time passed before this drop could run." })
+        continue
+      }
+      if (plan.action === "warm") {
+        db.setSchedulePhase(plan.id, "warming")
+        for (const accountId of plan.accountIds) {
+          try {
+            await sessions.warm(accountId)
+          } catch {
+            // A page that fails to load does not erase the saved session.
+          }
+        }
+        await publish({ kind: "drop", storeName: "Session Keeper", sku: plan.name, profileName: "Drop", detail: "Session Keeper opened the store pages before the drop." })
+      }
+      if (plan.action === "start") {
+        db.setSchedulePhase(plan.id, "started")
+        for (const id of plan.taskIds) {
+          try {
+            runner.start(id)
+          } catch {
+            // The task stays idle when it is not allowed to start.
+          }
+        }
+        await publish({
+          kind: "drop",
+          storeName: "Drop",
+          sku: plan.name,
+          profileName: "Scheduler",
+          detail: plan.taskIds.length ? `Started ${plan.taskIds.length} task${plan.taskIds.length === 1 ? "" : "s"}.` : "No tasks matched this drop."
+        })
+      }
+      if (plan.action === "stop") {
+        for (const id of plan.taskIds) runner.stop(id)
+        db.setSchedulePhase(plan.id, "stopped")
+        await publish({ kind: "drop", storeName: "Drop", sku: plan.name, profileName: "Scheduler", detail: "Stopped the scheduled tasks." })
+      }
+    }
+    if (plans.length) desktop.publishSnapshot()
+  } finally {
+    dropBusy = false
+  }
+}
 
 async function warmNext(db: Database, publish: (notice: Notice) => Promise<boolean>): Promise<void> {
   const settings = db.getSettings()

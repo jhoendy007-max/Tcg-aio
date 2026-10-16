@@ -6,9 +6,18 @@ import { PhonePage } from "./pages/Phone"
 import { SettingsPage } from "./pages/Settings"
 import { AlertsPage } from "./pages/Alerts"
 import { TasksPage } from "./pages/Tasks"
+import { KeeperPage } from "./pages/Keeper"
+import { DropsPage } from "./pages/Drops"
+import { AnalyticsPage } from "./pages/Analytics"
+import { APP_VERSION } from "../../shared/version"
+import type { UpdateStatus } from "../../shared/types"
+import { errorText, unwrap } from "./lib"
 
 const PAGES = [
   { id: "tasks", label: "Tasks" },
+  { id: "keeper", label: "Session Keeper" },
+  { id: "drops", label: "Drops" },
+  { id: "stats", label: "Analytics" },
   { id: "alerts", label: "Alerts" },
   { id: "profiles", label: "Profiles" },
   { id: "proxies", label: "Proxies" },
@@ -26,11 +35,18 @@ function pageFromHash(): PageId {
 
 export function App() {
   const [page, setPage] = useState<PageId>(pageFromHash)
+  const [update, setUpdate] = useState<UpdateStatus | null>(null)
+  const [updateError, setUpdateError] = useState("")
 
   useEffect(() => {
     const onHash = () => setPage(pageFromHash())
     window.addEventListener("hashchange", onHash)
     return () => window.removeEventListener("hashchange", onHash)
+  }, [])
+
+  useEffect(() => {
+    void unwrap(window.aio.updates.get()).then(setUpdate).catch(() => undefined)
+    return window.aio.updates.onEvent(setUpdate)
   }, [])
 
   return (
@@ -51,12 +67,28 @@ export function App() {
           ))}
         </nav>
         <footer>
-          <span>v0.2.4</span>
+          <span>v{APP_VERSION}</span>
           <span>Desktop + phone</span>
         </footer>
       </aside>
       <main>
+        {update && (update.status === "available" || update.status === "downloaded" || update.status === "downloading") ? (
+          <div className="card update-banner">
+            <div>
+              <strong>Update {update.version}</strong>
+              <p>{update.notes ? update.notes.slice(0, 280) : "A newer TCGAIO release is on GitHub."}</p>
+              {updateError ? <p>{updateError}</p> : null}
+            </div>
+            <div className="actions">
+              {update.status !== "downloaded" ? <button type="button" className="primary" onClick={() => void unwrap(window.aio.updates.download()).then(setUpdate).catch((err) => setUpdateError(errorText(err)))}>{update.status === "downloading" ? "Downloading…" : "Download"}</button> : null}
+              {update.status === "downloaded" ? <button type="button" className="primary" onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setUpdateError(errorText(err)))}>Restart and install</button> : null}
+            </div>
+          </div>
+        ) : null}
         {page === "tasks" ? <TasksPage /> : null}
+        {page === "keeper" ? <KeeperPage /> : null}
+        {page === "drops" ? <DropsPage /> : null}
+        {page === "stats" ? <AnalyticsPage /> : null}
         {page === "alerts" ? <AlertsPage /> : null}
         {page === "profiles" ? <ProfilesPage /> : null}
         {page === "proxies" ? <ProxiesPage /> : null}

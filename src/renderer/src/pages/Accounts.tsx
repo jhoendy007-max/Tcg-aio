@@ -92,7 +92,7 @@ export function AccountsPage() {
       <header className="page-head">
         <div>
           <h1>Accounts</h1>
-          <p>Sign in inside the app browser, or paste a session. The browser uses the account proxy. Warm-up reopens that same browser and saves the cookies it already has.</p>
+          <p>Session Keeper signs in inside the app browser, or you can paste a session. The browser uses the account proxy and saves the cookies it already has.</p>
         </div>
         <button type="button" className="primary" onClick={() => { setForm(blank()); setError("") }}>New account</button>
       </header>

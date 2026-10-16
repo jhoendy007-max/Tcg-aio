@@ -1,4 +1,5 @@
 import { storeName } from "../shared/stores"
+import { APP_VERSION } from "../shared/version"
 import type { AlertsView, AlertLog, KeywordWatch, Notice, ProxyEndpoint, RestockRule, StoreId } from "../shared/types"
 import type { Database } from "./database"
 import type { HttpClient } from "./http"
@@ -185,7 +186,7 @@ export class AlertService {
         url: `https://discord.com/api/v10/channels/${encodeURIComponent(config.channelId)}/messages?limit=20`,
         headers: {
           authorization: `Bot ${config.token}`,
-          "user-agent": "TCGAIO (tcgaio, 0.2.4)"
+          "user-agent": `TCGAIO (tcgaio, ${APP_VERSION})`
         },
         timeoutMs: 15000
       })

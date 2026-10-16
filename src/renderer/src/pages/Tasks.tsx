@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type StoreHealth, type StoreInfo, type TaskInput } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
+import { TasksBulk } from "./TasksBulk"
 import { errorText, formatTime, STATUS_LABEL, unwrap } from "../lib"
 
 const emptyForm = (): TaskInput => ({
@@ -11,7 +12,8 @@ const emptyForm = (): TaskInput => ({
   accountId: "",
   proxyGroupId: null,
   confirmPurchase: false,
-  testMode: false
+  testMode: false,
+  group: ""
 })
 
 export function TasksPage() {
@@ -209,6 +211,9 @@ export function TasksPage() {
               {storeAccounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
             </Select>
           </Field>
+          <Field label="Group" hint="Optional. A drop can start every task with this label.">
+            <TextInput value={form.group ?? ""} onChange={(event) => setForm({ ...form, group: event.target.value })} placeholder="ETB" />
+          </Field>
           <Field label="Proxy group">
             <Select value={form.proxyGroupId ?? ""} onChange={(event) => setForm({ ...form, proxyGroupId: event.target.value || null })}>
               <option value="">Direct connection</option>
@@ -264,6 +269,7 @@ export function TasksPage() {
           </div>
         ) : null}
       </div>
+      <TasksBulk tasks={tasks} profiles={profiles} accounts={accounts} groups={groups} stores={stores} onChanged={() => reload()} />
       <div className="table-wrap card">
         <table>
           <thead>
@@ -340,6 +346,7 @@ function toInput(task: PublicTask): TaskInput {
     accountId: task.accountId,
     proxyGroupId: task.proxyGroupId,
     confirmPurchase: task.confirmPurchase,
-    testMode: task.testMode
+    testMode: task.testMode,
+    group: task.group ?? ""
   }
 }
