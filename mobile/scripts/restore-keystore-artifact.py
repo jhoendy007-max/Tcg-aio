@@ -24,14 +24,28 @@ headers = {
 }
 
 
+class StripAuthRedirect(urllib.request.HTTPRedirectHandler):
+    """Artifact downloads redirect to a signed blob URL that rejects the GitHub token."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            redirected.headers.pop("Authorization", None)
+        return redirected
+
+
+opener = urllib.request.build_opener(StripAuthRedirect)
+
+
 def get(url: str) -> bytes:
     request = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(request) as response:
+        with opener.open(request) as response:
             return response.read()
     except urllib.error.HTTPError as err:
         if err.code == 404:
             sys.exit(2)
+        print(f"Keystore download failed with HTTP {err.code}.", file=sys.stderr)
         sys.exit(1)
 
 
