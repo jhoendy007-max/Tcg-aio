@@ -4,6 +4,9 @@ import type { SessionCookies } from "../shared/types"
 export function parseSession(text: string): SessionCookies {
   const trimmed = text.trim()
   if (!trimmed) throw new AppError("Paste a browser session before saving.")
+  if (/^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(trimmed)) {
+    return { accessToken: trimmed }
+  }
   if (trimmed.startsWith("{")) {
     let json: unknown
     try {

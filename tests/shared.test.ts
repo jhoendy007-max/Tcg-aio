@@ -85,6 +85,7 @@ describe("sessions and stock", () => {
     const pokemon = parseSession("GlobalE_Consent=1; datadome=abc")
     expect(pokemon.accessToken).toBe("session")
     expect(pokemon.cookie).toContain("datadome=abc")
+    expect(parseSession("eyJhbGciOiJub25lIn0.eyJzdWIiOiJjdXN0b21lci0xIn0.sig").accessToken).toContain("eyJ")
     expect(() => parseSession("visitorId=only")).toThrow(/accessToken/)
   })
 

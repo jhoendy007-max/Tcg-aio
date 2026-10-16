@@ -6,7 +6,7 @@ export const STORE_CATALOG: StoreInfo[] = [
   { id: "bestbuy", name: "Best Buy", skuHint: "SKU or product URL", implemented: true },
   { id: "pokemon-center", name: "Pokémon Center", skuHint: "SKU or product URL", implemented: true },
   { id: "amazon", name: "Amazon", skuHint: "ASIN or product URL", implemented: false },
-  { id: "crunchyroll", name: "Crunchyroll", skuHint: "Product URL", implemented: false }
+  { id: "crunchyroll", name: "Crunchyroll", skuHint: "Product ID or URL", implemented: true }
 ]
 
 export function storeName(id: StoreId): string {
