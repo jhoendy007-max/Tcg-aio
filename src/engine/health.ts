@@ -11,7 +11,8 @@ const PROBES: Record<StoreId, string> = {
   bestbuy: "https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&st=6606082",
   "pokemon-center": "https://www.pokemoncenter.com/",
   amazon: "https://www.amazon.com/",
-  crunchyroll: "https://www.crunchyroll.com/store"
+  crunchyroll: "https://www.crunchyroll.com/store",
+  bandai: "https://p-bandai.com/api/products/N2716225001"
 }
 
 /** Read-only GET for every store. No cart, checkout, or place-order request is sent. */
@@ -25,7 +26,7 @@ export async function checkStoreHealth(http: HttpClient, proxies: ProxyEndpoint[
       const response = await http.request({
         method: "GET",
         url: PROBES[store],
-        headers: { accept: "text/html,application/json", "user-agent": "TCGAIO-health" },
+        headers: probeHeaders(store),
         proxy,
         timeoutMs: 20000
       })
@@ -75,6 +76,16 @@ export function applyBlockRates(rows: StoreHealth[], rates: StoreBlockRate[]): S
       detail: `${row.detail} · block rate ${pct}`
     }
   })
+}
+
+function probeHeaders(store: StoreId): Record<string, string> {
+  const headers: Record<string, string> = { accept: "text/html,application/json", "user-agent": "TCGAIO-health" }
+  if (store === "bandai") {
+    headers["accept-language"] = "en"
+    headers["x-g1-area-code"] = "us"
+    headers["x-requested-with"] = "XMLHttpRequest"
+  }
+  return headers
 }
 
 function classify(status: number, body: string): StoreHealth["verdict"] {

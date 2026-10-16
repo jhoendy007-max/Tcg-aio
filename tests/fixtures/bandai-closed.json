@@ -1,0 +1,17 @@
+{
+  "productCode": "N2716225001",
+  "flags": ["PRE_ORDER_CLOSED"],
+  "purchaseAvailable": false,
+  "areaItemToItemCode": {
+    "NAI0661923US": { "itemCode": "NIT2716225001", "availableQty": 0 }
+  },
+  "discontinued": false,
+  "infoSection": {
+    "productType": "PreOrder",
+    "productName": { "en": "ONE PIECE CARD GAME Special Goods Set -Former Four Emperors-" },
+    "price": { "fixedPrice": true, "fixedListPrice": { "amount": 42, "currency": "USD" } },
+    "orderInfo": { "preOrderStatus": "End", "orderEndDate": "2023-11-05T23:00:00Z" },
+    "generalProdInfo": { "availabilityStatus": "End", "outOfStock": true },
+    "quantityInfo": { "minQuantity": 1, "maxQuantity": 10 }
+  }
+}

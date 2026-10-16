@@ -3,7 +3,7 @@ import { APP_VERSION } from "../shared/version"
 import type { AlertsView, AlertLog, KeywordWatch, Notice, ProxyEndpoint, RestockRule, StoreId } from "../shared/types"
 import type { Database } from "./database"
 import type { HttpClient } from "./http"
-import { isListingBlock, listingSearchUrl, parseListings, type Listing } from "./listings"
+import { isListingBlock, listingHeaders, listingSearchUrl, parseListings, type Listing } from "./listings"
 import { searchTerms } from "./keywords"
 import { keywordsAllow } from "./keywords"
 import { parseDiscordContent, parseWebhook, type RestockSignal } from "./restock-parse"
@@ -275,7 +275,7 @@ export class AlertService {
       response = await this.http.request({
         method: "GET",
         url: listingSearchUrl(watch.store, terms, settings),
-        headers: { accept: "text/html,application/json", "user-agent": "TCGAIO-keyword" },
+        headers: { accept: "text/html,application/json", "user-agent": "TCGAIO-keyword", ...listingHeaders(watch.store) },
         proxy,
         timeoutMs: 20000
       })

@@ -17,7 +17,8 @@ const final: Record<StoreId, HttpRequest> = {
   bestbuy: { method: "POST", url: "https://www.bestbuy.com/checkout/v3/order-1", body: "{\"metadata\":{}}" },
   "pokemon-center": { method: "POST", url: "https://www.pokemoncenter.com/tpci-ecommweb-api/order?format=nodatalinks", body: "{}" },
   amazon: { method: "POST", url: "https://www.amazon.com/checkout/p/spc/place-order", body: "place=1" },
-  crunchyroll: { method: "POST", url: "https://www.crunchyroll.com/mobify/proxy/api/checkout/shopper-orders/v1/organizations/org/orders?siteId=CrunchyrollUS", body: "{\"basketId\":\"b\"}" }
+  crunchyroll: { method: "POST", url: "https://www.crunchyroll.com/mobify/proxy/api/checkout/shopper-orders/v1/organizations/org/orders?siteId=CrunchyrollUS", body: "{\"basketId\":\"b\"}" },
+  bandai: { method: "POST", url: "https://p-bandai.com/api/checkout/42/preComplete", body: "{\"globaleOrder\":{}}" }
 }
 
 const allowed: Record<StoreId, HttpRequest> = {
@@ -26,7 +27,8 @@ const allowed: Record<StoreId, HttpRequest> = {
   bestbuy: { method: "PATCH", url: "https://www.bestbuy.com/checkout/v3/order-1", body: "{\"shipping\":{}}" },
   "pokemon-center": { method: "POST", url: "https://flex.cybersource.com/flex/v2/tokens", body: "jwe" },
   amazon: { method: "GET", url: "https://www.amazon.com/checkout/entry/cart?proceedToCheckout=1" },
-  crunchyroll: { method: "POST", url: "https://api.stripe.com/v1/payment_methods", body: "card[number]=4242" }
+  crunchyroll: { method: "POST", url: "https://api.stripe.com/v1/payment_methods", body: "card[number]=4242" },
+  bandai: { method: "POST", url: "https://p-bandai.com/api/cart/cart-1/checkout", body: "{\"merchantCartToken\":\"t\",\"items\":[]}" }
 }
 
 describe("place-order gate", () => {

@@ -13,6 +13,7 @@ import type { HttpClient } from "../src/engine/http"
 import type { Notice } from "../src/shared/types"
 import type { StoreModule } from "../src/stores/module"
 import { AMAZON_PAUSE } from "../src/stores/amazon"
+import { BANDAI_PAUSE } from "../src/stores/bandai"
 import { BESTBUY_PAUSE } from "../src/stores/bestbuy"
 import { CRUNCHYROLL_PAUSE } from "../src/stores/crunchyroll"
 import { POKEMON_CENTER_PAUSE } from "../src/stores/pokemon-center"
@@ -27,7 +28,9 @@ const SESSION_PAUSES = [
   "Paste a signed-in Best Buy browser session (the cookie header from www.bestbuy.com). Password sign-in is blocked by Akamai, and TCGAIO does not solve challenges.",
   "The Best Buy session is not signed in. Paste the cookie header from a signed-in browser, then resume.",
   "Paste a signed-in Pokémon Center browser session (the cookie header from www.pokemoncenter.com). Password sign-in is blocked by Incapsula, and TCGAIO does not solve challenges.",
-  "Paste a signed-in Crunchyroll Store session (the www.crunchyroll.com cookie header or the shopper access token). Password sign-in is blocked by Cloudflare, and TCGAIO does not solve challenges."
+  "Paste a signed-in Crunchyroll Store session (the www.crunchyroll.com cookie header or the shopper access token). Password sign-in is blocked by Cloudflare, and TCGAIO does not solve challenges.",
+  "Paste a signed-in Premium Bandai session (the p-bandai.com cookie header) or use Sign in on the Session Keeper page. TCGAIO does not solve challenges.",
+  "Premium Bandai started the checkout. Global-e collects the card on the order page. Finish payment in the account browser. The card number was not sent, and the order confirmation was not submitted."
 ]
 
 const address = {
@@ -89,7 +92,8 @@ describe("challenge classification", () => {
       BESTBUY_PAUSE,
       POKEMON_CENTER_PAUSE,
       "Pokémon Center's waiting room asked for a captcha. Finish it in your own browser, then resume. TCGAIO does not solve challenges.",
-      CRUNCHYROLL_PAUSE
+      CRUNCHYROLL_PAUSE,
+      BANDAI_PAUSE
     ]) {
       expect(classifyChallenge(reason), reason).toBe(true)
     }
@@ -105,6 +109,7 @@ describe("challenge classification", () => {
     expect(challengePageUrl("pokemon-center", "sku-1")).toContain("https://www.pokemoncenter.com/")
     expect(challengePageUrl("crunchyroll", "12345678")).toContain("https://www.crunchyroll.com/")
     expect(challengePageUrl("bestbuy", "6530584")).toContain("https://www.bestbuy.com/")
+    expect(challengePageUrl("bandai", "N2884152001")).toBe("https://p-bandai.com/us/item/N2884152001")
   })
 })
 

@@ -8,6 +8,7 @@ import { createBestBuyModule } from "./bestbuy"
 import { createPokemonCenterModule } from "./pokemon-center"
 import { createAmazonModule } from "./amazon"
 import { createCrunchyrollModule } from "./crunchyroll"
+import { createBandaiModule } from "./bandai"
 
 export function createRegistry(): Map<StoreId, StoreModule> {
   const modules = new Map<StoreId, StoreModule>()
@@ -18,6 +19,7 @@ export function createRegistry(): Map<StoreId, StoreModule> {
   modules.set("pokemon-center", createPokemonCenterModule())
   modules.set("amazon", createAmazonModule())
   modules.set("crunchyroll", createCrunchyrollModule())
+  modules.set("bandai", createBandaiModule())
   return modules
 }
 

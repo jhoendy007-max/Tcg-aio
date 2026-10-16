@@ -1,3 +1,4 @@
+import { parseSku as parseBandaiSku } from "../stores/bandai/parse"
 import { parseAsin } from "../stores/amazon/parse"
 import { parseSku as parseBestBuySku } from "../stores/bestbuy/parse"
 import { parseSku as parseCrunchyrollSku } from "../stores/crunchyroll/parse"
@@ -32,7 +33,11 @@ const STORE_ALIASES: Record<string, StoreId> = {
   "pokemon centre": "pokemon-center",
   amazon: "amazon",
   crunchyroll: "crunchyroll",
-  "crunchyroll store": "crunchyroll"
+  "crunchyroll store": "crunchyroll",
+  bandai: "bandai",
+  "premium bandai": "bandai",
+  "p-bandai": "bandai",
+  premiumbandai: "bandai"
 }
 
 export function storeFromName(value: string): StoreId | null {
@@ -70,7 +75,7 @@ export function parseDiscordContent(content: string): RestockSignal[] {
     if (signal) found.push(signal)
   }
   for (const line of text.split(/\n+/)) {
-    const labeled = line.match(/^(target|walmart|best\s*buy|pok[eé]mon\s*cent(?:er|re)|amazon|crunchyroll(?:\s+store)?)\b[:|\s-]+(\S+)/i)
+    const labeled = line.match(/^(target|walmart|best\s*buy|pok[eé]mon\s*cent(?:er|re)|amazon|crunchyroll(?:\s+store)?|premium\s*bandai|p-bandai|bandai)\b[:|\s-]+(\S+)/i)
     if (!labeled) continue
     const store = storeFromName(labeled[1])
     if (!store) continue
@@ -99,7 +104,7 @@ function oneSignal(value: unknown): RestockSignal | { error: string } {
   const named = storeFromName(stringField(record, ["store", "retailer", "shop"]))
   const fromUrl = url ? signalFromUrl(url) : null
   const store = named ?? fromUrl?.store ?? null
-  if (!store) return { error: "store is required. Use target, walmart, bestbuy, pokemon-center, amazon, or crunchyroll." }
+  if (!store) return { error: "store is required. Use target, walmart, bestbuy, pokemon-center, amazon, crunchyroll, or bandai." }
   const sku = skuForStore(store, stringField(record, ["sku", "tcin", "itemId", "usItemId", "asin", "productId", "pid"])) ?? fromUrl?.sku ?? ""
   if (!sku) return { error: "sku is required, or put a product URL in url." }
   const inStock = readStockFlag(record.inStock ?? record.in_stock ?? record.stock)
@@ -137,6 +142,7 @@ function storeFromHost(host: string): StoreId | null {
   if (host.endsWith("pokemoncenter.com")) return "pokemon-center"
   if (host.endsWith("amazon.com")) return "amazon"
   if (host.endsWith("crunchyroll.com")) return "crunchyroll"
+  if (host.endsWith("p-bandai.com") || host.endsWith("premiumbandai.com")) return "bandai"
   return null
 }
 
@@ -147,6 +153,7 @@ function skuForStore(store: StoreId, value: string): string | null {
   if (store === "bestbuy") return parseBestBuySku(value)
   if (store === "pokemon-center") return parsePokemonSku(value)
   if (store === "amazon") return parseAsin(value)
+  if (store === "bandai") return parseBandaiSku(value)
   return parseCrunchyrollSku(value)
 }
 

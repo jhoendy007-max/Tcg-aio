@@ -46,7 +46,17 @@ export function listingSearchUrl(store: StoreId, query: string, settings: Pick<S
     return `https://www.pokemoncenter.com/tpci-ecommweb-api/search?${params.toString()}`
   }
   if (store === "amazon") return `https://www.amazon.com/s?k=${q}`
+  if (store === "bandai") {
+    const params = new URLSearchParams({ keyword: query, limit: "24", offset: "0", _f_productStatuses: "On,Waiting" })
+    return `https://p-bandai.com/api/search?${params.toString()}`
+  }
   return `https://www.crunchyroll.com/mobify/proxy/api/search/shopper-search/v1/organizations/${CRUNCHYROLL_ORG}/product-search?siteId=CrunchyrollUS&q=${q}`
+}
+
+/** Headers the storefront's own client sends. Other stores keep the caller's headers. */
+export function listingHeaders(store: StoreId): Record<string, string> {
+  if (store !== "bandai") return {}
+  return { "accept-language": "en", "x-g1-area-code": "us", "x-requested-with": "XMLHttpRequest" }
 }
 
 export function isListingBlock(status: number, body: string): boolean {
@@ -80,6 +90,7 @@ function take(store: StoreId, record: Record<string, unknown>): Listing | null {
   if (store === "bestbuy") return takeBestBuy(record)
   if (store === "pokemon-center") return takePokemon(record)
   if (store === "amazon") return takeAmazon(record)
+  if (store === "bandai") return takeBandai(record)
   return takeCrunchyroll(record)
 }
 
@@ -146,6 +157,19 @@ function takeAmazon(record: Record<string, unknown>): Listing | null {
   const known = typeof explicit === "boolean" || Boolean(seller)
   const retailer = typeof explicit === "boolean" ? explicit : /amazon(\.com)?$/i.test(seller) || /^amazon(\.com)?$/i.test(seller)
   return { store: "amazon", sku, title, price: priceOf(record), url: `https://www.amazon.com/dp/${sku}`, retailer, sellerKnown: known }
+}
+
+function takeBandai(record: Record<string, unknown>): Listing | null {
+  const sku = text(record.productCode)
+  if (!/^[A-Za-z][A-Za-z0-9]{5,23}$/.test(sku)) return null
+  const sale = text(record.saleStatus)
+  if (sale !== "On" && sale !== "Waiting") return null
+  const name = record.productName
+  const title = typeof name === "string" ? name.trim() : text(asRecord(name)?.en) || text(asRecord(name)?.ja)
+  if (!title) return null
+  const amount = asRecord(record.fixedListPrice)?.amount
+  const price = typeof amount === "number" && Number.isFinite(amount) ? Math.round(amount * 100) / 100 : priceOf(record)
+  return { store: "bandai", sku, title, price, url: `https://p-bandai.com/us/item/${sku}`, retailer: true, sellerKnown: true }
 }
 
 function takeCrunchyroll(record: Record<string, unknown>): Listing | null {
@@ -249,7 +273,7 @@ function extractJson(body: string): unknown {
 
 function looksLikeCatalog(body: string): boolean {
   const sample = body.slice(0, 4000).toLowerCase()
-  return ["tcin", "usitemid", "skuid", "\"pid\"", "data-asin", "productid", "productname"].some((marker) => sample.includes(marker))
+  return ["tcin", "usitemid", "skuid", "\"pid\"", "data-asin", "productid", "productname", "productcode"].some((marker) => sample.includes(marker))
 }
 
 function walk(node: unknown, visit: (record: Record<string, unknown>) => void): void {

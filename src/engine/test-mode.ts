@@ -48,6 +48,14 @@ export function isFinalSubmit(store: StoreId, request: Pick<HttpRequest, "method
       return false
     }
   }
+  if (store === "bandai") {
+    if (method !== "POST") return false
+    try {
+      return /\/api\/checkout\/[^/]+\/preComplete$/.test(new URL(url).pathname)
+    } catch {
+      return false
+    }
+  }
   return false
 }
 

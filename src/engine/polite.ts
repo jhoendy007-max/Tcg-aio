@@ -9,7 +9,8 @@ export const STORE_GAP_MS: Record<StoreId, number> = {
   bestbuy: 3000,
   "pokemon-center": 4000,
   amazon: 4000,
-  crunchyroll: 3000
+  crunchyroll: 3000,
+  bandai: 4000
 }
 
 export const BLOCK_STATUSES = new Set([403, 412, 429, 435])

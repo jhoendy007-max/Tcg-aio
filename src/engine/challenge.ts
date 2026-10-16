@@ -4,6 +4,7 @@ import { parseTcin } from "../shared/tcin"
 import { parseAsin, productUrl as amazonProductUrl } from "../stores/amazon/parse"
 import { monitorUrl, parseSku as parseBestBuySku } from "../stores/bestbuy/parse"
 import { parseSku as parseCrunchyrollSku, productPageUrl } from "../stores/crunchyroll/parse"
+import { parseSku as parseBandaiSku, productPageUrl as bandaiProductUrl } from "../stores/bandai/parse"
 import { productUrl as pokemonProductUrl } from "../stores/pokemon-center/parse"
 import { parseItemId } from "../stores/walmart/parse"
 
@@ -15,7 +16,8 @@ const HOSTS: Record<StoreId, string> = {
   bestbuy: "www.bestbuy.com",
   "pokemon-center": "www.pokemoncenter.com",
   amazon: "www.amazon.com",
-  crunchyroll: "www.crunchyroll.com"
+  crunchyroll: "www.crunchyroll.com",
+  bandai: "p-bandai.com"
 }
 
 /**
@@ -53,8 +55,12 @@ export function challengePageUrl(store: StoreId, sku: string): string {
     const asin = parseAsin(sku)
     return asin ? amazonProductUrl(asin) : fallback
   }
-  const crunchy = parseCrunchyrollSku(sku)
-  return crunchy ? productPageUrl(crunchy) : fallback
+  if (store === "crunchyroll") {
+    const crunchy = parseCrunchyrollSku(sku)
+    return crunchy ? productPageUrl(crunchy) : fallback
+  }
+  const code = parseBandaiSku(sku)
+  return code ? bandaiProductUrl(code) : "https://p-bandai.com/us"
 }
 
 export function splitCookieHeader(header: string): { name: string; value: string }[] {
