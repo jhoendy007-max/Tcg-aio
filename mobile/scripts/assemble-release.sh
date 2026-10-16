@@ -52,6 +52,8 @@ if [[ -n "$APKSIGNER" ]]; then
   fi
 fi
 
+# package.json lives in mobile/, and gradle left us in mobile/android.
+cd "$MOBILE"
 VER="$(node -p "require('./package.json').version")"
 mkdir -p "$REPO/release"
 cp "$APK" "$REPO/release/TCGAIO-Phone-${VER}.apk"
