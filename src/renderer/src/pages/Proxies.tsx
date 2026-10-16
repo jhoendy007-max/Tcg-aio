@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react"
 import { formatProxy } from "../../../shared/proxy"
-import type { ProxyGroup, ProxyTestResult } from "../../../shared/types"
-import { Banner, Field, TextInput } from "../components/ui"
+import type { ProxyGroup, ProxyNetwork, ProxyScore, ProxyTestResult } from "../../../shared/types"
+import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
 export function ProxiesPage() {
   const [groups, setGroups] = useState<ProxyGroup[]>([])
   const [name, setName] = useState("")
+  const [network, setNetwork] = useState<ProxyNetwork>("residential")
   const [text, setText] = useState("")
+  const [scores, setScores] = useState<ProxyScore[]>([])
   const [editing, setEditing] = useState<string | undefined>(undefined)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -15,7 +17,12 @@ export function ProxiesPage() {
   const [testing, setTesting] = useState<string | null>(null)
 
   async function reload() {
-    setGroups(await unwrap(window.aio.proxies.list()))
+    const [nextGroups, nextScores] = await Promise.all([
+      unwrap(window.aio.proxies.list()),
+      unwrap(window.aio.proxies.health())
+    ])
+    setGroups(nextGroups)
+    setScores(nextScores)
   }
 
   useEffect(() => {
@@ -27,9 +34,10 @@ export function ProxiesPage() {
     setBusy(true)
     setError("")
     try {
-      await unwrap(window.aio.proxies.save({ id: editing, name, text }))
+      await unwrap(window.aio.proxies.save({ id: editing, name, text, network }))
       setName("")
       setText("")
+      setNetwork("residential")
       setEditing(undefined)
       await reload()
     } catch (err) {
@@ -68,7 +76,7 @@ export function ProxiesPage() {
       <header className="page-head">
         <div>
           <h1>Proxies</h1>
-          <p>Import a list, then test each proxy. A task starts on one proxy from its group. Walmart rotates to another proxy in the group when PerimeterX returns HTTP 412.</p>
+          <p>Each account keeps one proxy until that proxy is benched after three 403, 412, 429, or 435 responses. Label the group residential or datacenter. The password stays on this PC.</p>
         </div>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
@@ -76,12 +84,18 @@ export function ProxiesPage() {
         <Field label="Group name">
           <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="Residential" required />
         </Field>
+        <Field label="Network">
+          <Select value={network} onChange={(event) => setNetwork(event.target.value as ProxyNetwork)}>
+            <option value="residential">Residential</option>
+            <option value="datacenter">Datacenter</option>
+          </Select>
+        </Field>
         <Field label="Proxy list" hint="host:port, host:port:user:pass, or user:pass@host:port. Lines starting with # are ignored.">
           <textarea value={text} onChange={(event) => setText(event.target.value)} rows={8} placeholder={"203.0.113.10:8000\n203.0.113.11:8000:user:pass"} required />
         </Field>
         <div className="actions">
           <button className="primary" type="submit" disabled={busy}>{editing ? "Update group" : "Save group"}</button>
-          {editing ? <button type="button" onClick={() => { setEditing(undefined); setName(""); setText("") }}>Cancel</button> : null}
+          {editing ? <button type="button" onClick={() => { setEditing(undefined); setName(""); setText(""); setNetwork("residential") }}>Cancel</button> : null}
         </div>
       </form>
       <div className="stack">
@@ -90,10 +104,10 @@ export function ProxiesPage() {
             <div className="proxy-head">
               <div>
                 <h2>{group.name}</h2>
-                <span>{group.proxies.length} proxies</span>
+                <span>{group.proxies.length} proxies · {group.network}</span>
               </div>
               <div className="actions">
-                <button type="button" onClick={() => { setEditing(group.id); setName(group.name); setText(group.proxies.map(formatProxy).join("\n")) }}>Edit</button>
+                <button type="button" onClick={() => { setEditing(group.id); setName(group.name); setNetwork(group.network); setText(group.proxies.map(formatProxy).join("\n")) }}>Edit</button>
                 <button type="button" onClick={() => void test(group.id)} disabled={testing === group.id}>{testing === group.id ? "Testing…" : "Test"}</button>
                 <button type="button" className="danger" onClick={() => void remove(group.id)}>Delete</button>
               </div>
@@ -108,6 +122,18 @@ export function ProxiesPage() {
                 ))}
               </ul>
             ) : null}
+            <ul className="proxy-results">
+              {group.proxies.map((proxy) => {
+                const score = scores.find((item) => item.proxyId === proxy.id)
+                const benched = score && score.benchedUntil > Date.now()
+                return (
+                  <li key={proxy.id} className={benched ? "bad" : "ok"}>
+                    <span>{proxy.host}:{proxy.port}</span>
+                    <span>{benched ? `Benched until ${new Date(score.benchedUntil).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}` : score ? `${score.ok} ok · ${score.blocks} blocks` : "No samples yet"}</span>
+                  </li>
+                )
+              })}
+            </ul>
           </article>
         ))}
       </div>

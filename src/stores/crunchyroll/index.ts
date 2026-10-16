@@ -1,3 +1,4 @@
+import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -64,7 +65,7 @@ interface StepOk<T> {
   value: T
 }
 interface StepStop {
-  kind: "paused" | "failed" | "oos" | "unauthorized" | "retry"
+  kind: "paused" | "failed" | "oos" | "unauthorized" | "retry" | "tested"
   reason: string
 }
 type Step<T> = StepOk<T> | StepStop
@@ -91,6 +92,7 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
   const jar = new CookieJar()
   jar.load(ctx.account.session)
   ctx.log("info", "Using the saved Crunchyroll session. store.crunchyroll.com now redirects to www.crunchyroll.com.")
+  note(ctx, "session", "pass", "Saved Crunchyroll session loaded.")
   ctx.phase("monitoring")
   ctx.log("info", `Watching product ${sku} for Crunchyroll store availability.`)
   let waits = 0
@@ -116,6 +118,7 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
 
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
+    note(ctx, "monitor", "pass", reading.reason)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, sku)
     if (cart.kind === "oos") {
@@ -124,13 +127,23 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
       await ctx.sleep(ctx.settings.monitorDelayMs)
       continue
     }
-    if (cart.kind !== "ok") return asResult(cart)
+    if (cart.kind !== "ok") {
+      note(ctx, "cart", "fail", cart.reason)
+      return asResult(cart)
+    }
+    note(ctx, "cart", "pass", "Added the item to the cart.")
 
     ctx.phase("checking_out")
     const shipped = await shipToHome(ctx, jar, cart.value)
-    if (shipped.kind !== "ok") return asResult(shipped)
+    if (shipped.kind !== "ok") {
+      note(ctx, "address", "fail", shipped.reason)
+      return asResult(shipped)
+    }
+    note(ctx, "address", "pass", "Shipping address accepted.")
+    note(ctx, "shipping", "pass", "Shipping method selected.")
     ctx.log("info", `Submitting payment for the card ending ${ctx.profile.last4}.`)
     const paid = await pay(ctx, jar, sku, cart.value, shipped.value)
+    if (paid.kind === "tested") return finishTest(ctx)
     if (paid.kind === "oos") {
       ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")
       ctx.phase("monitoring")
@@ -328,6 +341,11 @@ async function pay(ctx: StoreRunContext, jar: CookieJar, sku: string, basketId: 
   if (declined(saved.value.body)) return { kind: "failed", reason: "Crunchyroll declined the card." }
   if (saved.value.status < 200 || saved.value.status >= 300) {
     return { kind: "failed", reason: `Payment was rejected (${saved.value.status}): ${snippet(saved.value.body)}` }
+  }
+  note(ctx, "payment", "pass", "Stripe token saved on the basket. The card was not charged.")
+  if (ctx.testMode) {
+    if (ctx.clearCartAfterTest) note(ctx, "cart", "skip", "Crunchyroll cart clear is left for you. Test mode does not call a cart-delete API.")
+    return { kind: "tested", reason: "Test mode" }
   }
   const order = await store(ctx, {
     method: "POST",

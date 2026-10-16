@@ -1,15 +1,49 @@
 import { ipcMain, type BrowserWindow } from "electron"
+import QRCode from "qrcode"
+import { relayRestockUrl, type AlertService } from "../engine/alerts"
+import type { ChallengeController } from "./challenge-window"
 import { postDiscord } from "../engine/discord"
+import { checkStoreHealth } from "../engine/health"
+import type { SessionBrowser } from "./session-window"
+import type { UpdateController } from "./auto-update"
+import { parseBulkTasks } from "../engine/bulk"
+import { defaultHttp } from "../engine/http"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
+import type { PhoneServer } from "../phone/server"
+import { encodePairingPayload } from "../phone/protocol"
 import { channels } from "../shared/ipc"
 import type { Result, Settings, TaskEvent } from "../shared/types"
 import { listStores } from "../stores/registry"
 import type { StoreId } from "../shared/types"
 import type { StoreModule } from "../stores/module"
 
-export function registerIpc(db: Database, runner: TaskService, registry: Map<StoreId, StoreModule>, getWindow: () => BrowserWindow | null): void {
+export function registerIpc(
+  db: Database,
+  runner: TaskService,
+  registry: Map<StoreId, StoreModule>,
+  getWindow: () => BrowserWindow | null,
+  phone: PhoneServer,
+  alerts: AlertService,
+  challenge: ChallengeController,
+  sessions: SessionBrowser,
+  updates: UpdateController
+): void {
+  const publishAlerts = () => {
+    const status = phone.status()
+    alerts.setUrls({
+      localUrl: `http://${status.host}:${status.port}/v1/restock`,
+      relayUrl: relayRestockUrl(status.relay, db.pcId())
+    })
+    const view = alerts.view({
+      localUrl: `http://${status.host}:${status.port}/v1/restock`,
+      relayUrl: relayRestockUrl(status.relay, db.pcId())
+    })
+    getWindow()?.webContents.send(channels.alertsEvent, view)
+    phone.publishAlerts(alerts.phoneAlerts())
+    return view
+  }
   handle(channels.tasksList, () => db.listTasks())
   handle(channels.tasksSave, (input) => db.saveTask(input))
   handle(channels.tasksDelete, (id: string) => {
@@ -21,6 +55,14 @@ export function registerIpc(db: Database, runner: TaskService, registry: Map<Sto
   handle(channels.tasksStart, (id: string) => {
     runner.start(id)
     return { started: true as const }
+  })
+  handle(channels.tasksTest, (id: string) => {
+    runner.start(id, { test: true })
+    return { started: true as const }
+  })
+  handle(channels.healthCheck, async (proxyGroupId: string | null) => {
+    const proxies = proxyGroupId ? db.getProxyGroup(proxyGroupId).proxies : []
+    return db.recordHealth(await checkStoreHealth(defaultHttp, proxies), proxies)
   })
   handle(channels.tasksStop, (id: string) => {
     runner.stop(id)
@@ -39,12 +81,22 @@ export function registerIpc(db: Database, runner: TaskService, registry: Map<Sto
     return { id }
   })
   handle(channels.proxiesTest, (id: string) => testProxies(db.getProxyGroup(id).proxies))
+  handle(channels.proxiesHealth, () => db.proxyScores())
   handle(channels.accountsList, () => db.listAccounts())
   handle(channels.accountsSave, (input) => db.saveAccount(input))
   handle(channels.accountsDelete, (id: string) => {
     db.deleteAccount(id)
     return { id }
   })
+  handle(channels.sessionOpen, async (id: string) => {
+    await sessions.open(id)
+    return { opened: true as const }
+  })
+  handle(channels.sessionCapture, async (id: string) => {
+    await sessions.capture(id)
+    return { saved: true as const }
+  })
+  handle(channels.sessionWarm, (id: string) => sessions.warm(id))
   handle(channels.settingsGet, () => ({ settings: db.getSettings(), security: db.security() }))
   handle(channels.settingsSave, (input: Settings) => {
     db.saveSettings(input)
@@ -63,6 +115,107 @@ export function registerIpc(db: Database, runner: TaskService, registry: Map<Sto
     return { delivered: true as const }
   })
   handle(channels.storesList, () => listStores(registry))
+  handle(channels.phoneStatus, () => phone.status())
+  handle(channels.phoneInvite, async () => {
+    const payload = phone.createInvite()
+    const text = encodePairingPayload(payload)
+    const qrDataUrl = await QRCode.toDataURL(text, { margin: 1, width: 320, errorCorrectionLevel: "M", color: { dark: "#14161b", light: "#ffffff" } })
+    return { ...phone.status(), text, qrDataUrl }
+  })
+  handle(channels.phoneRevoke, (id: string) => {
+    phone.revoke(id)
+    return phone.status()
+  })
+  handle(channels.phoneRelay, (url: string) => {
+    db.saveSettings({ ...db.getSettings(), phoneRelayUrl: url })
+    phone.reconnectRelay()
+    publishAlerts()
+    return phone.status()
+  })
+  handle(channels.alertsGet, () => publishAlerts())
+  handle(channels.alertsRotateToken, () => {
+    db.rotateRestockToken()
+    return publishAlerts()
+  })
+  handle(channels.alertsSaveDiscord, (input) => {
+    db.saveDiscordWatch(input)
+    alerts.refresh()
+    return publishAlerts()
+  })
+  handle(channels.alertsSaveRule, (input) => {
+    const rule = db.saveRestockRule(input)
+    alerts.refresh()
+    publishAlerts()
+    return rule
+  })
+  handle(channels.alertsDeleteRule, (id: string) => {
+    db.deleteRestockRule(id)
+    alerts.refresh()
+    publishAlerts()
+    return { id }
+  })
+  handle(channels.alertsSaveWatch, (input) => {
+    const watch = db.saveWatch(input)
+    alerts.refresh()
+    publishAlerts()
+    return watch
+  })
+  handle(channels.alertsDeleteWatch, (id: string) => {
+    db.deleteWatch(id)
+    alerts.refresh()
+    publishAlerts()
+    return { id }
+  })
+  handle(channels.alertsResumeWatch, (id: string) => {
+    const watch = db.resumeWatch(id)
+    alerts.refresh()
+    publishAlerts()
+    return watch
+  })
+  handle(channels.challengeGet, () => challenge.current())
+  handle(channels.challengeOpen, async () => {
+    await challenge.open()
+    return { opened: true as const }
+  })
+  handle(channels.challengeDone, async () => {
+    await challenge.complete()
+    return { saved: true as const }
+  })
+  handle(channels.challengeSubmit, (cookie: string) => {
+    challenge.submit(cookie)
+    return { saved: true as const }
+  })
+  handle(channels.challengeDismiss, () => {
+    challenge.dismiss()
+    return { dismissed: true as const }
+  })
+  handle(channels.schedulesList, () => db.listSchedules())
+  handle(channels.schedulesSave, (input) => db.saveSchedule(input))
+  handle(channels.schedulesDelete, (id: string) => {
+    db.deleteSchedule(id)
+    return { id }
+  })
+  handle(channels.analyticsGet, () => db.analytics())
+  handle(channels.analyticsCsv, () => ({ csv: db.checkoutCsv() }))
+  handle(channels.tasksBulk, (input) => {
+    const parsed = parseBulkTasks(input)
+    const tasks = parsed.tasks.length ? db.createTasks(parsed.tasks) : []
+    return { tasks, errors: parsed.errors }
+  })
+  handle(channels.tasksBulkEdit, (input) => db.bulkEdit(input))
+  handle(channels.tasksDuplicate, (ids: string[]) => db.duplicateTasks(ids))
+  handle(channels.tasksDeleteMany, (ids: string[]) => db.deleteTasks(ids))
+  handle(channels.updatesGet, () => updates.current())
+  handle(channels.updatesCheck, () => updates.check())
+  handle(channels.updatesDownload, () => updates.download())
+  handle(channels.updatesInstall, () => {
+    updates.install()
+    return { installing: true as const }
+  })
+  handle(channels.updatesToken, (input: { action: "keep" | "replace" | "clear"; token: string }) => {
+    db.setUpdateToken(input.action, input.token ?? "")
+    return updates.current()
+  })
 }
 
 function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {

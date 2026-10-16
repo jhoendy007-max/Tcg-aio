@@ -1,0 +1,17 @@
+{
+  "productCode": "N2884152001",
+  "flags": ["PRE_ORDER"],
+  "purchaseAvailable": false,
+  "areaItemToItemCode": {
+    "NAI0850326US": { "itemCode": "NIT2884152001", "availableQty": 12 }
+  },
+  "discontinued": false,
+  "infoSection": {
+    "productType": "PreOrder",
+    "productName": { "en": "DIGIMON CARD GAME PREMIUM BATTLE SET Ver. Royal Knights [PB-27]" },
+    "price": { "fixedPrice": true, "fixedListPrice": { "amount": 66, "currency": "USD" } },
+    "orderInfo": { "preOrderStatus": "InProgress", "orderEndDate": "2026-11-16T14:59:59.999Z" },
+    "generalProdInfo": { "availabilityStatus": "On", "outOfStock": false },
+    "quantityInfo": { "minQuantity": 1, "maxQuantity": 12 }
+  }
+}

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import { finishTest, note } from "../../engine/test-mode"
 import { proxyLabel } from "../../shared/proxy"
 import { redact } from "../../shared/redact"
 import type { ProxyEndpoint, SessionCookies } from "../../shared/types"
@@ -99,6 +100,7 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
   const jar = new CookieJar()
   jar.load(ctx.account.session)
   ctx.log("info", "Using the saved Walmart session.")
+  note(ctx, "session", "pass", "Saved Walmart session loaded.")
   const probe = await probeCart(ctx, jar)
   if (probe.kind === "paused") return { outcome: "paused", reason: probe.reason }
   if (probe.kind === "unauthorized") return pause(EXPIRED_PAUSE)
@@ -130,6 +132,7 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
 
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
+    note(ctx, "monitor", "pass", reading.reason)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, itemId, reading)
     if (cart.kind === "oos") {
@@ -139,16 +142,29 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
       continue
     }
     if (cart.kind === "unauthorized") return pause(EXPIRED_PAUSE)
-    if (cart.kind !== "ok") return asResult(cart)
+    if (cart.kind !== "ok") {
+      note(ctx, "cart", "fail", cart.reason)
+      return asResult(cart)
+    }
+    note(ctx, "cart", "pass", "Added the Walmart.com offer to the cart.")
 
     ctx.phase("checking_out")
     const shipped = await setShipToHome(ctx, jar, cart.value)
     if (shipped.kind === "unauthorized") return pause(EXPIRED_PAUSE)
-    if (shipped.kind !== "ok") return asResult(shipped)
+    if (shipped.kind !== "ok") {
+      note(ctx, "address", "fail", shipped.reason)
+      return asResult(shipped)
+    }
+    note(ctx, "address", "pass", "Shipping address accepted.")
+    note(ctx, "shipping", "pass", "Ship-to-home selected.")
     ctx.log("info", `Submitting payment for the card ending ${ctx.profile.last4}.`)
     const paid = await saveCard(ctx, jar)
     if (paid.kind === "unauthorized") return pause(EXPIRED_PAUSE)
-    if (paid.kind !== "ok") return asResult(paid)
+    if (paid.kind !== "ok") {
+      note(ctx, "payment", "fail", paid.reason)
+      return asResult(paid)
+    }
+    note(ctx, "payment", "pass", "Card token accepted. The card was not charged.")
     const contract = await createContract(ctx, jar, reading, cart.value, shipped.value, paid.value)
     if (contract.kind === "oos") {
       ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")
@@ -158,6 +174,13 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
     }
     if (contract.kind === "unauthorized") return pause(EXPIRED_PAUSE)
     if (contract.kind !== "ok") return asResult(contract)
+    if (ctx.testMode) {
+      if (ctx.clearCartAfterTest) {
+        await clearLine(ctx, jar, cart.value, reading)
+        note(ctx, "cart", "pass", "Cleared the test line from the cart.")
+      }
+      return finishTest(ctx)
+    }
     const order = await placeOrder(ctx, jar, contract.value)
     if (order.kind === "oos") {
       ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")

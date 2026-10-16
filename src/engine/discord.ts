@@ -20,21 +20,51 @@ export function assertDiscordWebhook(url: string): void {
 }
 
 export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string, unknown>> } {
-  const color = notice.kind === "success" ? 0x3cba8b : notice.kind === "paused" ? 0xe0a045 : 0xe25b5b
+  const color = notice.kind === "success"
+    ? 0x3cba8b
+    : notice.kind === "tested" || notice.kind === "alert"
+      ? 0x6aa6ff
+      : notice.kind === "drop"
+        ? 0x6aa6ff
+        : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session"
+          ? 0xe0a045
+          : 0xe25b5b
   const title =
     notice.kind === "success"
       ? `${notice.storeName} checkout succeeded`
-      : notice.kind === "paused"
-        ? `${notice.storeName} task paused`
-        : `${notice.storeName} checkout failed`
+      : notice.kind === "tested"
+        ? `${notice.storeName} test finished`
+        : notice.kind === "alert"
+          ? `${notice.storeName} match`
+          : notice.kind === "challenge"
+            ? `${notice.storeName} needs a person`
+            : notice.kind === "session"
+              ? `${notice.storeName} needs a sign-in`
+              : notice.kind === "drop"
+                ? `${notice.sku} drop`
+                : notice.kind === "paused"
+                  ? `${notice.storeName} needs attention`
+                  : `${notice.storeName} checkout failed`
   const lines = [
     `Product: ${notice.sku}`,
     `Profile: ${notice.profileName}`,
     redact(notice.detail)
   ]
   if (notice.orderId) lines.push(`Order: ${notice.orderId}`)
-  if (notice.kind === "paused") {
+  if (notice.kind === "paused" && notice.profileName !== "Alerts") {
     lines.push("Update the account session in TCGAIO, then resume the task.")
+  }
+  if (notice.kind === "challenge") {
+    lines.push("A person solves this in TCGAIO. It is not sent to a solving service.")
+  }
+  if (notice.kind === "session") {
+    lines.push("Open the account browser and sign in again. TCGAIO does not create a session for you.")
+  }
+  if (notice.kind === "drop") {
+    lines.push("Times are Atlantic Time (Puerto Rico, UTC−4).")
+  }
+  if (notice.kind === "tested") {
+    lines.push("Place order was not sent.")
   }
   return {
     embeds: [

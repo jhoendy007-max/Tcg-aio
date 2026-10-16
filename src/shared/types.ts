@@ -4,7 +4,8 @@ export const STORE_IDS = [
   "bestbuy",
   "pokemon-center",
   "amazon",
-  "crunchyroll"
+  "crunchyroll",
+  "bandai"
 ] as const
 
 export type StoreId = (typeof STORE_IDS)[number]
@@ -76,6 +77,8 @@ export interface SessionCookies {
   cookie?: string
 }
 
+export type SessionState = "missing" | "saved" | "expired"
+
 export interface PublicAccount {
   id: string
   store: StoreId
@@ -83,6 +86,9 @@ export interface PublicAccount {
   username: string
   hasPassword: boolean
   hasSession: boolean
+  proxyGroupId: string | null
+  sessionState: SessionState
+  lastWarmAt: number | null
 }
 
 export interface AccountInput {
@@ -94,6 +100,7 @@ export interface AccountInput {
   passwordAction: "keep" | "replace" | "clear"
   session: string
   sessionAction: "keep" | "replace" | "clear"
+  proxyGroupId?: string | null
 }
 
 export interface FullAccount {
@@ -103,7 +110,10 @@ export interface FullAccount {
   username: string
   password?: string
   session?: SessionCookies
+  proxyGroupId?: string | null
 }
+
+export type ProxyNetwork = "residential" | "datacenter"
 
 export interface ProxyEndpoint {
   id: string
@@ -116,6 +126,7 @@ export interface ProxyEndpoint {
 export interface ProxyGroup {
   id: string
   name: string
+  network: ProxyNetwork
   proxies: ProxyEndpoint[]
 }
 
@@ -123,6 +134,23 @@ export interface ProxyGroupInput {
   id?: string
   name: string
   text: string
+  network?: ProxyNetwork
+}
+
+export interface ProxyScore {
+  proxyId: string
+  streak: number
+  ok: number
+  blocks: number
+  benchedUntil: number
+  lastStatus: number | null
+}
+
+export interface StoreBlockRate {
+  store: StoreId
+  samples: number
+  blocked: number
+  rate: number
 }
 
 export interface ProxyTestResult {
@@ -151,12 +179,15 @@ export type TaskStatus =
   | "failed"
   | "paused"
   | "stopped"
+  | "tested"
+  | "challenge"
 
 export const ACTIVE_STATUSES: TaskStatus[] = [
   "monitoring",
   "in_stock",
   "adding_to_cart",
-  "checking_out"
+  "checking_out",
+  "challenge"
 ]
 
 export function isActiveStatus(status: TaskStatus): boolean {
@@ -172,6 +203,9 @@ export interface PublicTask {
   accountId: string
   proxyGroupId: string | null
   confirmPurchase: boolean
+  testMode: boolean
+  /** Optional label so a drop can start every task in the group. */
+  group: string
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -189,6 +223,8 @@ export interface TaskInput {
   accountId: string
   proxyGroupId: string | null
   confirmPurchase: boolean
+  testMode?: boolean
+  group?: string
 }
 
 export interface Settings {
@@ -198,6 +234,20 @@ export interface Settings {
   targetZip: string
   targetState: string
   targetApiKey: string
+  /** Optional ws:// or wss:// relay so a paired phone can connect away from home. */
+  phoneRelayUrl: string
+  /** When on, every task runs as a test and cannot place an order. */
+  testMode: boolean
+  /** After a passed test, clear the cart on stores that support it. */
+  clearCartAfterTest: boolean
+  /** How long a person has to solve a store challenge before the task pauses. */
+  challengeTimeoutSec: number
+  /** Open the real browser session on a timer and save the cookies it already has. */
+  sessionWarmup: boolean
+  /** Minutes between session warm-ups. */
+  sessionWarmupMin: number
+  /** Percent of jitter added to monitor sleeps. */
+  monitorJitterPct: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -206,7 +256,14 @@ export const DEFAULT_SETTINGS: Settings = {
   targetStoreId: "1881",
   targetZip: "10001",
   targetState: "NY",
-  targetApiKey: ""
+  targetApiKey: "",
+  phoneRelayUrl: "",
+  testMode: false,
+  clearCartAfterTest: false,
+  challengeTimeoutSec: 180,
+  sessionWarmup: false,
+  sessionWarmupMin: 30,
+  monitorJitterPct: 20
 }
 
 export interface SecurityInfo {
@@ -225,11 +282,273 @@ export type TaskEvent =
   | { type: "upsert"; task: PublicTask }
   | { type: "delete"; id: string }
 
+export interface StoreHealth {
+  store: StoreId
+  storeName: string
+  proxy: string
+  status: number | null
+  verdict: "up" | "challenge" | "down"
+  detail: string
+  ms: number
+  blockSamples: number
+  blockCount: number
+  blockRate: number
+}
+
+/** A store challenge waiting for a person. No proxy password and no cookie header. */
+export interface PublicChallenge {
+  id: string
+  taskId: string
+  store: StoreId
+  storeName: string
+  sku: string
+  url: string
+  reason: string
+  expiresAt: number
+  proxyLabel: string
+}
+
 export interface Notice {
-  kind: "success" | "failure" | "paused"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop"
   storeName: string
   sku: string
   profileName: string
   detail: string
   orderId?: string
+}
+
+export interface RestockRule {
+  id: string
+  name: string
+  enabled: boolean
+  /** Empty matches every store. */
+  store: StoreId | ""
+  /** Empty matches by keywords only. */
+  sku: string
+  keywords: string
+  /** Existing task to start. Empty creates a task from the template below. */
+  taskId: string | null
+  profileId: string
+  accountId: string
+  proxyGroupId: string | null
+  quantity: number
+  maxQuantity: number
+  maxPrice: number | null
+  cooldownSec: number
+  testMode: boolean
+  confirmPurchase: boolean
+  lastFiredAt: number
+}
+
+export interface RestockRuleInput {
+  id?: string
+  name: string
+  enabled: boolean
+  store: StoreId | ""
+  sku: string
+  keywords: string
+  taskId: string | null
+  profileId: string
+  accountId: string
+  proxyGroupId: string | null
+  quantity: number
+  maxQuantity: number
+  maxPrice: number | null
+  cooldownSec: number
+  testMode: boolean
+  confirmPurchase: boolean
+}
+
+export type WatchStatus = "idle" | "watching" | "paused" | "blocked"
+
+export interface KeywordWatch {
+  id: string
+  name: string
+  enabled: boolean
+  store: StoreId
+  keywords: string
+  maxPrice: number | null
+  soldByRetailer: boolean
+  proxyGroupId: string | null
+  profileId: string
+  accountId: string
+  quantity: number
+  maxQuantity: number
+  autoStart: boolean
+  testMode: boolean
+  confirmPurchase: boolean
+  seenSkus: string[]
+  status: WatchStatus
+  detail: string
+}
+
+export interface KeywordWatchInput {
+  id?: string
+  name: string
+  enabled: boolean
+  store: StoreId
+  keywords: string
+  maxPrice: number | null
+  soldByRetailer: boolean
+  proxyGroupId: string | null
+  profileId: string
+  accountId: string
+  quantity: number
+  maxQuantity: number
+  autoStart: boolean
+  testMode: boolean
+  confirmPurchase: boolean
+  resetSeen?: boolean
+}
+
+export interface AlertLog {
+  id: string
+  ts: number
+  source: "webhook" | "discord" | "keyword"
+  store: string
+  sku: string
+  title: string
+  result: string
+}
+
+export interface AlertsView {
+  localUrl: string
+  relayUrl: string
+  token: string
+  discordWatch: boolean
+  hasBot: boolean
+  channelId: string
+  rules: RestockRule[]
+  watches: KeywordWatch[]
+  log: AlertLog[]
+}
+
+export interface DiscordWatchInput {
+  channelId: string
+  enabled: boolean
+  token: string
+  tokenAction: "keep" | "replace" | "clear"
+}
+
+export type SchedulePhase = "waiting" | "warming" | "started" | "stopped"
+
+export interface DropSchedule {
+  id: string
+  name: string
+  enabled: boolean
+  startAt: number
+  stopAt: number | null
+  warmupMin: number
+  taskIds: string[]
+  group: string
+  phase: SchedulePhase
+}
+
+export interface DropScheduleInput {
+  id?: string
+  name: string
+  enabled: boolean
+  /** Epoch milliseconds, or `YYYY-MM-DDTHH:mm` interpreted as Atlantic Time. */
+  startAt: number | string
+  stopAt?: number | string | null
+  warmupMin: number
+  taskIds: string[]
+  group: string
+}
+
+export type CheckoutOutcome = "success" | "failure" | "paused" | "tested"
+
+export interface CheckoutRecord {
+  id: string
+  at: number
+  store: StoreId
+  sku: string
+  product: string
+  price: number | null
+  outcome: CheckoutOutcome
+  profileName: string
+  orderId?: string
+  detail: string
+}
+
+export interface StoreAnalytics {
+  store: StoreId
+  storeName: string
+  success: number
+  failure: number
+  paused: number
+  tested: number
+  spend: number
+}
+
+export interface ProductAnalytics {
+  store: StoreId
+  sku: string
+  product: string
+  success: number
+  failure: number
+  paused: number
+  spend: number
+}
+
+export interface TimelinePoint {
+  day: string
+  success: number
+  failure: number
+  paused: number
+}
+
+export interface AnalyticsReport {
+  attempts: number
+  success: number
+  failure: number
+  paused: number
+  tested: number
+  winRate: number
+  spend: number
+  byStore: StoreAnalytics[]
+  byProduct: ProductAnalytics[]
+  timeline: TimelinePoint[]
+  recent: CheckoutRecord[]
+}
+
+export interface BulkShared {
+  store: StoreId
+  quantity: number
+  profileId: string
+  accountId: string
+  proxyGroupId: string | null
+  confirmPurchase: boolean
+  testMode: boolean
+  group: string
+  text: string
+}
+
+export interface BulkEdit {
+  ids: string[]
+  quantity?: number
+  profileId?: string
+  accountId?: string
+  proxyGroupId?: string | null
+  confirmPurchase?: boolean
+  testMode?: boolean
+  group?: string
+}
+
+export interface UpdateStatus {
+  current: string
+  status: "idle" | "checking" | "available" | "downloading" | "downloaded" | "current" | "error"
+  version: string | null
+  notes: string
+  phoneVersion: string | null
+  error: string
+  hasToken: boolean
+}
+
+export interface ReleaseAsset {
+  version: string
+  tag: string
+  notes: string
+  exe: string | null
+  apk: string | null
 }

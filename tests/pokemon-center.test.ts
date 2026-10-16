@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
+import { isFinalSubmit } from "../src/engine/test-mode"
 import { POKEMON_CENTER_PAUSE, createPokemonCenterModule } from "../src/stores/pokemon-center"
 import { cardType, createCardJwe, readFlexContext, readPaymentToken } from "../src/stores/pokemon-center/card"
 import { isChallenge, parseSku, productUrl, readQueueTarget, readStock, searchUrl } from "../src/stores/pokemon-center/parse"
@@ -396,5 +397,13 @@ describe("pokémon center checkout", () => {
     expect(result.outcome).toBe("failed")
     expect(fake.calls.some((call) => new URL(call.url).hostname === "evil.example")).toBe(false)
     expect(fake.calls.some((call) => call.url.includes("/tpci-ecommweb-api/order"))).toBe(false)
+  })
+
+  it("tokenizes the card and never sends place order in test mode", async () => {
+    const fake = client((req) => happy(req))
+    const result = await createPokemonCenterModule().run(ctx(fake.http, { testMode: true }))
+    expect(result.outcome).toBe("tested")
+    expect(fake.calls.some((call) => call.url.includes("flex.cybersource.com"))).toBe(true)
+    expect(fake.calls.some((call) => isFinalSubmit("pokemon-center", call))).toBe(false)
   })
 })

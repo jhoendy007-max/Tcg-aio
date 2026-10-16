@@ -2,6 +2,7 @@ export function redact(text: string): string {
   return text
     .replace(/\b\d{13,19}\b/g, "[card]")
     .replace(/("cvv"\s*:\s*")[^"]*(")/gi, "$1[redacted]$2")
+    .replace(/\bcvv\b(?:\s*[:=]\s*|\s+)\d{3,4}\b/gi, "cvv [redacted]")
     .replace(/("password"\s*:\s*")[^"]*(")/gi, "$1[redacted]$2")
     .replace(/("card_number"\s*:\s*")[^"]*(")/gi, "$1[redacted]$2")
     .replace(/(accessToken=)[^;\s]+/gi, "$1[redacted]")

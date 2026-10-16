@@ -3,6 +3,7 @@ import type {
   AccountInput,
   ProxyGroup,
   ProxyGroupInput,
+  ProxyScore,
   ProxyTestResult,
   PublicAccount,
   PublicProfile,
@@ -13,8 +14,23 @@ import type {
   StoreInfo,
   TaskEvent,
   TaskInput,
-  ProfileInput
+  ProfileInput,
+  AlertsView,
+  DiscordWatchInput,
+  KeywordWatch,
+  KeywordWatchInput,
+  RestockRule,
+  RestockRuleInput,
+  StoreHealth,
+  PublicChallenge,
+  AnalyticsReport,
+  BulkEdit,
+  BulkShared,
+  DropSchedule,
+  DropScheduleInput,
+  UpdateStatus
 } from "./types"
+import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
 
 export interface AioApi {
   tasks: {
@@ -22,8 +38,12 @@ export interface AioApi {
     save: (input: TaskInput) => Promise<Result<PublicTask>>
     delete: (id: string) => Promise<Result<{ id: string }>>
     start: (id: string) => Promise<Result<{ started: true }>>
+    test: (id: string) => Promise<Result<{ started: true }>>
     stop: (id: string) => Promise<Result<{ stopped: true }>>
     onEvent: (cb: (event: TaskEvent) => void) => () => void
+  }
+  health: {
+    check: (proxyGroupId: string | null) => Promise<Result<StoreHealth[]>>
   }
   profiles: {
     list: () => Promise<Result<PublicProfile[]>>
@@ -35,11 +55,15 @@ export interface AioApi {
     save: (input: ProxyGroupInput) => Promise<Result<ProxyGroup>>
     delete: (id: string) => Promise<Result<{ id: string }>>
     test: (id: string) => Promise<Result<ProxyTestResult[]>>
+    health: () => Promise<Result<ProxyScore[]>>
   }
   accounts: {
     list: () => Promise<Result<PublicAccount[]>>
     save: (input: AccountInput) => Promise<Result<PublicAccount>>
     delete: (id: string) => Promise<Result<{ id: string }>>
+    openBrowser: (id: string) => Promise<Result<{ opened: true }>>
+    captureBrowser: (id: string) => Promise<Result<{ saved: true }>>
+    warm: (id: string) => Promise<Result<{ expired: boolean; detail: string }>>
   }
   settings: {
     get: () => Promise<Result<SettingsPayload>>
@@ -48,6 +72,55 @@ export interface AioApi {
   }
   stores: {
     list: () => Promise<Result<StoreInfo[]>>
+  }
+  phone: {
+    status: () => Promise<Result<PhoneStatus>>
+    invite: () => Promise<Result<PhoneInvite>>
+    revoke: (id: string) => Promise<Result<PhoneStatus>>
+    saveRelay: (url: string) => Promise<Result<PhoneStatus>>
+    onEvent: (cb: (status: PhoneStatus) => void) => () => void
+  }
+  alerts: {
+    get: () => Promise<Result<AlertsView>>
+    rotateToken: () => Promise<Result<AlertsView>>
+    saveDiscord: (input: DiscordWatchInput) => Promise<Result<AlertsView>>
+    saveRule: (input: RestockRuleInput) => Promise<Result<RestockRule>>
+    deleteRule: (id: string) => Promise<Result<{ id: string }>>
+    saveWatch: (input: KeywordWatchInput) => Promise<Result<KeywordWatch>>
+    deleteWatch: (id: string) => Promise<Result<{ id: string }>>
+    resumeWatch: (id: string) => Promise<Result<KeywordWatch>>
+    onEvent: (cb: (view: AlertsView) => void) => () => void
+  }
+  challenge: {
+    get: () => Promise<Result<PublicChallenge | null>>
+    open: () => Promise<Result<{ opened: true }>>
+    done: () => Promise<Result<{ saved: true }>>
+    submit: (cookie: string) => Promise<Result<{ saved: true }>>
+    dismiss: () => Promise<Result<{ dismissed: true }>>
+    onEvent: (cb: (challenge: PublicChallenge | null) => void) => () => void
+  }
+  schedules: {
+    list: () => Promise<Result<DropSchedule[]>>
+    save: (input: DropScheduleInput) => Promise<Result<DropSchedule>>
+    delete: (id: string) => Promise<Result<{ id: string }>>
+  }
+  analytics: {
+    get: () => Promise<Result<AnalyticsReport>>
+    csv: () => Promise<Result<{ csv: string }>>
+  }
+  bulk: {
+    create: (input: BulkShared) => Promise<Result<{ tasks: PublicTask[]; errors: string[] }>>
+    edit: (input: BulkEdit) => Promise<Result<{ updated: string[]; errors: { id: string; error: string }[] }>>
+    duplicate: (ids: string[]) => Promise<Result<PublicTask[]>>
+    delete: (ids: string[]) => Promise<Result<{ deleted: string[]; errors: { id: string; error: string }[] }>>
+  }
+  updates: {
+    get: () => Promise<Result<UpdateStatus>>
+    check: () => Promise<Result<UpdateStatus>>
+    download: () => Promise<Result<UpdateStatus>>
+    install: () => Promise<Result<{ installing: true }>>
+    saveToken: (input: { action: "keep" | "replace" | "clear"; token: string }) => Promise<Result<UpdateStatus>>
+    onEvent: (cb: (status: UpdateStatus) => void) => () => void
   }
 }
 

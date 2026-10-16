@@ -70,14 +70,47 @@ export function cleanSettings(input: Settings): Settings {
   if (targetApiKey && !/^[A-Za-z0-9]{20,80}$/.test(targetApiKey)) {
     throw new AppError("Target API key should be the site key, or left blank to use the built-in key.")
   }
+  const challengeTimeoutSec = Math.round(Number(input.challengeTimeoutSec ?? DEFAULT_SETTINGS.challengeTimeoutSec))
+  if (!Number.isFinite(challengeTimeoutSec) || challengeTimeoutSec < 30 || challengeTimeoutSec > 600) {
+    throw new AppError("Challenge timeout must be between 30 and 600 seconds.")
+  }
+  const sessionWarmupMin = Math.round(Number(input.sessionWarmupMin ?? DEFAULT_SETTINGS.sessionWarmupMin))
+  if (!Number.isFinite(sessionWarmupMin) || sessionWarmupMin < 10 || sessionWarmupMin > 240) {
+    throw new AppError("Session warm-up interval must be between 10 and 240 minutes.")
+  }
+  const monitorJitterPct = Math.round(Number(input.monitorJitterPct ?? DEFAULT_SETTINGS.monitorJitterPct))
+  if (!Number.isFinite(monitorJitterPct) || monitorJitterPct < 0 || monitorJitterPct > 40) {
+    throw new AppError("Monitor jitter must be between 0 and 40 percent.")
+  }
   return {
     discordWebhook: input.discordWebhook.trim(),
     monitorDelayMs,
     targetStoreId,
     targetZip,
     targetState,
-    targetApiKey
+    targetApiKey,
+    phoneRelayUrl: cleanRelayUrl(input.phoneRelayUrl ?? ""),
+    testMode: input.testMode === true,
+    clearCartAfterTest: input.clearCartAfterTest === true,
+    challengeTimeoutSec,
+    sessionWarmup: input.sessionWarmup === true,
+    sessionWarmupMin,
+    monitorJitterPct
   }
+}
+
+export function cleanRelayUrl(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  } catch {
+    throw new AppError("Phone relay must be a ws:// or wss:// URL.")
+  }
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") throw new AppError("Phone relay must be a ws:// or wss:// URL.")
+  if (url.username || url.password) throw new AppError("Put the phone relay token in the path, not the URL userinfo.")
+  return url.toString()
 }
 
 export function assertStore(value: string) {

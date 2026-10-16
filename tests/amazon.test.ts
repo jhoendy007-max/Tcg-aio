@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
+import { isFinalSubmit } from "../src/engine/test-mode"
 import { AMAZON_PAUSE, createAmazonModule } from "../src/stores/amazon"
 import { isChallenge, parseAsin, readOffers, readStock } from "../src/stores/amazon/parse"
 import type { StoreRunContext } from "../src/stores/module"
@@ -287,5 +288,13 @@ describe("amazon checkout", () => {
     const result = await createAmazonModule().run(ctx(fake.http))
     expect(result).toMatchObject({ outcome: "success", orderId: "111-2222222-3333333" })
     expect(carts).toBe(2)
+  })
+
+  it("reads checkout and never submits place order in test mode", async () => {
+    const fake = client((req) => happy(req))
+    const result = await createAmazonModule().run(ctx(fake.http, { testMode: true }))
+    expect(result.outcome).toBe("tested")
+    expect(fake.calls.some((call) => call.url.includes("/checkout/entry/"))).toBe(true)
+    expect(fake.calls.some((call) => isFinalSubmit("amazon", call))).toBe(false)
   })
 })
