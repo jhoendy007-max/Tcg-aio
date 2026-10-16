@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto"
+import { proxyLabel } from "../../shared/proxy"
 import { redact } from "../../shared/redact"
-import type { SessionCookies } from "../../shared/types"
+import type { ProxyEndpoint, SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
 import {
@@ -17,9 +18,13 @@ import {
   readStock,
   type StockReading
 } from "./parse"
+import { parsePieKey, protectPanAndCvv } from "./pie"
 
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-const ALLOWED_HOSTS = new Set(["www.walmart.com"])
+const CARD_HOST = "www.walmart.com"
+const PIE_HOST = "securedataweb.walmart.com"
+const ALLOWED_HOSTS = new Set([CARD_HOST, PIE_HOST])
+const PIE_KEY_URL = "https://securedataweb.walmart.com/pie/v1/wmcom_us_vtg_pie/getkey.js"
 const OFFERS_HASH = "a7ea759bd71585427be5fffd34326a399c017f162cae893fc3e8c9d00cdcb34c"
 const CART_HASH = "f9e23365bcbea20fa5894ef17dd63c0cc3da2e3e8f96798320cc7d6752f95941"
 const UPDATE_ITEMS_HASH = "5bdd18fcb51caa2ae775b1ccfbdcd1f5df0d13d52ef949724a3912591e2b02f8"
@@ -323,6 +328,18 @@ async function saveCard(ctx: StoreRunContext, jar: CookieJar): Promise<Step<stri
   const card = ctx.profile.card
   const bill = ctx.profile.billing
   const names = splitName(card.name)
+  const keyResponse = await call(ctx, {
+    method: "GET",
+    url: `${PIE_KEY_URL}?bust=${Date.now()}`
+  })
+  if (isChallenge(keyResponse.status, keyResponse.body)) return { kind: "paused", reason: WALMART_PAUSE }
+  if (keyResponse.status < 200 || keyResponse.status >= 300) {
+    return { kind: "failed", reason: `Walmart did not return a PIE key (HTTP ${keyResponse.status}).` }
+  }
+  const pieKey = parsePieKey(keyResponse.body)
+  if (!pieKey) return { kind: "failed", reason: "Walmart's PIE key response could not be read." }
+  const cipher = protectPanAndCvv(card.number, card.cvv, pieKey)
+  if (!cipher) return { kind: "failed", reason: "The card number failed PIE validation." }
   const response = await gql(
     ctx,
     jar,
@@ -339,8 +356,11 @@ async function saveCard(ctx: StoreRunContext, jar: CookieJar): Promise<Step<stri
         isDefault: false,
         phone: ctx.profile.phone,
         cardType: cardBrand(card.number),
-        encryptedPan: card.number,
-        encryptedCVV: card.cvv,
+        encryptedPan: cipher.encryptedPan,
+        encryptedCVV: cipher.encryptedCvv,
+        integrityCheck: cipher.integrityCheck,
+        keyId: cipher.keyId,
+        phase: cipher.phase,
         address: {
           addressLineOne: bill.line1,
           addressLineTwo: bill.line2,
@@ -511,11 +531,78 @@ function rememberSession(ctx: StoreRunContext, jar: CookieJar, response: HttpRes
   if (changed && !quiet) void ctx.onSession(jar.toSession())
 }
 
+const lanes = new WeakMap<StoreRunContext, ProxyLane>()
+
+class ProxyLane {
+  private readonly proxies: ProxyEndpoint[]
+  private index: number
+  private strikes = 0
+
+  constructor(ctx: StoreRunContext) {
+    this.proxies = ctx.proxies?.length ? ctx.proxies : ctx.proxy ? [ctx.proxy] : []
+    const start = ctx.proxy
+    const found = start ? this.proxies.findIndex((proxy) => proxy.id === start.id && proxy.host === start.host && proxy.port === start.port) : 0
+    this.index = found >= 0 ? found : 0
+  }
+
+  private current(): ProxyEndpoint | undefined {
+    return this.proxies[this.index]
+  }
+
+  async send(ctx: StoreRunContext, request: HttpRequest): Promise<HttpResponse> {
+    for (;;) {
+      const proxy = this.current()
+      const response = await ctx.http.request({ ...request, proxy, signal: ctx.signal })
+      if (!isProxyBlock(response.status)) {
+        if (!isChallenge(response.status, response.body)) this.strikes = 0
+        return response
+      }
+      this.strikes += 1
+      const budget = Math.max(3, this.proxies.length * 2)
+      const where = proxy ? `proxy ${proxyLabel(proxy)}` : "a direct connection"
+      if (this.strikes >= budget) {
+        ctx.log("warn", `Walmart returned HTTP ${response.status} (PerimeterX) through ${where} again. Pausing after ${this.strikes} blocks.`)
+        return response
+      }
+      const next = this.rotate()
+      const moved = Boolean(next && proxy && (next.host !== proxy.host || next.port !== proxy.port))
+      const wait = Math.min(ctx.settings.monitorDelayMs * 2 ** Math.min(this.strikes - 1, 3), 30000)
+      const action = moved && next ? `Rotating to proxy ${proxyLabel(next)}` : "No other proxy is in the group"
+      ctx.log("warn", `Walmart returned HTTP ${response.status} (PerimeterX) through ${where}. ${action}. Waiting ${formatWait(wait)} before retrying.`)
+      await ctx.sleep(wait)
+    }
+  }
+
+  private rotate(): ProxyEndpoint | undefined {
+    if (this.proxies.length > 1) this.index = (this.index + 1) % this.proxies.length
+    return this.current()
+  }
+}
+
+function laneFor(ctx: StoreRunContext): ProxyLane {
+  const existing = lanes.get(ctx)
+  if (existing) return existing
+  const created = new ProxyLane(ctx)
+  lanes.set(ctx, created)
+  return created
+}
+
+function isProxyBlock(status: number): boolean {
+  return status === 412 || status === 418 || status === 456
+}
+
+function formatWait(ms: number): string {
+  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+  return `${ms}ms`
+}
+
 async function call(ctx: StoreRunContext, request: HttpRequest, carriesCard = false): Promise<HttpResponse> {
   const host = new URL(request.url).hostname
   if (!ALLOWED_HOSTS.has(host)) throw new Error(`Refusing to contact ${host}.`)
-  if (carriesCard && host !== "www.walmart.com") throw new Error("Card data can only be sent to the retailer.")
-  return ctx.http.request({ ...request, proxy: ctx.proxy, signal: ctx.signal })
+  if (carriesCard && host !== CARD_HOST) throw new Error("Card data can only be sent to the retailer.")
+  if (host === PIE_HOST && request.method !== "GET") throw new Error("The PIE key endpoint accepts a key request only.")
+  return laneFor(ctx).send(ctx, request)
 }
 
 function endpoint(gateway: "home" | "cartxo", name: string, hash: string): string {

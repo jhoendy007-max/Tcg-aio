@@ -1,0 +1,126 @@
+{
+  "data": {
+    "productBySkuId": {
+      "skuId": "6606082",
+      "price": {
+        "customerPrice": 49.99,
+        "mobileContracts": null,
+        "__typename": "ItemPrice"
+      },
+      "seller": {
+        "classification": "1P",
+        "id": "bby",
+        "__typename": "Seller"
+      },
+      "fulfillmentOptions": {
+        "buttonStates": [
+          {
+            "buttonState": "IN_STORE_ONLY",
+            "condition": "NEW",
+            "displayText": "In-Store Only",
+            "secondaryButtonState": null,
+            "secondaryDisplayText": null,
+            "planButtonState": null,
+            "hyperlinkUrl": null,
+            "__typename": "ButtonState"
+          }
+        ],
+        "shippingDetails": [
+          {
+            "destinationZipCode": "55423",
+            "abTestMetadata": {
+              "excludeFromAnalytics": true,
+              "excludeFromAnalyticsReason": "Strategic Slowdown SKU",
+              "experimentName": "exp0635",
+              "experimentVariation": "A",
+              "__typename": "AbTestMetadata"
+            },
+            "shippingAvailability": [
+              {
+                "backordered": null,
+                "condition": "NEW",
+                "customerLOSGroup": null,
+                "levelOfServices": null,
+                "defaultCustomerLosGroupId": null,
+                "downloadEligible": false,
+                "emailEligible": false,
+                "fulfillByVendor": false,
+                "preorderable": false,
+                "promiseByStreetDate": null,
+                "whenAvailableFlag": null,
+                "shippingEligible": false,
+                "restrictions": null,
+                "__typename": "FulfillmentShippingAvailability"
+              }
+            ],
+            "sku": "6606082",
+            "__typename": "FulfillmentShippingDetail"
+          }
+        ],
+        "deliveryDetails": [
+          {
+            "deliveryAvailability": [
+              {
+                "salLocationId": null,
+                "deliverable": null,
+                "deliveryEligible": false,
+                "forceSkipScheduling": null,
+                "forceSkipSchedulingReasonCode": null,
+                "productAppointmentType": null,
+                "homeDeliveryDisplayDateType": null,
+                "condition": "NEW",
+                "deliverySlots": null,
+                "deliveryServices": null,
+                "installationSlots": null,
+                "backordered": null,
+                "restrictions": null,
+                "__typename": "FulfillmentDeliveryAvailability"
+              }
+            ],
+            "destinationZipCode": "55423",
+            "__typename": "FulfillmentDeliveryDetail"
+          }
+        ],
+        "ispuDetails": [
+          {
+            "sku": "6606082",
+            "ispuAvailability": [
+              {
+                "backordered": null,
+                "condition": "NEW",
+                "displayDateType": null,
+                "downloadEligible": null,
+                "emailEligible": null,
+                "fulfillDate": null,
+                "fulfillmentType": null,
+                "instoreInventoryAvailable": false,
+                "inStoreOnly": true,
+                "maxDate": null,
+                "minPickupInHours": null,
+                "pickupEligible": true,
+                "preorderable": null,
+                "promiseByStreetDate": null,
+                "whenAvailableFlag": null,
+                "quantity": null,
+                "restrictions": null,
+                "inStoreServices": null,
+                "__typename": "InStorePickupAvailability"
+              }
+            ],
+            "nearbyLocation": null,
+            "nearbyLocations": null,
+            "store": {
+              "name": "Roseville",
+              "storeId": "7",
+              "zip": "55113",
+              "__typename": "FulfillmentPickUpStore"
+            },
+            "__typename": "InStorePickupDetail"
+          }
+        ],
+        "__typename": "FulfillmentOptionsList"
+      },
+      "bsin": "JJG2TLCW3L"
+    }
+  }
+}

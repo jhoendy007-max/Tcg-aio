@@ -1,0 +1,146 @@
+{
+  "data": {
+    "productBySkuId": {
+      "skuId": "12771570",
+      "price": {
+        "customerPrice": 159.99,
+        "mobileContracts": null,
+        "__typename": "ItemPrice"
+      },
+      "seller": {
+        "classification": "3P",
+        "id": "7566",
+        "__typename": "Seller"
+      },
+      "fulfillmentOptions": {
+        "buttonStates": [
+          {
+            "buttonState": "ADD_TO_CART",
+            "condition": "NEW",
+            "displayText": "Add to Cart",
+            "secondaryButtonState": null,
+            "secondaryDisplayText": null,
+            "planButtonState": null,
+            "hyperlinkUrl": null,
+            "__typename": "ButtonState"
+          }
+        ],
+        "shippingDetails": [
+          {
+            "destinationZipCode": "55423",
+            "abTestMetadata": {
+              "excludeFromAnalytics": true,
+              "excludeFromAnalyticsReason": "Marketplace SKU",
+              "experimentName": "exp0635",
+              "experimentVariation": "A",
+              "__typename": "AbTestMetadata"
+            },
+            "shippingAvailability": [
+              {
+                "backordered": null,
+                "condition": "NEW",
+                "customerLOSGroup": [
+                  {
+                    "customerLosGroupId": 1,
+                    "displayDateType": "IN_HAND",
+                    "maxLineItemMaxDate": "2026-10-21",
+                    "minLineItemMaxDate": "2026-10-21",
+                    "name": "Standard",
+                    "price": 0,
+                    "__typename": "FulfillmentCustomerLOSGroup"
+                  }
+                ],
+                "levelOfServices": [
+                  {
+                    "code": "CU_ADD-STD",
+                    "id": 1001,
+                    "isLessThanTruckload": false,
+                    "isScheduleParcelDelivery": false,
+                    "cutOffTime": "2026-10-16T12:30:00 CDT",
+                    "customerLosGroupId": 1,
+                    "__typename": "FulfillmentShippingLevelOfService"
+                  }
+                ],
+                "defaultCustomerLosGroupId": 1,
+                "downloadEligible": false,
+                "emailEligible": false,
+                "fulfillByVendor": false,
+                "preorderable": null,
+                "promiseByStreetDate": null,
+                "whenAvailableFlag": null,
+                "shippingEligible": true,
+                "restrictions": null,
+                "__typename": "FulfillmentShippingAvailability"
+              }
+            ],
+            "sku": "12771570",
+            "__typename": "FulfillmentShippingDetail"
+          }
+        ],
+        "deliveryDetails": [
+          {
+            "deliveryAvailability": [
+              {
+                "salLocationId": null,
+                "deliverable": null,
+                "deliveryEligible": false,
+                "forceSkipScheduling": null,
+                "forceSkipSchedulingReasonCode": null,
+                "productAppointmentType": null,
+                "homeDeliveryDisplayDateType": null,
+                "condition": "NEW",
+                "deliverySlots": null,
+                "deliveryServices": null,
+                "installationSlots": null,
+                "backordered": null,
+                "restrictions": null,
+                "__typename": "FulfillmentDeliveryAvailability"
+              }
+            ],
+            "destinationZipCode": "55423",
+            "__typename": "FulfillmentDeliveryDetail"
+          }
+        ],
+        "ispuDetails": [
+          {
+            "sku": "12771570",
+            "ispuAvailability": [
+              {
+                "backordered": null,
+                "condition": "NEW",
+                "displayDateType": null,
+                "downloadEligible": null,
+                "emailEligible": null,
+                "fulfillDate": null,
+                "fulfillmentType": null,
+                "instoreInventoryAvailable": false,
+                "inStoreOnly": false,
+                "maxDate": null,
+                "minPickupInHours": null,
+                "pickupEligible": false,
+                "preorderable": null,
+                "promiseByStreetDate": null,
+                "whenAvailableFlag": null,
+                "quantity": null,
+                "restrictions": null,
+                "inStoreServices": null,
+                "__typename": "InStorePickupAvailability"
+              }
+            ],
+            "nearbyLocation": null,
+            "nearbyLocations": null,
+            "store": {
+              "name": null,
+              "storeId": "7",
+              "zip": null,
+              "__typename": "FulfillmentPickUpStore"
+            },
+            "__typename": "InStorePickupDetail"
+          }
+        ],
+        "__typename": "FulfillmentOptionsList"
+      },
+      "bsin": "JJG2TLCW3L"
+    }
+  }
+}

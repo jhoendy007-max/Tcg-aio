@@ -13,14 +13,18 @@ export function parseSession(text: string): SessionCookies {
     }
     if (!json || typeof json !== "object") throw new AppError("Session JSON must be an object.")
     const record = json as Record<string, unknown>
-    const accessToken = stringField(record, ["accessToken", "access_token", "auth"])
-    if (!accessToken) throw new AppError("Session must include accessToken or auth.")
+    const accessToken = stringField(record, ["accessToken", "access_token", "auth", "at"])
+    const cookie = stringField(record, ["cookie", "cookies"])
+    if (!accessToken) {
+      if (cookie) return parseSession(cookie)
+      throw new AppError("Session must include accessToken, auth, or a Best Buy at cookie.")
+    }
     return {
       accessToken,
-      visitorId: stringField(record, ["visitorId", "visitorID", "visitor_id", "CID", "cid"]),
+      visitorId: stringField(record, ["visitorId", "visitorID", "visitor_id", "CID", "cid", "vt"]),
       refreshToken: stringField(record, ["refreshToken", "refresh_token"]),
       idToken: stringField(record, ["idToken", "id_token"]),
-      cookie: stringField(record, ["cookie", "cookies"])
+      cookie
     }
   }
   const map = new Map<string, string>()
@@ -29,11 +33,11 @@ export function parseSession(text: string): SessionCookies {
     if (eq <= 0) continue
     map.set(part.slice(0, eq).trim(), part.slice(eq + 1).trim())
   }
-  const accessToken = map.get("accessToken") ?? map.get("access_token") ?? map.get("auth")
-  if (!accessToken) throw new AppError("Session must include accessToken or auth.")
+  const accessToken = map.get("accessToken") ?? map.get("access_token") ?? map.get("auth") ?? map.get("at")
+  if (!accessToken) throw new AppError("Session must include accessToken, auth, or a Best Buy at cookie.")
   return {
     accessToken,
-    visitorId: map.get("visitorId") ?? map.get("visitorID") ?? map.get("visitor_id") ?? map.get("CID") ?? map.get("cid"),
+    visitorId: map.get("visitorId") ?? map.get("visitorID") ?? map.get("visitor_id") ?? map.get("CID") ?? map.get("cid") ?? map.get("vt"),
     refreshToken: map.get("refreshToken") ?? map.get("refresh_token"),
     idToken: map.get("idToken") ?? map.get("id_token"),
     cookie: trimmed.includes(";") ? trimmed : undefined

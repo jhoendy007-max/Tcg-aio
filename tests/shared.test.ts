@@ -78,6 +78,10 @@ describe("sessions and stock", () => {
     expect(walmart.accessToken).toBe("secret-auth")
     expect(walmart.visitorId).toBe("customer-1")
     expect(walmart.cookie).toContain("CID=customer-1")
+    const bestbuy = parseSession("at=bb-token; vt=visitor-9; SID=abc")
+    expect(bestbuy.accessToken).toBe("bb-token")
+    expect(bestbuy.visitorId).toBe("visitor-9")
+    expect(bestbuy.cookie).toContain("SID=abc")
     expect(() => parseSession("visitorId=only")).toThrow(/accessToken/)
   })
 

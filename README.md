@@ -1,8 +1,8 @@
 # TCGAIO
 
-Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.1 monitors Target by TCIN and Walmart by item ID, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. Best Buy, Pokémon Center, Amazon, and Crunchyroll are registered store modules with checkout still stubbed.
+Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.1 monitors Target by TCIN, Walmart by item ID, and Best Buy by SKU, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. Pokémon Center, Amazon, and Crunchyroll are registered store modules with checkout still stubbed.
 
-Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target or Walmart shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
+Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target, Walmart, or Best Buy shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
 
 ## What you get
 
@@ -12,13 +12,13 @@ Retailer terms often restrict automated purchasing. TCGAIO uses the account, pro
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
 - **Settings** — Discord webhook and Target monitor delay, store ID, ZIP, and state.
 
-On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, and only to `www.walmart.com` during Walmart payment.
+On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Walmart's PIE key is fetched with a GET that does not include the card.
 
 ## Requirements
 
 - Windows 10 or 11 to run the packaged app
 - Node.js 22 to build from source
-- A Target or Walmart account you control, plus a browser session if password sign-in is challenged
+- A Target, Walmart, or Best Buy account you control, plus a browser session if password sign-in is challenged
 
 ## Setup
 
@@ -62,8 +62,8 @@ App data lives in Electron's user data directory (`%APPDATA%\tcgaio` on Windows)
 ## Usage
 
 1. Open **Profiles** and save a US shipping address, billing address, and card. v0.1 ships inside the US only.
-2. Open **Accounts**. Add a Target or Walmart account.
-   - Target password sign-in is attempted when no session is saved. Walmart password sign-in is not attempted, because PerimeterX blocks it.
+2. Open **Accounts**. Add a Target, Walmart, or Best Buy account.
+   - Target password sign-in is attempted when no session is saved. Walmart and Best Buy password sign-in are not attempted, because PerimeterX and Akamai block them.
    - The reliable path is a browser session. Sign in on the retailer site, open DevTools, and copy the cookies into the session box.
    - Target:
 
@@ -78,10 +78,15 @@ App data lives in Electron's user data directory (`%APPDATA%\tcgaio` on Windows)
      ```
 
      JSON with the same field names works too. Extra cookies in the Walmart string are replayed with the request.
-3. Optionally import a proxy group and run **Test**. Each task sticks to one proxy from the group.
+   - Best Buy: paste the cookie header from a signed-in `www.bestbuy.com` page, including `at` and `vt`.
+
+     ```text
+     at=...; vt=...; SID=...
+     ```
+3. Optionally import a proxy group and run **Test**. A task starts on one proxy from the group. A Walmart task rotates to the next proxy in that group when PerimeterX returns HTTP 412, waits with backoff, and pauses if the block continues.
 4. Open **Settings**. Set the Discord webhook (`https://discord.com/api/webhooks/...`), monitor delay, and the Target store ID / ZIP / state used for ship-to-home stock. Send the test webhook to confirm it.
-5. Open **Tasks**. Create a task with a Target TCIN (`88897904`) or product URL (`https://www.target.com/p/.../-/A-88897904`), or a Walmart item ID (`13816151308`) or product URL (`https://www.walmart.com/ip/.../13816151308`). Check the confirmation box. The checkbox is required before **Start** will run, because a successful monitor places a real order.
-6. Press **Start**. The log shows monitoring, add to cart, shipping, payment, and the order id when Target accepts it. **Stop** aborts the run. **Resume** continues a paused task after you update the account session.
+5. Open **Tasks**. Create a task with a Target TCIN (`88897904`) or product URL (`https://www.target.com/p/.../-/A-88897904`), a Walmart item ID (`13816151308`) or product URL (`https://www.walmart.com/ip/.../13816151308`), or a Best Buy SKU (`6606082`) or product URL (`https://www.bestbuy.com/product/.../sku/6606082`). Check the confirmation box. The checkbox is required before **Start** will run, because a successful monitor places a real order.
+6. Press **Start**. The log shows monitoring, add to cart, shipping, payment, and the order id when the retailer accepts it. **Stop** aborts the run. **Resume** continues a paused task after you update the account session.
 
 Stub stores can be selected. Starting one writes a clear failure: that module is registered, and checkout is not implemented in v0.1.
 
@@ -100,21 +105,32 @@ An expired session tries the refresh token, then the password. A challenge at an
 ## Walmart flow
 
 1. Require a pasted browser session with the `auth` cookie (and `CID` when you have it). Password sign-in is not attempted.
-2. Poll the persisted `GetAllSellerOffers` query for every seller of that item. A product-page `__NEXT_DATA__` read is the fallback when that call returns no product payload. HTTP 412, 418, and 456, a "Robot or human?" page, and press-and-hold pause the task. The word PerimeterX on a normal product page does not. HTTP 429 and 5xx retry on the monitor delay.
+2. Poll the persisted `GetAllSellerOffers` query for every seller of that item. A product-page `__NEXT_DATA__` read is the fallback when that call returns no product payload. HTTP 412, 418, and 456 rotate to the next proxy in the task's group, log which proxy was blocked, and wait `monitor delay × 2^(attempt-1)` up to 30 seconds. After `max(3, proxies × 2)` blocks in a row the task pauses. A "Robot or human?" page and press-and-hold pause immediately. The word PerimeterX on a normal product page does not. A normal response clears the block counter. HTTP 429 and 5xx retry on the monitor delay.
 3. Continue only for an offer sold by Walmart.com itself (`sellerType` `INTERNAL`, `catalogSellerId` 0, or the seller name Walmart.com) with ship-to-home stock at or below the list or was price. Third-party sellers are ignored, including Fulfilled by Walmart. A marketplace listing, a Walmart.com price above that reference, pickup-only stock, and a missing item keep the monitor running.
 4. `updateItems` adds the Walmart.com offer. Fulfillment is set to `SHIPPING`. Pickup is not requested.
 5. `CreateDeliveryAddress` saves the profile address without making it the account default, then `setShipping` attaches it to the cart.
-6. `CreateAccountCreditCard` sends the profile card only to `www.walmart.com`. Walmart's live site encrypts cards with PIE before this call. v0.1 does not generate that encryption, so this step is untested against Walmart and can be rejected until a browser session already has a saved card that the mutation accepts.
+6. Fetch the current PIE key with GET `https://securedataweb.walmart.com/pie/v1/wmcom_us_vtg_pie/getkey.js`. That request carries no card data. The PAN and CVV are encrypted with PIE (embed=false) and `CreateAccountCreditCard` sends `encryptedPan`, `encryptedCVV`, `integrityCheck`, `keyId`, and `phase` only to `www.walmart.com`. The raw card number is not in that body.
 7. `CreateBuyNowContract` opens one contract for that offer, then `placeOrder` submits it. If Walmart asks for the CVV again, the card is resubmitted once and place order is retried. Only `placeOrder` is the charge. After a success response, the cart line is set to quantity 0 so it is not bought again later.
+8. On success, failure, or pause, the app posts to the Discord webhook when one is saved.
+
+## Best Buy flow
+
+1. Require a pasted signed-in browser session (the `www.bestbuy.com` cookie header, including `at`). Password sign-in is not attempted. A guest cart (`authStatus` `G`) pauses before monitoring.
+2. A bare SKU is opened through `searchpage.jsp?st={sku}`, which follows the redirect to that SKU's product page. A product URL that already contains `/sku/{id}` is requested directly. The old `/site/{sku}.p` link is not used: live, it dropped SKU `6606082` and opened a marketplace sibling instead.
+3. Read `productBySkuId` from the page. Continue only when the seller is Best Buy (`classification` `1P`, seller id `bby`, or the name Best Buy), ship-to-home is eligible, and the button is Add to Cart or Pre-order, at or below `regularPrice` when Best Buy sends one. Otherwise Best Buy's own current price counts. Marketplace sellers are ignored even when they can ship. `IN_STORE_ONLY` and a false `shippingEligible` stay on the monitor. HTTP 403 access-denied, Akamai, and captcha pages pause the task. "Please wait" on add to cart is a queue, not a captcha.
+4. `POST /cart/api/v1/addToCart` with the SKU and quantity. `CONSTRAINED_ITEM` decodes the `a2ctransactioncode` wait (SHA-256, 0–899 seconds) and retries with the queue headers. `CONSTRAINED_ITEM_DHV` and `CONSTRAINED_ITEM_PERPETUAL` wait the numeric `a2ctransactionwait`. The task logs the wait and stops after 8 queue attempts.
+5. `POST /cart/checkout`, then read `var orderData` from `/checkout/r/fast-track`. If `shippingEligible` is false, the task fails and does not place a pickup order. `PATCH /checkout/v3/{orderId}` sets shipping to the profile address without saving it as the account default.
+6. Payment lookup stays on `www.bestbuy.com`. A 3-D Secure or Cardinal step-up pauses the task. TCGAIO does not call `centinelapi.cardinalcommerce.com` and does not generate Akamai sensor data.
+7. GET `/api/csiservice/v2/key/tas` for the public key (no card in that request). The PAN is RSA-OAEP SHA-1 encrypted as `00960001` plus the digits. `PUT /payment/api/v3/payment/{id}/creditCard` sends that ciphertext and the CVV only to `www.bestbuy.com`. Payments are refreshed, then `POST /checkout/v3/{orderId}` places the order.
 8. On success, failure, or pause, the app posts to the Discord webhook when one is saved.
 
 ## Adding a store
 
-Each retailer is a `StoreModule` under `src/stores/<store>/`. The registry in `src/stores/registry.ts` is the only place that needs to know it exists. A module implements `run(ctx)` and returns `success`, `failed`, `paused`, or `stopped`. `ctx` provides the profile, account, proxy, monitor settings, logger, and an HTTP client that already has the task's proxy attached. The Best Buy, Pokémon Center, Amazon, and Crunchyroll files are the stubs to replace.
+Each retailer is a `StoreModule` under `src/stores/<store>/`. The registry in `src/stores/registry.ts` is the only place that needs to know it exists. A module implements `run(ctx)` and returns `success`, `failed`, `paused`, or `stopped`. `ctx` provides the profile, account, the starting proxy, the proxy group, monitor settings, logger, and an HTTP client. The Pokémon Center, Amazon, and Crunchyroll files are the stubs to replace.
 
 ## What was tested, and what was not
 
-Automated tests cover TCIN and proxy parsing, local encryption, masked profiles, the task runner, Discord payload redaction, Walmart session cookies, and the Target and Walmart sequences against a fake HTTP client: in-stock shipping checkout, a wait through an out-of-stock or marketplace reading, a captcha pause before add-to-cart, a declined card, and a CVV resubmit.
+Automated tests cover TCIN and proxy parsing, local encryption, masked profiles, the task runner, Discord payload redaction, Walmart and Best Buy session cookies, Walmart PIE ciphertext against a fixed key, Walmart 412 proxy rotation, and the Target, Walmart, and Best Buy sequences against a fake HTTP client: in-stock shipping checkout, a Best Buy please-wait queue, a wait through an out-of-stock or marketplace reading, a captcha pause before add-to-cart, a declined card, a CVV resubmit, and a 3-D Secure pause that does not call Cardinal.
 
 A direct Target request from the development network, without a proxy, returned HTTP 435 and a PerimeterX captcha payload. Through a residential proxy, `product_summary_with_fulfillment_v1` returned real JSON: HTTP 200 for a physical store, and HTTP 206 with `Parameter store_id cannot be digital store 3991` when the store id is the old default. The legacy `pdp_fulfillment_v1` path returned HTTP 410. With store `1881` and ZIP `10001`, shipping status was `IN_STOCK` for TCIN `1012916220` (Destined Rivals Elite Trainer Box) and `OUT_OF_STOCK` for TCIN `1010892076` (30th Celebration Elite Trainer Box). New installs use store `1881`. Target checkout against a live cart was not run.
 
@@ -131,6 +147,20 @@ The same proxy's exit IP was `69.85.83.159` (ipify HTTP 200). Walmart product pa
 | 953848932 Shining Fates Pikachu V | HTTP 200 | Toywiz, external | Available | $113.88 |
 | 4048737 | HTTP 404 | no product |  |  |
 
-No Walmart.com listing was in those buy boxes. The 41-offer payload was counted, then the proxy was challenged with HTTP 412 before a second full seller list was saved, so it is unconfirmed whether any of those 41 sellers was Walmart.com. Add to cart, sign-in, and checkout were not run against live Walmart. No purchase was made.
+No Walmart.com listing was in those buy boxes. The 41-offer payload was counted, then the proxy was challenged with HTTP 412 before a second full seller list was saved, so it is unconfirmed whether any of those 41 sellers was Walmart.com. Add to cart, sign-in, checkout, and the live PIE key were not run against a Walmart payment call. PIE ciphertext is locked to the public embed=false algorithm with a fixed sample key. No purchase was made.
 
-Target and Walmart change response shapes, and sign-in or cart calls can be blocked. Expect a paused task until you paste a fresh browser session. Confirm a small in-stock item you actually want before pointing a task at a drop.
+The same proxy was used for read-only Best Buy product pages (undici, HTTP/2 through the proxy). ipify was HTTP 200 and the exit IP was `69.85.83.159`. No add to cart, sign-in, or checkout was sent. No purchase was made.
+
+| SKU | Request | HTTP | Seller | Ship-to-home | Price | Monitor |
+| --- | --- | --- | --- | --- | --- | --- |
+| 6606082 Prismatic Evolutions ETB | `/product/.../sku/6606082` | 200 | Best Buy, 1P | `shippingEligible` false, button `IN_STORE_ONLY` | $49.99 | Not in stock |
+| 6606082 via `/site/6606082.p?skuId=6606082` | redirected to the BSIN page without `/sku/6606082` | 200 | Marketplace 12771570, 3P | Eligible | $159.99 | Ignored; the URL dropped the Best Buy SKU |
+| 6606082 via `searchpage.jsp?st=6606082` | redirected to `/sku/6606082` | 200 | Best Buy, 1P | `IN_STORE_ONLY` | $49.99 | Not in stock |
+| 12771570 Prismatic Evolutions ETB | `/site/12771570.p` | 200 | Marketplace, 3P | Add to Cart, eligible | $159.99 | Ignored |
+| 12267167 Mega Evolution Ascended Heroes ETB | `/site/12267167.p` | 200 | Marketplace, 3P | Add to Cart, eligible | $198.99 | Ignored |
+| 13114704 30th Celebration ETB | `/site/13114704.p` | 200 | Marketplace, 3P | Add to Cart, eligible | $191.39 | Ignored |
+| 6668618 (redirected) Perfect Order ETB | ended on SKU 12799883 | 200 | Marketplace, 3P | Add to Cart, eligible | $94.99 | Ignored |
+
+Sibling ids `6685559` and `6665449` redirected to the same marketplace ETB pages. None of these Pokémon listings were Best Buy ship-to-home at the time of the check. These pages included `customerPrice` and no separate regular price. Best Buy add to cart, the please-wait queue, sign-in, TAS encryption, and checkout were not run live.
+
+Target, Walmart, and Best Buy change response shapes, and sign-in or cart calls can be blocked. Expect a paused task until you paste a fresh browser session. Confirm a small in-stock item you actually want before pointing a task at a drop.

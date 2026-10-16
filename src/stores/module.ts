@@ -18,6 +18,8 @@ export interface StoreRunContext {
   account: FullAccount
   settings: Settings
   proxy?: ProxyEndpoint
+  /** Every proxy in the task's group. Walmart rotates through these after an HTTP 412 block. */
+  proxies?: ProxyEndpoint[]
   signal: AbortSignal
   http: HttpClient
   log: (level: LogLevel, message: string) => void

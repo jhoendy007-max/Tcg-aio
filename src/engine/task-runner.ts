@@ -82,11 +82,13 @@ export class TaskService {
       log: line("info", "Task started.")
     })
     let proxy: ProxyEndpoint | undefined
+    let proxies: ProxyEndpoint[] | undefined
     try {
       const profile = this.db.readProfile(task.profileId)
       const account = this.db.readAccount(task.accountId)
       if (task.proxyGroupId) {
         const group = this.db.getProxyGroup(task.proxyGroupId)
+        proxies = group.proxies
         proxy = pickProxy(group.proxies, task.id)
         update({
           log: line("info", proxy ? `Using proxy ${proxyLabel(proxy)} from ${group.name}.` : `Proxy group ${group.name} is empty. Using a direct connection.`)
@@ -100,6 +102,7 @@ export class TaskService {
         account,
         settings: this.db.getSettings(),
         proxy,
+        proxies,
         signal: controller.signal,
         http: this.http,
         log: (level, message) => update({ log: line(level, message) }),

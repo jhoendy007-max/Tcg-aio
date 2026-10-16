@@ -4,12 +4,22 @@ import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/sha
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
 import { createWalmartModule, WALMART_PAUSE } from "../src/stores/walmart"
 import { isChallenge, parseItemId, readStock } from "../src/stores/walmart/parse"
+import { parsePieKey, protectPanAndCvv } from "../src/stores/walmart/pie"
 import type { StoreRunContext } from "../src/stores/module"
 
 const marketplace = readFileSync(new URL("./fixtures/walmart-offers-marketplace.json", import.meta.url), "utf8")
 const internal = readFileSync(new URL("./fixtures/walmart-internal.json", import.meta.url), "utf8")
 const above = readFileSync(new URL("./fixtures/walmart-above-msrp.json", import.meta.url), "utf8")
 const challenge = readFileSync(new URL("./fixtures/walmart-challenge.json", import.meta.url), "utf8")
+const pieFixture = JSON.parse(readFileSync(new URL("./fixtures/walmart-pie.json", import.meta.url), "utf8")) as {
+  script: string
+  pan: string
+  cvv: string
+  encryptedPan: string
+  encryptedCvv: string
+  integrityCheck: string
+  phase1: { encryptedPan: string; encryptedCvv: string; integrityCheck: string }
+}
 
 const profile: FullProfile = {
   id: "p1",
@@ -87,6 +97,7 @@ function ctx(http: HttpClient, overrides: Partial<StoreRunContext> = {}): StoreR
 
 function happy(req: HttpRequest, placeBody: unknown = { data: { placeOrder: { order: { id: "WM100" } } } }): HttpResponse {
   const url = req.url
+  if (url.includes("getkey.js")) return { status: 200, headers: {}, body: pieFixture.script }
   if (url.includes("GetAllSellerOffers")) return json(200, internal)
   if (url.includes("/getCart/")) return json(200, { data: { cart: { id: "cart-1" } } })
   if (url.includes("/updateItems/")) return json(200, { data: { updateItems: { id: "cart-1" } } })
@@ -189,9 +200,20 @@ describe("walmart module", () => {
       city: "New York",
       isDefault: false
     })
+    const key = fake.calls.find((call) => call.url.includes("getkey.js"))
+    expect(key?.method).toBe("GET")
+    expect(new URL(key?.url ?? "https://invalid").hostname).toBe("securedataweb.walmart.com")
+    expect(key?.body ?? "").not.toContain(pieFixture.pan)
     const pay = fake.calls.find((call) => call.url.includes("CreateAccountCreditCard"))
     expect(new URL(pay?.url ?? "https://invalid").hostname).toBe("www.walmart.com")
-    expect(JSON.parse(pay?.body ?? "{}").variables.input.encryptedPan).toBe("4242424242424242")
+    expect(JSON.parse(pay?.body ?? "{}").variables.input).toMatchObject({
+      encryptedPan: pieFixture.encryptedPan,
+      encryptedCVV: pieFixture.encryptedCvv,
+      integrityCheck: pieFixture.integrityCheck,
+      keyId: "2595de71",
+      phase: 0
+    })
+    expect(pay?.body ?? "").not.toContain(pieFixture.pan)
     expect(JSON.parse(pay?.body ?? "{}").variables.input.address.addressLineOne).toBe("9 Billing Rd")
     const contract = fake.calls.find((call) => call.url.includes("CreateBuyNowContract"))
     expect(JSON.parse(contract?.body ?? "{}").variables).toMatchObject({
@@ -204,7 +226,8 @@ describe("walmart module", () => {
       contractId: "contract-1",
       emailAddress: "ada@example.com"
     })
-    const cardCalls = fake.calls.filter((call) => (call.body ?? "").includes("4242424242424242"))
+    expect(fake.calls.some((call) => (call.body ?? "").includes(pieFixture.pan))).toBe(false)
+    const cardCalls = fake.calls.filter((call) => call.url.includes("CreateAccountCreditCard"))
     expect(cardCalls.length).toBeGreaterThan(0)
     expect(cardCalls.every((call) => new URL(call.url).hostname === "www.walmart.com")).toBe(true)
     expect(fake.calls.some((call) => (call.body ?? "").includes("PICKUP"))).toBe(false)
@@ -219,7 +242,61 @@ describe("walmart module", () => {
     })
     const result = await createWalmartModule().run(ctx(fake.http))
     expect(result).toMatchObject({ outcome: "paused", reason: WALMART_PAUSE })
+    expect(fake.calls.filter((call) => call.url.includes("GetAllSellerOffers"))).toHaveLength(3)
     expect(fake.calls.some((call) => call.url.includes("updateItems"))).toBe(false)
+    expect(fake.calls.some((call) => call.url.includes("CreateAccountCreditCard"))).toBe(false)
+  })
+
+  it("rotates to the next proxy after an HTTP 412 and then continues", async () => {
+    const proxies = [
+      { id: "a", host: "10.0.0.1", port: 8000 },
+      { id: "b", host: "10.0.0.2", port: 8001 }
+    ]
+    let offers = 0
+    const logs: string[] = []
+    const sleeps: number[] = []
+    const fake = client((req) => {
+      if (req.url.includes("GetAllSellerOffers")) {
+        offers += 1
+        if (offers === 1) {
+          expect(req.proxy?.host).toBe("10.0.0.1")
+          return json(412, challenge)
+        }
+        expect(req.proxy?.host).toBe("10.0.0.2")
+        return json(200, internal)
+      }
+      return happy(req)
+    })
+    const result = await createWalmartModule().run(ctx(fake.http, {
+      proxy: proxies[0],
+      proxies,
+      log: (_level, message) => logs.push(message),
+      sleep: async (ms) => { sleeps.push(ms) }
+    }))
+    expect(result).toMatchObject({ outcome: "success", orderId: "WM100" })
+    expect(offers).toBe(2)
+    expect(sleeps).toEqual([1000])
+    expect(logs.some((line) => line.includes("HTTP 412") && line.includes("10.0.0.1:8000") && line.includes("Rotating to proxy 10.0.0.2:8001"))).toBe(true)
+  })
+
+  it("pauses after the 412 budget when the group has no other proxy", async () => {
+    const sleeps: number[] = []
+    const logs: string[] = []
+    const fake = client((req) => {
+      if (req.url.includes("GetAllSellerOffers")) return json(412, challenge)
+      if (req.url.includes("/getCart/")) return json(200, { data: { cart: { id: "cart-1" } } })
+      return json(500, "should not run")
+    })
+    const result = await createWalmartModule().run(ctx(fake.http, {
+      proxy: { id: "a", host: "10.0.0.9", port: 9000 },
+      proxies: [{ id: "a", host: "10.0.0.9", port: 9000 }],
+      log: (_level, message) => logs.push(message),
+      sleep: async (ms) => { sleeps.push(ms) }
+    }))
+    expect(result).toMatchObject({ outcome: "paused", reason: WALMART_PAUSE })
+    expect(fake.calls.filter((call) => call.url.includes("GetAllSellerOffers"))).toHaveLength(3)
+    expect(sleeps).toEqual([1000, 2000])
+    expect(logs.some((line) => line.includes("No other proxy is in the group"))).toBe(true)
     expect(fake.calls.some((call) => call.url.includes("CreateAccountCreditCard"))).toBe(false)
   })
 
@@ -282,5 +359,22 @@ describe("walmart module", () => {
     const cards = fake.calls.filter((call) => call.url.includes("CreateAccountCreditCard"))
     expect(cards).toHaveLength(2)
     expect(cards.every((call) => new URL(call.url).hostname === "www.walmart.com")).toBe(true)
+    expect(fake.calls.filter((call) => call.url.includes("getkey.js"))).toHaveLength(2)
+    expect(cards.every((call) => !(call.body ?? "").includes(pieFixture.pan))).toBe(true)
+  })
+})
+
+describe("walmart PIE", () => {
+  it("matches the PIE embed=false ciphertext for a fixed key", () => {
+    const key = parsePieKey(pieFixture.script)
+    expect(key).toMatchObject({ L: 6, E: 4, K: "70E99B247C0E6B77679F65F1D721B120", keyId: "2595de71", phase: 0 })
+    expect(protectPanAndCvv(pieFixture.pan, pieFixture.cvv, key!)).toMatchObject({
+      encryptedPan: pieFixture.encryptedPan,
+      encryptedCvv: pieFixture.encryptedCvv,
+      integrityCheck: pieFixture.integrityCheck
+    })
+    expect(protectPanAndCvv("4242 4242 4242 4242", pieFixture.cvv, key! )?.encryptedPan).toBe(pieFixture.encryptedPan)
+    expect(protectPanAndCvv("4242424242424243", pieFixture.cvv, key!)).toBeNull()
+    expect(protectPanAndCvv(pieFixture.pan, pieFixture.cvv, { ...key!, phase: 1 })).toMatchObject(pieFixture.phase1)
   })
 })
