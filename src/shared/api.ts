@@ -15,6 +15,7 @@ import type {
   TaskInput,
   ProfileInput
 } from "./types"
+import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
 
 export interface AioApi {
   tasks: {
@@ -48,6 +49,13 @@ export interface AioApi {
   }
   stores: {
     list: () => Promise<Result<StoreInfo[]>>
+  }
+  phone: {
+    status: () => Promise<Result<PhoneStatus>>
+    invite: () => Promise<Result<PhoneInvite>>
+    revoke: (id: string) => Promise<Result<PhoneStatus>>
+    saveRelay: (url: string) => Promise<Result<PhoneStatus>>
+    onEvent: (cb: (status: PhoneStatus) => void) => () => void
   }
 }
 

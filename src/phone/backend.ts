@@ -1,0 +1,62 @@
+import { hostname } from "node:os"
+import type { Database } from "../engine/database"
+import type { TaskService } from "../engine/task-runner"
+import { STORE_CATALOG } from "../shared/stores"
+import { projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneSnapshot, type PhoneTaskDraft } from "./protocol"
+import type { PhoneHost } from "./server"
+
+export function desktopName(): string {
+  return hostname().slice(0, 60) || "TCGAIO"
+}
+
+export function createPhoneHost(db: Database, getRunner: () => TaskService | null): PhoneHost {
+  const pcName = desktopName()
+  const snapshot = (): PhoneSnapshot => {
+    const profiles = db.listProfiles()
+    const accounts = db.listAccounts()
+    const groups = db.listProxyGroups()
+    return {
+      pcName,
+      tasks: db.listTasks().map((task) => projectTask(task, profiles, accounts, groups)),
+      profiles: profiles.map(projectProfile),
+      accounts: accounts.map(projectAccount),
+      proxyGroups: groups.map(projectProxyGroup),
+      stores: STORE_CATALOG
+    }
+  }
+  return {
+    pcId: db.pcId(),
+    pcName,
+    relayUrl: () => db.getSettings().phoneRelayUrl,
+    snapshot,
+    saveTask(draft: PhoneTaskDraft) {
+      const saved = db.saveTask(draft)
+      return projectTask(saved, db.listProfiles(), db.listAccounts(), db.listProxyGroups())
+    },
+    deleteTask(id: string) {
+      if (getRunner()?.isRunning(id)) throw new Error("Stop the task before deleting it.")
+      db.deleteTask(id)
+    },
+    start(id: string) {
+      const runner = getRunner()
+      if (!runner) throw new Error("The desktop app is still starting.")
+      runner.start(id)
+    },
+    stop(id: string) {
+      getRunner()?.stop(id)
+    },
+    startAll() {
+      const runner = getRunner()
+      if (!runner) throw new Error("The desktop app is still starting.")
+      return runner.startAll()
+    },
+    stopAll() {
+      getRunner()?.stopAll()
+    },
+    devices: () => db.listDevices(),
+    deviceTokens: () => db.deviceTokens(),
+    saveDevice: (device) => db.saveDevice(device),
+    revokeDevice: (id) => db.revokeDevice(id),
+    touchDevice: (id) => db.touchDevice(id)
+  }
+}

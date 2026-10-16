@@ -151,6 +151,11 @@ tbody tr { cursor: pointer; }
 .proxy-results li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 8px; background: var(--card-2); }
 .proxy-results .ok { color: #b7f0d6; }
 .proxy-results .bad { color: #ffc7c7; }
+.phone-grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+.qr-wrap { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.qr { width: 280px; height: 280px; background: #fff; border-radius: 12px; padding: 10px; }
+.mono { font-family: "Cascadia Mono", "Segoe UI Mono", ui-monospace, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
+@media (max-width: 900px) { .phone-grid { grid-template-columns: 1fr; } }
 
 @media (max-width: 1100px) {
   .form-grid { grid-template-columns: 1fr; }

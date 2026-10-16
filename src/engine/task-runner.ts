@@ -5,7 +5,7 @@ import { isAbortError, sleep } from "./sleep"
 import type { Database } from "./database"
 import { defaultHttp, type HttpClient } from "./http"
 import type { StoreModule } from "../stores/module"
-import type { LogLevel, Notice, ProxyEndpoint, StoreId, TaskEvent, TaskStatus } from "../shared/types"
+import { isActiveStatus, type LogLevel, type Notice, type ProxyEndpoint, type StoreId, type TaskEvent, type TaskStatus } from "../shared/types"
 
 export class TaskService {
   private readonly inflight = new Map<string, Promise<void>>()
@@ -48,6 +48,21 @@ export class TaskService {
 
   stopAll(): void {
     for (const controller of this.controllers.values()) controller.abort()
+  }
+
+  startAll(): { started: string[]; errors: { id: string; error: string }[] } {
+    const started: string[] = []
+    const errors: { id: string; error: string }[] = []
+    for (const task of this.db.listTasks()) {
+      if (this.isRunning(task.id) || isActiveStatus(task.status)) continue
+      try {
+        this.start(task.id)
+        started.push(task.id)
+      } catch (err) {
+        errors.push({ id: task.id, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    return { started, errors }
   }
 
   private async execute(id: string, controller: AbortController): Promise<void> {

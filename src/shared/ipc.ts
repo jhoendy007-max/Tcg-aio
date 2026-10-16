@@ -18,5 +18,10 @@ export const channels = {
   settingsGet: "settings:get",
   settingsSave: "settings:save",
   settingsTest: "settings:test",
-  storesList: "stores:list"
+  storesList: "stores:list",
+  phoneStatus: "phone:status",
+  phoneInvite: "phone:invite",
+  phoneRevoke: "phone:revoke",
+  phoneRelay: "phone:relay",
+  phoneEvent: "phone:event"
 } as const

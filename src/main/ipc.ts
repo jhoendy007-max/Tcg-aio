@@ -1,15 +1,24 @@
 import { ipcMain, type BrowserWindow } from "electron"
+import QRCode from "qrcode"
 import { postDiscord } from "../engine/discord"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
+import type { PhoneServer } from "../phone/server"
+import { encodePairingPayload } from "../phone/protocol"
 import { channels } from "../shared/ipc"
 import type { Result, Settings, TaskEvent } from "../shared/types"
 import { listStores } from "../stores/registry"
 import type { StoreId } from "../shared/types"
 import type { StoreModule } from "../stores/module"
 
-export function registerIpc(db: Database, runner: TaskService, registry: Map<StoreId, StoreModule>, getWindow: () => BrowserWindow | null): void {
+export function registerIpc(
+  db: Database,
+  runner: TaskService,
+  registry: Map<StoreId, StoreModule>,
+  getWindow: () => BrowserWindow | null,
+  phone: PhoneServer
+): void {
   handle(channels.tasksList, () => db.listTasks())
   handle(channels.tasksSave, (input) => db.saveTask(input))
   handle(channels.tasksDelete, (id: string) => {
@@ -63,6 +72,22 @@ export function registerIpc(db: Database, runner: TaskService, registry: Map<Sto
     return { delivered: true as const }
   })
   handle(channels.storesList, () => listStores(registry))
+  handle(channels.phoneStatus, () => phone.status())
+  handle(channels.phoneInvite, async () => {
+    const payload = phone.createInvite()
+    const text = encodePairingPayload(payload)
+    const qrDataUrl = await QRCode.toDataURL(text, { margin: 1, width: 320, errorCorrectionLevel: "M", color: { dark: "#14161b", light: "#ffffff" } })
+    return { ...phone.status(), text, qrDataUrl }
+  })
+  handle(channels.phoneRevoke, (id: string) => {
+    phone.revoke(id)
+    return phone.status()
+  })
+  handle(channels.phoneRelay, (url: string) => {
+    db.saveSettings({ ...db.getSettings(), phoneRelayUrl: url })
+    phone.reconnectRelay()
+    return phone.status()
+  })
 }
 
 function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {

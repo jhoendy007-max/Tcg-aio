@@ -6,6 +6,9 @@ import { postDiscord } from "../engine/discord"
 import { TaskService } from "../engine/task-runner"
 import { channels } from "../shared/ipc"
 import type { TaskEvent } from "../shared/types"
+import { createPhoneHost } from "../phone/backend"
+import { projectTask } from "../phone/protocol"
+import { PhoneServer } from "../phone/server"
 import { createRegistry } from "../stores/registry"
 import { registerIpc } from "./ipc"
 
@@ -14,6 +17,7 @@ if (!gotLock) app.quit()
 
 let window: BrowserWindow | null = null
 let runner: TaskService | null = null
+let phone: PhoneServer | null = null
 
 function createCipher(): Cipher {
   if (safeStorage.isEncryptionAvailable()) return createDpapiCipher(safeStorage)
@@ -47,7 +51,7 @@ function createWindow(): void {
   })
 }
 
-if (gotLock) app.whenReady().then(() => {
+if (gotLock) void app.whenReady().then(async () => {
   if (!process.env.ELECTRON_RENDERER_URL) {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
       callback({
@@ -61,18 +65,38 @@ if (gotLock) app.whenReady().then(() => {
   const db = new Database(join(app.getPath("userData"), "tcgaio.json"), createCipher())
   db.load()
   const registry = createRegistry()
+  phone = new PhoneServer(createPhoneHost(db, () => runner), {
+    onDevices: () => {
+      if (phone) window?.webContents.send(channels.phoneEvent, phone.status())
+    }
+  })
+  await phone.start()
+  const desktop = phone
   runner = new TaskService(
     db,
     registry,
-    (event: TaskEvent) => window?.webContents.send(channels.taskEvent, event),
+    (event: TaskEvent) => {
+      window?.webContents.send(channels.taskEvent, event)
+      if (event.type === "delete") desktop.publishDelete(event.id)
+      else desktop.publishTask(projectTask(event.task, db.listProfiles(), db.listAccounts(), db.listProxyGroups()))
+    },
     async (notice) => {
+      desktop.publishNotice({
+        kind: notice.kind,
+        storeName: notice.storeName,
+        sku: notice.sku,
+        profileName: notice.profileName,
+        detail: notice.detail,
+        orderId: notice.orderId,
+        ts: Date.now()
+      })
       const webhook = db.getSettings().discordWebhook
       if (!webhook) return false
       await postDiscord(webhook, notice)
       return true
     }
   )
-  registerIpc(db, runner, registry, () => window)
+  registerIpc(db, runner, registry, () => window, desktop)
   createWindow()
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -85,5 +109,8 @@ app.on("second-instance", () => {
   window.focus()
 })
 
-app.on("before-quit", () => runner?.stopAll())
+app.on("before-quit", () => {
+  runner?.stopAll()
+  void phone?.stop()
+})
 app.on("window-all-closed", () => app.quit())
