@@ -1,8 +1,8 @@
 # TCGAIO
 
-Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.1 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, and Crunchyroll Store by product ID or URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. Amazon is a registered store module with checkout still stubbed.
+Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.1 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, and Amazon by ASIN or product URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile.
 
-Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target, Walmart, Best Buy, Pokémon Center, or Crunchyroll shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
+Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, or Amazon shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
 
 ## What you get
 
@@ -12,13 +12,13 @@ Retailer terms often restrict automated purchasing. TCGAIO uses the account, pro
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
 - **Settings** — Discord webhook and Target monitor delay, store ID, ZIP, and state.
 
-On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Pokémon Center payment fetches a CyberSource Flex capture context with a GET that does not include the card, then posts the encrypted card only to `flex.cybersource.com`. Crunchyroll payment posts the card form only to `api.stripe.com` and sends the store a `pm_` id plus a masked card. Walmart's PIE key is fetched with a GET that does not include the card.
+On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Pokémon Center payment fetches a CyberSource Flex capture context with a GET that does not include the card, then posts the encrypted card only to `flex.cybersource.com`. Crunchyroll payment posts the card form only to `api.stripe.com` and sends the store a `pm_` id plus a masked card. Amazon checkout uses the address and payment already saved on the Amazon account and does not send the card number or CVV. Walmart's PIE key is fetched with a GET that does not include the card.
 
 ## Requirements
 
 - Windows 10 or 11 to run the packaged app
 - Node.js 22 to build from source
-- A Target, Walmart, Best Buy, Pokémon Center, or Crunchyroll account you control, plus a browser session if password sign-in is challenged
+- A Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, or Amazon account you control, plus a browser session if password sign-in is challenged
 
 ## Setup
 
@@ -62,8 +62,8 @@ App data lives in Electron's user data directory (`%APPDATA%\tcgaio` on Windows)
 ## Usage
 
 1. Open **Profiles** and save a US shipping address, billing address, and card. v0.1 ships inside the US only.
-2. Open **Accounts**. Add a Target, Walmart, Best Buy, Pokémon Center, or Crunchyroll account.
-   - Target password sign-in is attempted when no session is saved. Walmart, Best Buy, Pokémon Center, and Crunchyroll password sign-in are not attempted, because PerimeterX, Akamai, Incapsula, and Cloudflare block them.
+2. Open **Accounts**. Add a Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, or Amazon account.
+   - Target password sign-in is attempted when no session is saved. Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon password sign-in are not attempted, because PerimeterX, Akamai, Incapsula, Cloudflare, and Amazon's robot check block them.
    - The reliable path is a browser session. Sign in on the retailer site, open DevTools, and copy the cookies into the session box.
    - Target:
 
@@ -86,12 +86,13 @@ App data lives in Electron's user data directory (`%APPDATA%\tcgaio` on Windows)
 
    - Pokémon Center: paste the full cookie header from a signed-in `www.pokemoncenter.com` page. Two or more cookies are enough. A single `visitorId` cookie is not.
    - Crunchyroll: paste the cookie header from a signed-in `www.crunchyroll.com` store page, or paste the shopper access token (`eyJ...`) on its own. A guest token pauses before any request.
+   - Amazon: paste the cookie header from a signed-in `www.amazon.com` page, including `at-main` (or `sess-at-main`). A guest `session-id` without `at-main` pauses before any request.
 3. Optionally import a proxy group and run **Test**. A task starts on one proxy from the group. A Walmart task rotates to the next proxy in that group when PerimeterX returns HTTP 412, waits with backoff, and pauses if the block continues.
 4. Open **Settings**. Set the Discord webhook (`https://discord.com/api/webhooks/...`), monitor delay, and the Target store ID / ZIP / state used for ship-to-home stock. Send the test webhook to confirm it.
-5. Open **Tasks**. Create a task with a Target TCIN (`88897904`) or product URL (`https://www.target.com/p/.../-/A-88897904`), a Walmart item ID (`13816151308`) or product URL (`https://www.walmart.com/ip/.../13816151308`), a Best Buy SKU (`6606082`) or product URL (`https://www.bestbuy.com/product/.../sku/6606082`), a Pokémon Center SKU (`10-10416-112`) or product URL (`https://www.pokemoncenter.com/product/10-10416-112/...`), or a Crunchyroll product ID (`810158836396`) or product URL (`https://store.crunchyroll.com/products/...-810158836396.html`). Check the confirmation box. The checkbox is required before **Start** will run, because a successful monitor places a real order.
+5. Open **Tasks**. Create a task with a Target TCIN (`88897904`) or product URL (`https://www.target.com/p/.../-/A-88897904`), a Walmart item ID (`13816151308`) or product URL (`https://www.walmart.com/ip/.../13816151308`), a Best Buy SKU (`6606082`) or product URL (`https://www.bestbuy.com/product/.../sku/6606082`), a Pokémon Center SKU (`10-10416-112`) or product URL (`https://www.pokemoncenter.com/product/10-10416-112/...`), a Crunchyroll product ID (`810158836396`) or product URL (`https://store.crunchyroll.com/products/...-810158836396.html`), or an Amazon ASIN (`B0C8YN3BY4`) or product URL (`https://www.amazon.com/dp/B0C8YN3BY4`). Check the confirmation box. The checkbox is required before **Start** will run, because a successful monitor places a real order.
 6. Press **Start**. The log shows monitoring, add to cart, shipping, payment, and the order id when the retailer accepts it. **Stop** aborts the run. **Resume** continues a paused task after you update the account session.
 
-Stub stores can be selected. Starting one writes a clear failure: that module is registered, and checkout is not implemented in v0.1.
+Every store in the catalog is implemented. A store id registered without a module still fails closed: checkout is not run.
 
 ## Target flow
 
@@ -151,13 +152,33 @@ An expired session tries the refresh token, then the password. A challenge at an
 8. `POST .../baskets/{id}/payment-instruments` sends `paymentMethodId` `STRIPE`, `c_stripePaymentMethodId` (the `pm_` id), the card type, expiry, holder, and `maskedNumber` (`************` plus the last four). The raw card number and CVV are not in that body. `POST .../shopper-orders/v1/.../orders` places the order with `{ basketId }`. `requires_action`, `requires_source_action`, or `redirect_to_url` pauses for 3-D Secure. A declined card fails without an order id.
 9. On success, failure, or pause, the app posts to the Discord webhook when one is saved.
 
+## Amazon flow
+
+1. Require a pasted signed-in `www.amazon.com` cookie header that includes `at-main` or `sess-at-main`. Password sign-in is not attempted. A guest cookie header pauses before any request.
+2. A bare 10-character ASIN and a `/dp/`, `/gp/product/`, or `/gp/offer-listing/` URL are both accepted. The task requests `https://www.amazon.com/dp/{ASIN}` and then `GET /gp/product/ajax/aodAjaxMain/ref=dp_aod_NEW_mbc?asin={ASIN}&pc=dp`. `/gp/offer-listing/{ASIN}` currently returns HTTP 301 to the product page and drops the offer list, so the task uses the ajax path that still returns the offers.
+3. Continue only for an offer whose seller is Amazon.com (seller id `ATVPDKIKX0DER` on that offer, or the sold-by name Amazon.com) and whose shipper is Amazon.com. The marketplace id in the page header is the same token and does not count. Third-party sellers are ignored, including Fulfilled by Amazon (`isAmazonFulfilled=1` with a different seller). When the product page shows a list price, the Amazon.com price has to be at or within 5% of that list price. A higher price stays on the monitor. If Amazon.com sends no list price, Amazon.com's own price is the store price. HTTP 429 and 5xx retry. A "Page Not Found" title stays on the monitor.
+4. A robot check (`/errors/validateCaptcha`, "not a robot", "Enter the characters you see", `opfcaptcha`) pauses the task. A two-step verification page (`/ap/mfa`, `/ap/cvf`, "Two-Step Verification") pauses the task. Discord is notified. TCGAIO does not solve captchas or enter OTP codes. A product page that mentions `robotdetection` in a script is not treated as a challenge. A redirect to `/ap/signin` pauses for a fresh cookie header.
+5. `POST /cart/add-to-cart/ref=aod_dpdsk_new_0` sends the ASIN, the Amazon.com `offerListingId`, the task quantity, and the `anti-csrftoken-a2z` value from that offer. An unavailable add to cart returns to the monitor.
+6. `GET /checkout/entry/cart?proceedToCheckout=1&pipelineType=Chewbacca&referrer=cart` opens checkout. The task does not type a shipping address. It uses the address already selected on the account. A locker, Hub Counter, or pickup destination with no ship-to address fails, and no order is placed. If Amazon asks for a new card or a CVV, the task pauses or fails and does not send the profile card.
+7. The place-order form Amazon rendered (`/checkout/p/.../spc/place-order`, or `placeYourOrder1`) is submitted with the fields already on that form. Those fields are the purchase id and the CSRF token. The card number and CVV are not added. A declined saved payment fails without an order id. The order number is the `###-#######-#######` value on the thank-you page.
+8. On success, failure, or pause, the app posts to the Discord webhook when one is saved. The checkout page itself was not available during the live read-only check, so the place-order field names are locked by the fake HTTP client.
+
 ## Adding a store
 
-Each retailer is a `StoreModule` under `src/stores/<store>/`. The registry in `src/stores/registry.ts` is the only place that needs to know it exists. A module implements `run(ctx)` and returns `success`, `failed`, `paused`, or `stopped`. `ctx` provides the profile, account, the starting proxy, the proxy group, monitor settings, logger, and an HTTP client. The Amazon file is the stub to replace.
+Each retailer is a `StoreModule` under `src/stores/<store>/`. The registry in `src/stores/registry.ts` is the only place that needs to know it exists. A module implements `run(ctx)` and returns `success`, `failed`, `paused`, or `stopped`. `ctx` provides the profile, account, the starting proxy, the proxy group, monitor settings, logger, and an HTTP client. Every store in the catalog has a module. `createStubModule` remains the fallback for a catalog id that has no module yet.
 
 ## What was tested, and what was not
 
-Automated tests cover TCIN and proxy parsing, local encryption, masked profiles, the task runner, Discord payload redaction, Walmart, Best Buy, Pokémon Center, and Crunchyroll session cookies, Walmart PIE ciphertext against a fixed key, a Pokémon Center Flex JWE that decrypts back to the card, a Crunchyroll Stripe PaymentMethod body, Walmart 412 proxy rotation, and the Target, Walmart, Best Buy, Pokémon Center, and Crunchyroll sequences against a fake HTTP client: in-stock shipping checkout, a Best Buy please-wait queue, a Pokémon Center Queue-it wait that logs the line position, a wait through an out-of-stock or marketplace reading, a captcha pause before add-to-cart, a declined card, a CVV resubmit, and a 3-D Secure pause that does not call Cardinal. Pokémon Center challenge fixtures are trimmed from live DataDome and Incapsula responses. The Crunchyroll fixture is a trimmed Cloudflare "Just a moment..." page. The tests do not call the live sites.
+| Store | Live-verified | Untested live |
+| --- | --- | --- |
+| Target | Ship-to-home stock JSON through the proxy. Store `1881` ZIP `10001`: TCIN `1012916220` `IN_STOCK`, TCIN `1010892076` `OUT_OF_STOCK`. Store `3991` HTTP 206 digital-store error. Direct requests HTTP 435. | Add to cart, payment, checkout |
+| Walmart | Product pages HTTP 200. Sampled Pokémon buy boxes were third-party, not Walmart.com. `GetAllSellerOffers` HTTP 200, then HTTP 412. | Add to cart, sign-in, PIE payment, checkout |
+| Best Buy | SKU pages HTTP 200. `6606082` is Best Buy (1P), in-store only, $49.99. Other sampled ETBs were marketplace. | Add to cart, please-wait queue, sign-in, TAS, checkout |
+| Pokémon Center | Homepage, search, product, and cart API returned DataDome, Imperva, or Incapsula. No product JSON, price, or stock. | Add to cart, Queue-it, sign-in, Flex, checkout |
+| Crunchyroll | `store.crunchyroll.com` HTTP 301 to `https://www.crunchyroll.com/store`. `www` pages and Shopper Products HTTP 403 Cloudflare. No stock JSON. | Add to cart, sign-in, Stripe, checkout |
+| Amazon | Product pages and All Offers Display HTTP 200 for the Pokémon ETBs below. None were sold or shipped by Amazon.com. No robot check on these requests. | Add to cart, sign-in, checkout with the saved payment |
+
+Automated tests cover TCIN and proxy parsing, local encryption, masked profiles, the task runner, Discord payload redaction, Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon session cookies, Walmart PIE ciphertext against a fixed key, a Pokémon Center Flex JWE that decrypts back to the card, a Crunchyroll Stripe PaymentMethod body, Walmart 412 proxy rotation, and the Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon sequences against a fake HTTP client: in-stock shipping checkout, a Best Buy please-wait queue, a Pokémon Center Queue-it wait that logs the line position, a wait through an out-of-stock or marketplace reading, a captcha pause before add-to-cart, a declined card, a CVV resubmit, and a 3-D Secure pause that does not call Cardinal. Pokémon Center challenge fixtures are trimmed from live DataDome and Incapsula responses. The Crunchyroll fixture is a trimmed Cloudflare "Just a moment..." page. The Amazon fixture is a trimmed All Offers Display block from the live 151 Elite Trainer Box page. The tests do not call the live sites.
 
 A direct Target request from the development network, without a proxy, returned HTTP 435 and a PerimeterX captcha payload. Through a residential proxy, `product_summary_with_fulfillment_v1` returned real JSON: HTTP 200 for a physical store, and HTTP 206 with `Parameter store_id cannot be digital store 3991` when the store id is the old default. The legacy `pdp_fulfillment_v1` path returned HTTP 410. With store `1881` and ZIP `10001`, shipping status was `IN_STOCK` for TCIN `1012916220` (Destined Rivals Elite Trainer Box) and `OUT_OF_STOCK` for TCIN `1010892076` (30th Celebration Elite Trainer Box). New installs use store `1881`. Target checkout against a live cart was not run.
 
@@ -221,4 +242,19 @@ The same proxy was used for read-only Crunchyroll Store requests (undici through
 
 Crunchyroll add to cart, sign-in, the Stripe publishable key, payment-method creation, shipping-address and shipping-method field names, and place order were not run live. Those steps are covered by the fake HTTP client only.
 
-Target, Walmart, Best Buy, Pokémon Center, and Crunchyroll change response shapes, and sign-in or cart calls can be blocked. Expect a paused task until you paste a fresh browser session. Confirm a small in-stock item you actually want before pointing a task at a drop.
+The same proxy was used for read-only Amazon requests (undici through the proxy, redirects not followed). ipify was HTTP 200 and the exit IP was `69.85.83.159`. No add to cart, sign-in, or checkout was sent. No purchase was made. None of these offers were sold by Amazon.com, so the monitor treats every one as not in stock. The offer parser matches these All Offers Display bodies. No response was a robot check.
+
+| ASIN | Page | All Offers Display | Amazon.com offer |
+| --- | --- | --- | --- |
+| B0C8YN3BY4 Pokémon 151 Elite Trainer Box | HTTP 200. Featured seller SSA Cards, $609.99, "Only 13 left in stock". New (14) from other sellers. | HTTP 200. 11 offers, all shipped by the seller. Lowest $609.99 (SSA Cards, Collectors Expedition, DynamaxDeals, Empire of the Senses, AIGDistributionLLC, Thumbs Up Distribution). Then Strawberri Entertainment $699.97, Super Games Inc. $747.97, Bricks a Plenty $799.99, Everstead Supply $851.86, GemMintArena $859.27. | None |
+| B0BZQWDLG1 Scarlet & Violet Elite Trainer Box | HTTP 200. The page canonical is B0BSNXK3H7 and shows "See All Buying Options" with no featured merchant. | HTTP 200. Same four sellers as B0BSNXK3H7. | None |
+| B0BSNXK3H7 Scarlet & Violet Elite Trainer Box | The B0BZQWDLG1 product page resolved to this ASIN. | HTTP 200. TicTakToys, LegitMTG, and The Gaming Broker $229.95. Ozone Toys $252.95. Each ships from that seller. | None |
+| B01N9XCZI7 Sun & Moon Elite Trainer Box | HTTP 200. Featured seller Super Games Inc., $324.97, "Only 2 left in stock". | HTTP 200. Super Games Inc. $324.97, TicTakToys $369.95, BlueProton $499.99. | None |
+| B0CLB99P32 | HTTP 404, title "Page Not Found" | not requested |  |
+| B078QF8G78 | HTTP 404, title "Page Not Found" | not requested |  |
+
+`/gp/offer-listing/{ASIN}` for B0C8YN3BY4, B0BSNXK3H7, and B01N9XCZI7 was HTTP 301 to `https://www.amazon.com/dp/{ASIN}/ref=olp-opf-redir?aod=1`. That product URL does not include the offer list. `/gp/product/ajax/aodAjaxMain/ref=dp_aod_NEW_mbc?asin={ASIN}&pc=dp` is the request that returned the sellers above.
+
+Amazon add to cart, sign-in, two-step verification, and checkout with the account's saved address and payment were not run live. No card number was sent. The place-order form is covered by the fake HTTP client only.
+
+Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon change response shapes, and sign-in or cart calls can be blocked. Expect a paused task until you paste a fresh browser session. Confirm a small in-stock item you actually want before pointing a task at a drop.

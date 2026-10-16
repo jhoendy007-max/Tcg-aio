@@ -185,7 +185,7 @@ describe("target module", () => {
 })
 
 describe("store registry", () => {
-  it("implements Target, Walmart, Best Buy, Pokémon Center, and Crunchyroll and stubs Amazon", async () => {
+  it("implements every catalog store", () => {
     const registry = createRegistry()
     expect([...registry.keys()].sort()).toEqual(["amazon", "bestbuy", "crunchyroll", "pokemon-center", "target", "walmart"])
     expect(registry.get("target")?.implemented).toBe(true)
@@ -197,10 +197,8 @@ describe("store registry", () => {
     expect(registry.get("pokemon-center")?.skuHint).toBe("SKU or product URL")
     expect(registry.get("crunchyroll")?.implemented).toBe(true)
     expect(registry.get("crunchyroll")?.skuHint).toBe("Product ID or URL")
-    for (const id of ["amazon"] as const) {
-      const result = await registry.get(id)?.run(ctx({ async request() { return json(500, "no") } }))
-      expect(registry.get(id)?.implemented).toBe(false)
-      expect(result?.outcome).toBe("failed")
-    }
+    expect(registry.get("amazon")?.implemented).toBe(true)
+    expect(registry.get("amazon")?.skuHint).toBe("ASIN or product URL")
+    for (const module of registry.values()) expect(module.implemented).toBe(true)
   })
 })
