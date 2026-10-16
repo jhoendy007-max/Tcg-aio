@@ -201,7 +201,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   discordWebhook: "",
   monitorDelayMs: 3500,
-  targetStoreId: "3991",
+  targetStoreId: "1881",
   targetZip: "10001",
   targetState: "NY",
   targetApiKey: ""

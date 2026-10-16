@@ -1,0 +1,22 @@
+{
+  "errors": [
+    {
+      "message": "Parameter store_id cannot be digital store 3991.",
+      "extensions": { "classification": "DataFetchingException" }
+    }
+  ],
+  "data": {
+    "product_summaries": [
+      {
+        "tcin": "1012916220",
+        "item": {
+          "product_description": {
+            "title": "Pokémon Destined Rivals Elite Trainer Box TCG - Official Expansion Pack"
+          },
+          "fulfillment": {}
+        },
+        "fulfillment": {}
+      }
+    ]
+  }
+}

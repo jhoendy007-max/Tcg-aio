@@ -12,6 +12,7 @@ import {
   isUnauthorized,
   parseStock,
   paymentInstructionId,
+  stockProblem,
   type StockReading
 } from "./parse"
 import { parseTcin } from "../../shared/tcin"
@@ -87,7 +88,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const key = ctx.settings.targetApiKey.trim() || DEFAULT_KEY
   const location = {
-    storeId: ctx.settings.targetStoreId.trim() || "3991",
+    storeId: ctx.settings.targetStoreId.trim() || "1881",
     zip: ctx.settings.targetZip.trim() || "10001",
     state: ctx.settings.targetState.trim().toUpperCase() || "NY"
   }
@@ -254,6 +255,10 @@ function interpretMonitor(response: HttpResponse): Step<StockReading> {
     return { kind: "retry", reason: `Monitor request returned HTTP ${response.status}. Retrying.` }
   }
   const reading = parseStock(response.body)
+  const problem = stockProblem(response.body)
+  if (problem && (!reading || reading.status === "UNKNOWN" || reading.status === "NOT_FOUND")) {
+    return { kind: "retry", reason: problem }
+  }
   if (!reading || (response.status >= 400 && reading.status === "NOT_FOUND")) {
     return { kind: "retry", reason: `Monitor returned HTTP ${response.status} without a stock reading.` }
   }

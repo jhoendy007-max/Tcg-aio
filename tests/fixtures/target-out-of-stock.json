@@ -1,0 +1,30 @@
+{
+  "data": {
+    "product_summaries": [
+      {
+        "tcin": "1010892076",
+        "item": {
+          "product_description": {
+            "title": "Pok&#233;mon Trading Card Game: 30th Celebration Elite Trainer Box"
+          }
+        },
+        "fulfillment": {
+          "product_id": "1010892076",
+          "is_out_of_stock_in_all_store_locations": true,
+          "sold_out": false,
+          "shipping_options": {
+            "availability_status": "OUT_OF_STOCK",
+            "loyalty_availability_status": "OUT_OF_STOCK",
+            "services": []
+          },
+          "store_options": [
+            {
+              "location_id": "1881",
+              "order_pickup": { "availability_status": "UNAVAILABLE" }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

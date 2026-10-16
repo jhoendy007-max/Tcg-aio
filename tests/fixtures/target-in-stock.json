@@ -1,0 +1,24 @@
+{
+  "data": {
+    "product_summaries": [
+      {
+        "tcin": "1012916220",
+        "item": {
+          "product_description": {
+            "title": "Pokémon Destined Rivals Elite Trainer Box TCG - Official Expansion Pack"
+          }
+        },
+        "fulfillment": {
+          "product_id": "1012916220",
+          "is_out_of_stock_in_all_store_locations": false,
+          "sold_out": false,
+          "shipping_options": {
+            "availability_status": "IN_STOCK",
+            "loyalty_availability_status": "IN_STOCK",
+            "services": []
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { luhnOk } from "../src/shared/card"
 import { parseProxyLine, parseProxyList } from "../src/shared/proxy"
@@ -5,7 +8,9 @@ import { redact } from "../src/shared/redact"
 import { parseTcin } from "../src/shared/tcin"
 import { assertDiscordWebhook, buildDiscordBody } from "../src/engine/discord"
 import { parseSession } from "../src/engine/session"
-import { isChallenge, parseStock } from "../src/stores/target/parse"
+import { isChallenge, parseStock, stockProblem } from "../src/stores/target/parse"
+
+const fixture = (name: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", name), "utf8")
 
 describe("parseTcin", () => {
   it("reads a bare TCIN and a product URL", () => {
@@ -85,6 +90,21 @@ describe("sessions and stock", () => {
     expect(parseStock(JSON.stringify({
       data: { product_summaries: [{ fulfillment: { sold_out: true, shipping_options: { availability_status: "IN_STOCK" } } }] }
     }))).toMatchObject({ inStock: false, status: "SOLD_OUT" })
+  })
+
+  it("parses live Target fulfillment shapes", () => {
+    expect(parseStock(fixture("target-in-stock.json"))).toEqual({
+      inStock: true,
+      status: "IN_STOCK",
+      title: "Pokémon Destined Rivals Elite Trainer Box TCG - Official Expansion Pack"
+    })
+    expect(parseStock(fixture("target-out-of-stock.json"))).toEqual({
+      inStock: false,
+      status: "OUT_OF_STOCK",
+      title: "Pokémon Trading Card Game: 30th Celebration Elite Trainer Box"
+    })
+    expect(stockProblem(fixture("target-digital-store.json"))).toBe("Parameter store_id cannot be digital store 3991.")
+    expect(stockProblem(fixture("target-in-stock.json"))).toBeNull()
   })
 
   it("detects a challenge page and ignores product copy", () => {

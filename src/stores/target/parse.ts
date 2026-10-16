@@ -116,7 +116,37 @@ function readTitle(product: Record<string, unknown>): string | undefined {
   const item = asRecord(product.item)
   const description = asRecord(item?.product_description) ?? asRecord(product.product_description)
   const title = description?.title
-  return typeof title === "string" && title.trim() ? title.trim() : undefined
+  if (typeof title !== "string" || !title.trim()) return undefined
+  return decodeEntities(title.trim())
+}
+
+export function stockProblem(body: string): string | null {
+  let json: unknown
+  try {
+    json = JSON.parse(body)
+  } catch {
+    return null
+  }
+  const root = asRecord(json)
+  const errors = Array.isArray(root?.errors) ? root.errors : []
+  const message = errors
+    .map((error) => asRecord(error)?.message)
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0)
+  if (!message) return null
+  const reading = parseStock(body)
+  if (reading && reading.status !== "UNKNOWN" && reading.status !== "NOT_FOUND") return null
+  return message.trim()
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&#(\d+);/g, (_, digits: string) => String.fromCodePoint(Number(digits)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
 }
 
 function shippingStatus(fulfillment: Record<string, unknown>): string | undefined {
