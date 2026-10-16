@@ -24,9 +24,11 @@ export async function notify(notice: PhoneNotice): Promise<void> {
       ? "Test finished"
       : notice.kind === "alert"
         ? "Restock match"
-        : notice.kind === "paused"
-          ? "Needs attention"
-          : "Checkout failed"
+        : notice.kind === "challenge"
+          ? "Solve a challenge"
+          : notice.kind === "paused"
+            ? "Needs attention"
+            : "Checkout failed"
   await Notifications.scheduleNotificationAsync({
     content: {
       title,

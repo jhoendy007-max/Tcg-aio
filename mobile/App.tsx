@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react"
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
 import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from "../src/phone/client"
-import type { PhoneSnapshot, PhoneTask, PhoneTaskDraft } from "../src/phone/protocol"
+import type { PhoneChallenge, PhoneSnapshot, PhoneTask, PhoneTaskDraft } from "../src/phone/protocol"
+import { ChallengeCard } from "./src/ChallengeCard"
 import type { KeywordWatchInput, RestockRuleInput } from "../src/shared/types"
 import { ensureNotificationPermission, notify } from "./src/notify"
 import { clearLink, loadLink, saveLink } from "./src/storage"
@@ -33,6 +34,8 @@ export default function App() {
   const [draft, setDraft] = useState<PhoneTaskDraft | null>(null)
   const [error, setError] = useState("")
   const [health, setHealth] = useState<StoreHealth[] | null>(null)
+  const [challenge, setChallenge] = useState<PhoneChallenge | null>(null)
+  const [now, setNow] = useState(() => Date.now())
   const [deviceName, setDeviceName] = useState("My phone")
   const [paste, setPaste] = useState("")
   const [scanning, setScanning] = useState(false)
@@ -61,6 +64,7 @@ export default function App() {
     next.onAlerts((alerts) => {
       setSnap((current) => current ? { ...current, alerts } : current)
     })
+    next.onChallenge(setChallenge)
   }
 
   async function connect(link: SavedPhoneLink) {
@@ -90,6 +94,12 @@ export default function App() {
       }, 4000)
     }
   }
+
+  useEffect(() => {
+    if (!challenge) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [challenge])
 
   useEffect(() => {
     void loadLink().then((link) => {
@@ -195,6 +205,9 @@ export default function App() {
           </View>
           <Text style={styles.p}>Tasks run on the PC. This phone starts, stops, and watches them.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
+          {challenge && screen !== "alerts" ? (
+            <ChallengeCard challenge={challenge} now={now} session={session.current} onRun={run} />
+          ) : null}
           {screen === "alerts" ? (
             <AlertsPanel snap={snap} onRun={run} session={session.current} onBack={() => setScreen("dash")} />
           ) : screen === "edit" && draft ? (

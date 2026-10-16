@@ -152,12 +152,14 @@ export type TaskStatus =
   | "paused"
   | "stopped"
   | "tested"
+  | "challenge"
 
 export const ACTIVE_STATUSES: TaskStatus[] = [
   "monitoring",
   "in_stock",
   "adding_to_cart",
-  "checking_out"
+  "checking_out",
+  "challenge"
 ]
 
 export function isActiveStatus(status: TaskStatus): boolean {
@@ -207,6 +209,8 @@ export interface Settings {
   testMode: boolean
   /** After a passed test, clear the cart on stores that support it. */
   clearCartAfterTest: boolean
+  /** How long a person has to solve a store challenge before the task pauses. */
+  challengeTimeoutSec: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -218,7 +222,8 @@ export const DEFAULT_SETTINGS: Settings = {
   targetApiKey: "",
   phoneRelayUrl: "",
   testMode: false,
-  clearCartAfterTest: false
+  clearCartAfterTest: false,
+  challengeTimeoutSec: 180
 }
 
 export interface SecurityInfo {
@@ -247,8 +252,21 @@ export interface StoreHealth {
   ms: number
 }
 
+/** A store challenge waiting for a person. No proxy password and no cookie header. */
+export interface PublicChallenge {
+  id: string
+  taskId: string
+  store: StoreId
+  storeName: string
+  sku: string
+  url: string
+  reason: string
+  expiresAt: number
+  proxyLabel: string
+}
+
 export interface Notice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge"
   storeName: string
   sku: string
   profileName: string

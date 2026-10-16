@@ -9,6 +9,7 @@ import {
   type ClientMessage,
   type PairingPayload,
   type PhoneAlerts,
+  type PhoneChallenge,
   type PhoneNotice,
   type PhoneSnapshot,
   type PhoneTask,
@@ -78,6 +79,7 @@ export class PhoneSession {
   private onDeletedCb: ((id: string) => void) | null = null
   private onNoticeCb: ((notice: PhoneNotice) => void) | null = null
   private onAlertsCb: ((alerts: PhoneAlerts) => void) | null = null
+  private onChallengeCb: ((challenge: PhoneChallenge | null) => void) | null = null
   private onOnlineCb: ((online: boolean) => void) | null = null
   constructor(private link: SavedPhoneLink | null = null) {}
 
@@ -103,6 +105,10 @@ export class PhoneSession {
 
   onAlerts(cb: (alerts: PhoneAlerts) => void): void {
     this.onAlertsCb = cb
+  }
+
+  onChallenge(cb: (challenge: PhoneChallenge | null) => void): void {
+    this.onChallengeCb = cb
   }
 
   onOnline(cb: (online: boolean) => void): void {
@@ -239,6 +245,22 @@ export class PhoneSession {
     return this.request({ type: "watch.resume", req: rid(), conn: this.conn, watchId })
   }
 
+  openChallenge(): Promise<PhoneCommandResult> {
+    return this.request({ type: "challenge.open", req: rid(), conn: this.conn })
+  }
+
+  completeChallenge(): Promise<PhoneCommandResult> {
+    return this.request({ type: "challenge.done", req: rid(), conn: this.conn })
+  }
+
+  dismissChallenge(): Promise<PhoneCommandResult> {
+    return this.request({ type: "challenge.dismiss", req: rid(), conn: this.conn })
+  }
+
+  submitChallenge(cookie: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "challenge.submit", req: rid(), conn: this.conn, cookie })
+  }
+
   private async request(message: ClientMessage): Promise<PhoneCommandResult> {
     if (!("req" in message)) throw new Error("Phone request is missing an id.")
     const req = message.req
@@ -373,6 +395,7 @@ export class PhoneSession {
     else if (message.type === "task.deleted") this.onDeletedCb?.(message.id)
     else if (message.type === "notice") this.onNoticeCb?.(message.notice)
     else if (message.type === "alerts") this.onAlertsCb?.(message.alerts)
+    else if (message.type === "challenge") this.onChallengeCb?.(message.challenge)
     else if (message.type === "presence") this.setOnline(true)
     const index = this.waiters.findIndex((waiter) => waiter.match(message))
     if (index < 0) {

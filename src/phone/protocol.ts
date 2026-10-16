@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2"
 import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils"
 import { redact } from "../shared/redact"
 import { isStoreId, storeName } from "../shared/stores"
-import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, PublicAccount, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
+import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
 
 export const PHONE_PROTOCOL = 1
 export const INVITE_TTL_MS = 3 * 60 * 1000
@@ -101,8 +101,13 @@ export interface PhoneSnapshot {
   alerts: PhoneAlerts
 }
 
+/** Challenge handoff for the paired phone. The cookie is only on this message. */
+export interface PhoneChallenge extends PublicChallenge {
+  cookie: string
+}
+
 export interface PhoneNotice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge"
   storeName: string
   sku: string
   profileName: string
@@ -164,6 +169,10 @@ export type ClientMessage =
   | { type: "watch.delete"; req: string; conn: string; watchId: string }
   | { type: "watch.toggle"; req: string; conn: string; watchId: string; enabled: boolean }
   | { type: "watch.resume"; req: string; conn: string; watchId: string }
+  | { type: "challenge.open"; req: string; conn: string }
+  | { type: "challenge.done"; req: string; conn: string }
+  | { type: "challenge.dismiss"; req: string; conn: string }
+  | { type: "challenge.submit"; req: string; conn: string; cookie: string }
 
 export type ServerMessage =
   | { type: "paired"; token: string; deviceId: string; pcName: string }
@@ -173,6 +182,7 @@ export type ServerMessage =
   | { type: "task.deleted"; id: string }
   | { type: "notice"; notice: PhoneNotice }
   | { type: "alerts"; alerts: PhoneAlerts }
+  | { type: "challenge"; challenge: PhoneChallenge | null }
   | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: StoreHealth[]; alerts?: PhoneAlerts }
   | { type: "result"; req: string; ok: false; error: string }
   | { type: "error"; error: string }
@@ -389,6 +399,13 @@ export function asClientMessage(value: unknown): ClientMessage {
     if (message.type === "watch.toggle") return { type: "watch.toggle", req: message.req, conn: message.conn, watchId: message.watchId, enabled: message.enabled === true }
     if (message.type === "watch.resume") return { type: "watch.resume", req: message.req, conn: message.conn, watchId: message.watchId }
     return { type: "watch.delete", req: message.req, conn: message.conn, watchId: message.watchId }
+  }
+  if (message.type === "challenge.open" || message.type === "challenge.done" || message.type === "challenge.dismiss") {
+    return { type: message.type, req: message.req, conn: message.conn }
+  }
+  if (message.type === "challenge.submit") {
+    if (typeof message.cookie !== "string" || !message.cookie.trim()) throw new Error("Solved cookies are missing.")
+    return { type: "challenge.submit", req: message.req, conn: message.conn, cookie: message.cookie.replace(/[\r\n]/g, "").slice(0, 8192) }
   }
   throw new Error("Unknown phone request.")
 }

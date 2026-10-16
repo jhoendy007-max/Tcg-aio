@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
 import type { AioApi } from "../shared/api"
 import { channels } from "../shared/ipc"
 import type { PhoneStatus } from "../phone/protocol"
-import type { AlertsView, TaskEvent } from "../shared/types"
+import type { AlertsView, PublicChallenge, TaskEvent } from "../shared/types"
 
 const api: AioApi = {
   tasks: {
@@ -69,6 +69,18 @@ const api: AioApi = {
       const listener = (_event: IpcRendererEvent, payload: AlertsView) => cb(payload)
       ipcRenderer.on(channels.alertsEvent, listener)
       return () => ipcRenderer.removeListener(channels.alertsEvent, listener)
+    }
+  },
+  challenge: {
+    get: () => ipcRenderer.invoke(channels.challengeGet),
+    open: () => ipcRenderer.invoke(channels.challengeOpen),
+    done: () => ipcRenderer.invoke(channels.challengeDone),
+    submit: (cookie) => ipcRenderer.invoke(channels.challengeSubmit, cookie),
+    dismiss: () => ipcRenderer.invoke(channels.challengeDismiss),
+    onEvent: (cb: (challenge: PublicChallenge | null) => void) => {
+      const listener = (_event: IpcRendererEvent, payload: PublicChallenge | null) => cb(payload)
+      ipcRenderer.on(channels.challengeEvent, listener)
+      return () => ipcRenderer.removeListener(channels.challengeEvent, listener)
     }
   }
 }

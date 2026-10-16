@@ -74,6 +74,9 @@ export function SettingsPage() {
           <input type="checkbox" checked={form.clearCartAfterTest} onChange={(event) => setForm({ ...form, clearCartAfterTest: event.target.checked })} />
           <span>After a passed test, remove the test line from the Target or Walmart cart. Other stores leave the cart for you.</span>
         </label>
+        <Field label="Challenge timeout (seconds)" hint="How long a person has to solve a store challenge before the task pauses. 30–600.">
+          <TextInput type="number" min={30} max={600} value={form.challengeTimeoutSec} onChange={(event) => setForm({ ...form, challengeTimeoutSec: Number(event.target.value) })} required />
+        </Field>
         <Field label="Monitor delay (ms)" hint="How long to wait between stock checks. 1000–60000.">
           <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
         </Field>

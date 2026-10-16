@@ -20,7 +20,8 @@ import type {
   KeywordWatchInput,
   RestockRule,
   RestockRuleInput,
-  StoreHealth
+  StoreHealth,
+  PublicChallenge
 } from "./types"
 import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
 
@@ -78,6 +79,14 @@ export interface AioApi {
     deleteWatch: (id: string) => Promise<Result<{ id: string }>>
     resumeWatch: (id: string) => Promise<Result<KeywordWatch>>
     onEvent: (cb: (view: AlertsView) => void) => () => void
+  }
+  challenge: {
+    get: () => Promise<Result<PublicChallenge | null>>
+    open: () => Promise<Result<{ opened: true }>>
+    done: () => Promise<Result<{ saved: true }>>
+    submit: (cookie: string) => Promise<Result<{ saved: true }>>
+    dismiss: () => Promise<Result<{ dismissed: true }>>
+    onEvent: (cb: (challenge: PublicChallenge | null) => void) => () => void
   }
 }
 

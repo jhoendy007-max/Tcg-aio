@@ -51,7 +51,7 @@ export function App() {
           ))}
         </nav>
         <footer>
-          <span>v0.2.2</span>
+          <span>v0.2.3</span>
           <span>Desktop + phone</span>
         </footer>
       </aside>

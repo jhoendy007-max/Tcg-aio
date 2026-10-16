@@ -23,9 +23,10 @@ export const STATUS_LABEL: Record<string, string> = {
   failed: "Failed",
   paused: "Paused",
   stopped: "Stopped",
-  tested: "Tested"
+  tested: "Tested",
+  challenge: "Solve challenge"
 }
 
 export function isActive(status: string): boolean {
-  return status === "monitoring" || status === "in_stock" || status === "adding_to_cart" || status === "checking_out"
+  return status === "monitoring" || status === "in_stock" || status === "adding_to_cart" || status === "checking_out" || status === "challenge"
 }

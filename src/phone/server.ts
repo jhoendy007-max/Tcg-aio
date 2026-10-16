@@ -18,6 +18,7 @@ import {
   type PairingPayload,
   type PhoneDevice,
   type PhoneAlerts,
+  type PhoneChallenge,
   type PhoneNotice,
   type PhoneSnapshot,
   type PhoneStatus,
@@ -51,6 +52,11 @@ export interface PhoneHost {
   deleteWatch?(id: string): PhoneAlerts
   toggleWatch?(id: string, enabled: boolean): PhoneAlerts
   resumeWatch?(id: string): PhoneAlerts
+  openChallenge?(): Promise<void> | void
+  completeChallenge?(): Promise<void> | void
+  dismissChallenge?(): void
+  submitChallenge?(cookie: string): void
+  currentChallenge?(): PhoneChallenge | null
 }
 
 interface DeviceKey {
@@ -181,6 +187,15 @@ export class PhoneServer {
 
   publishAlerts(alerts: PhoneAlerts): void {
     this.broadcast({ type: "alerts", alerts })
+  }
+
+  publishChallenge(challenge: PhoneChallenge | null): void {
+    this.broadcast({
+      type: "challenge",
+      challenge: challenge
+        ? { ...challenge, reason: redact(challenge.reason).slice(0, 500), cookie: challenge.cookie.slice(0, 8192) }
+        : null
+    })
   }
 
   status(): PhoneStatus {
@@ -332,6 +347,7 @@ export class PhoneServer {
       this.host.touchDevice(opened.id)
       this.send(conn, opened.key, "session", { type: "presence", online: true, pcName: this.host.pcName })
       this.send(conn, opened.key, "session", { type: "snapshot", conn: conn.connId, snapshot: this.host.snapshot() })
+      this.sendChallenge(conn, opened.key)
       return
     }
     this.handle(conn, opened.message)
@@ -357,6 +373,7 @@ export class PhoneServer {
       if (message.type === "sync") {
         this.send(conn, conn.key!, "session", { type: "result", req, ok: true })
         this.send(conn, conn.key!, "session", { type: "snapshot", conn: conn.connId, snapshot: this.host.snapshot() })
+        this.sendChallenge(conn, conn.key!)
         return
       }
       if (message.type === "task.start") {
@@ -448,6 +465,31 @@ export class PhoneServer {
         if (!alerts) throw new Error("Keyword watches are not available.")
         this.publishAlerts(alerts)
         this.reply(conn, req, { ok: true, alerts })
+        return
+      }
+      if (message.type === "challenge.open") {
+        if (!this.host.openChallenge) throw new Error("Challenge handoff is not available.")
+        await this.host.openChallenge()
+        this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "challenge.done") {
+        if (!this.host.completeChallenge) throw new Error("Challenge handoff is not available.")
+        await this.host.completeChallenge()
+        this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "challenge.dismiss") {
+        if (!this.host.dismissChallenge) throw new Error("Challenge handoff is not available.")
+        this.host.dismissChallenge()
+        this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "challenge.submit") {
+        if (!this.host.submitChallenge) throw new Error("Challenge handoff is not available.")
+        this.host.submitChallenge(message.cookie)
+        this.reply(conn, req, { ok: true })
+        return
       }
     } catch (err) {
       this.reply(conn, req, { ok: false, error: safeError(err) })
@@ -483,6 +525,15 @@ export class PhoneServer {
     this.conns.delete(conn)
     if (conn.rid) this.relayConns.delete(conn.rid)
     if (conn.ws && conn.ws.readyState === WebSocket.OPEN) conn.ws.close(code)
+  }
+
+  private sendChallenge(conn: Conn, key: Uint8Array): void {
+    const challenge = this.host.currentChallenge?.() ?? null
+    if (!challenge) return
+    this.send(conn, key, "session", {
+      type: "challenge",
+      challenge: { ...challenge, reason: redact(challenge.reason).slice(0, 500), cookie: challenge.cookie.slice(0, 8192) }
+    })
   }
 
   private requireAlerts(): PhoneHost {

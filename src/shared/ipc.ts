@@ -34,5 +34,11 @@ export const channels = {
   alertsSaveWatch: "alerts:saveWatch",
   alertsDeleteWatch: "alerts:deleteWatch",
   alertsResumeWatch: "alerts:resumeWatch",
-  alertsEvent: "alerts:event"
+  alertsEvent: "alerts:event",
+  challengeGet: "challenge:get",
+  challengeOpen: "challenge:open",
+  challengeDone: "challenge:done",
+  challengeSubmit: "challenge:submit",
+  challengeDismiss: "challenge:dismiss",
+  challengeEvent: "challenge:event"
 } as const

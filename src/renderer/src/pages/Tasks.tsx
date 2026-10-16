@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicProfile, type PublicTask, type StoreHealth, type StoreInfo, type TaskInput } from "../../../shared/types"
+import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type StoreHealth, type StoreInfo, type TaskInput } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, formatTime, STATUS_LABEL, unwrap } from "../lib"
 
@@ -28,6 +28,8 @@ export function TasksPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const [challenge, setChallenge] = useState<PublicChallenge | null>(null)
+  const [now, setNow] = useState(() => Date.now())
 
   async function reload() {
     const [nextTasks, nextProfiles, nextAccounts, nextGroups, nextStores, settings] = await Promise.all([
@@ -49,7 +51,8 @@ export function TasksPage() {
 
   useEffect(() => {
     void reload().catch((err) => setError(errorText(err)))
-    return window.aio.tasks.onEvent((event) => {
+    void unwrap(window.aio.challenge.get()).then(setChallenge).catch(() => undefined)
+    const stopTasks = window.aio.tasks.onEvent((event) => {
       if (event.type === "delete") {
         setTasks((current) => current.filter((task) => task.id !== event.id))
         setSelectedId((current) => (current === event.id ? null : current))
@@ -63,7 +66,18 @@ export function TasksPage() {
         return next
       })
     })
+    const stopChallenge = window.aio.challenge.onEvent(setChallenge)
+    return () => {
+      stopTasks()
+      stopChallenge()
+    }
   }, [])
+
+  useEffect(() => {
+    if (!challenge) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [challenge])
 
   const selected = tasks.find((task) => task.id === selectedId) ?? null
   const storeAccounts = accounts.filter((account) => account.store === form?.store)
@@ -155,6 +169,19 @@ export function TasksPage() {
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {globalTest ? <Banner tone="info">Global test mode is on. Every task stops before place order. Nothing is charged.</Banner> : null}
+      {challenge ? (
+        <div className="card">
+          <h2>Solve the challenge</h2>
+          <p>{challenge.storeName} · {challenge.sku} · {challenge.proxyLabel} · {Math.max(0, Math.ceil((challenge.expiresAt - now) / 1000))}s left</p>
+          <p>{challenge.reason}</p>
+          <p>A person solves this page. TCGAIO does not send it to a solving service. Open browser uses this PC, the task proxy, and the task cookies. The phone can open the same page on the phone network, and that path only sends back cookies JavaScript can see.</p>
+          <div className="actions">
+            <button type="button" className="primary" onClick={() => void unwrap(window.aio.challenge.open()).catch((err) => setError(errorText(err)))}>Open browser</button>
+            <button type="button" onClick={() => void unwrap(window.aio.challenge.done()).catch((err) => setError(errorText(err)))}>I solved it</button>
+            <button type="button" onClick={() => void unwrap(window.aio.challenge.dismiss()).catch((err) => setError(errorText(err)))}>Dismiss</button>
+          </div>
+        </div>
+      ) : null}
       {form ? (
         <form className="card form-grid" onSubmit={save}>
           <Field label="Store">

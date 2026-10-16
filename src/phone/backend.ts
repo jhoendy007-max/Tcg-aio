@@ -6,14 +6,27 @@ import type { Database } from "../engine/database"
 import type { TaskService } from "../engine/task-runner"
 import { STORE_CATALOG } from "../shared/stores"
 import type { KeywordWatchInput, RestockRuleInput } from "../shared/types"
-import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneAlerts, type PhoneSnapshot, type PhoneTaskDraft } from "./protocol"
+import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneAlerts, type PhoneChallenge, type PhoneSnapshot, type PhoneTaskDraft } from "./protocol"
 import type { PhoneHost } from "./server"
 
 export function desktopName(): string {
   return hostname().slice(0, 60) || "TCGAIO"
 }
 
-export function createPhoneHost(db: Database, getRunner: () => TaskService | null, getAlerts: () => AlertService | null = () => null): PhoneHost {
+export interface PhoneChallengeActions {
+  open(): Promise<void> | void
+  complete(): Promise<void> | void
+  dismiss(): void
+  submit(cookie: string): void
+  current(): PhoneChallenge | null
+}
+
+export function createPhoneHost(
+  db: Database,
+  getRunner: () => TaskService | null,
+  getAlerts: () => AlertService | null = () => null,
+  challenge?: PhoneChallengeActions
+): PhoneHost {
   const pcName = desktopName()
   const snapshot = (): PhoneSnapshot => {
     const profiles = db.listProfiles()
@@ -107,6 +120,25 @@ export function createPhoneHost(db: Database, getRunner: () => TaskService | nul
     resumeWatch(id: string) {
       db.resumeWatch(id)
       return changed()
+    },
+    openChallenge() {
+      if (!challenge) throw new Error("Challenge handoff is not available.")
+      return challenge.open()
+    },
+    completeChallenge() {
+      if (!challenge) throw new Error("Challenge handoff is not available.")
+      return challenge.complete()
+    },
+    dismissChallenge() {
+      if (!challenge) throw new Error("Challenge handoff is not available.")
+      challenge.dismiss()
+    },
+    submitChallenge(cookie: string) {
+      if (!challenge) throw new Error("Challenge handoff is not available.")
+      challenge.submit(cookie)
+    },
+    currentChallenge() {
+      return challenge?.current() ?? null
     }
   }
 }

@@ -70,6 +70,10 @@ export function cleanSettings(input: Settings): Settings {
   if (targetApiKey && !/^[A-Za-z0-9]{20,80}$/.test(targetApiKey)) {
     throw new AppError("Target API key should be the site key, or left blank to use the built-in key.")
   }
+  const challengeTimeoutSec = Math.round(Number(input.challengeTimeoutSec ?? DEFAULT_SETTINGS.challengeTimeoutSec))
+  if (!Number.isFinite(challengeTimeoutSec) || challengeTimeoutSec < 30 || challengeTimeoutSec > 600) {
+    throw new AppError("Challenge timeout must be between 30 and 600 seconds.")
+  }
   return {
     discordWebhook: input.discordWebhook.trim(),
     monitorDelayMs,
@@ -79,7 +83,8 @@ export function cleanSettings(input: Settings): Settings {
     targetApiKey,
     phoneRelayUrl: cleanRelayUrl(input.phoneRelayUrl ?? ""),
     testMode: input.testMode === true,
-    clearCartAfterTest: input.clearCartAfterTest === true
+    clearCartAfterTest: input.clearCartAfterTest === true,
+    challengeTimeoutSec
   }
 }
 

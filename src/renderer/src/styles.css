@@ -124,7 +124,7 @@ tbody tr { cursor: pointer; }
 .pill.monitoring, .pill.in_stock, .pill.adding_to_cart, .pill.checking_out { background: #1d2b46; color: #c5d8ff; }
 .pill.success { background: #16362b; color: #b7f0d6; }
 .pill.failed { background: #3d2020; color: #ffc7c7; }
-.pill.paused { background: #3d3118; color: #ffe1a8; }
+.pill.paused, .pill.challenge { background: #3d3118; color: #ffe1a8; }
 .pill.stopped, .pill.idle { background: #2a303b; color: var(--muted); }
 .pill.tested, .pill.test, .pill.watching { background: #1c3358; color: #d6e6ff; }
 .pill.blocked { background: #3d2020; color: #ffc7c7; }

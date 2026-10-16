@@ -1,6 +1,7 @@
 import { ipcMain, type BrowserWindow } from "electron"
 import QRCode from "qrcode"
 import { relayRestockUrl, type AlertService } from "../engine/alerts"
+import type { ChallengeController } from "./challenge-window"
 import { postDiscord } from "../engine/discord"
 import { checkStoreHealth } from "../engine/health"
 import { defaultHttp } from "../engine/http"
@@ -21,7 +22,8 @@ export function registerIpc(
   registry: Map<StoreId, StoreModule>,
   getWindow: () => BrowserWindow | null,
   phone: PhoneServer,
-  alerts: AlertService
+  alerts: AlertService,
+  challenge: ChallengeController
 ): void {
   const publishAlerts = () => {
     const status = phone.status()
@@ -154,6 +156,23 @@ export function registerIpc(
     alerts.refresh()
     publishAlerts()
     return watch
+  })
+  handle(channels.challengeGet, () => challenge.current())
+  handle(channels.challengeOpen, async () => {
+    await challenge.open()
+    return { opened: true as const }
+  })
+  handle(channels.challengeDone, async () => {
+    await challenge.complete()
+    return { saved: true as const }
+  })
+  handle(channels.challengeSubmit, (cookie: string) => {
+    challenge.submit(cookie)
+    return { saved: true as const }
+  })
+  handle(channels.challengeDismiss, () => {
+    challenge.dismiss()
+    return { dismissed: true as const }
   })
 }
 
