@@ -76,8 +76,32 @@ export function cleanSettings(input: Settings): Settings {
     targetStoreId,
     targetZip,
     targetState,
-    targetApiKey
+    targetApiKey,
+    phoneRelayUrl: cleanRelayUrl(input.phoneRelayUrl ?? ""),
+    blockRetries: cleanBlockRetries(input.blockRetries)
   }
+}
+
+function cleanBlockRetries(value: number): number {
+  const retries = Math.round(Number(value))
+  if (!Number.isInteger(retries) || retries < 1 || retries > 8) {
+    throw new AppError("Block retries must be from 1 to 8.")
+  }
+  return retries
+}
+
+export function cleanRelayUrl(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  } catch {
+    throw new AppError("Phone relay must be a ws:// or wss:// URL.")
+  }
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") throw new AppError("Phone relay must be a ws:// or wss:// URL.")
+  if (url.username || url.password) throw new AppError("Put the phone relay token in the path, not the URL userinfo.")
+  return url.toString()
 }
 
 export function assertStore(value: string) {

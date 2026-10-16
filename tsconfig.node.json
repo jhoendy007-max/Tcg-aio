@@ -18,6 +18,7 @@
     "src/engine/**/*",
     "src/shared/**/*",
     "src/stores/**/*",
+    "src/phone/**/*",
     "tests/**/*",
     "electron.vite.config.ts",
     "vitest.config.ts"

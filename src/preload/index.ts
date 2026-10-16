@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron"
 import type { AioApi } from "../shared/api"
 import { channels } from "../shared/ipc"
+import type { PhoneStatus } from "../phone/protocol"
 import type { TaskEvent } from "../shared/types"
 
 const api: AioApi = {
@@ -39,6 +40,17 @@ const api: AioApi = {
   },
   stores: {
     list: () => ipcRenderer.invoke(channels.storesList)
+  },
+  phone: {
+    status: () => ipcRenderer.invoke(channels.phoneStatus),
+    invite: () => ipcRenderer.invoke(channels.phoneInvite),
+    revoke: (id: string) => ipcRenderer.invoke(channels.phoneRevoke, id),
+    saveRelay: (url: string) => ipcRenderer.invoke(channels.phoneRelay, url),
+    onEvent: (cb: (status: PhoneStatus) => void) => {
+      const listener = (_event: IpcRendererEvent, payload: PhoneStatus) => cb(payload)
+      ipcRenderer.on(channels.phoneEvent, listener)
+      return () => ipcRenderer.removeListener(channels.phoneEvent, listener)
+    }
   }
 }
 

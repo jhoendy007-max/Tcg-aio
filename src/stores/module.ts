@@ -1,3 +1,4 @@
+import type { SessionRefreshResult } from "../engine/block-recovery"
 import type { HttpClient } from "../engine/http"
 import type {
   FullAccount,
@@ -18,9 +19,11 @@ export interface StoreRunContext {
   account: FullAccount
   settings: Settings
   proxy?: ProxyEndpoint
-  /** Every proxy in the task's group. Walmart rotates through these after an HTTP 412 block. */
+  /** Every proxy in the task's group. A block rotates to the next healthy proxy for this account. */
   proxies?: ProxyEndpoint[]
   signal: AbortSignal
+  /** Reloads the store in the account's real browser partition. Tests omit it. */
+  refreshSession?: (input: { homeUrl: string; proxy?: ProxyEndpoint; signal: AbortSignal }) => Promise<SessionRefreshResult>
   http: HttpClient
   log: (level: LogLevel, message: string) => void
   detail: (message: string) => void

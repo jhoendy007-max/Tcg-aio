@@ -1,8 +1,8 @@
 # TCGAIO
 
-Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.1 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, and Amazon by ASIN or product URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile.
+Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, and Amazon by ASIN or product URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
 
-Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, or Amazon shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
+Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not forge cookies or send challenges to a solving service. On HTTP 429, 403, 412, or 435, or a challenge page, a task backs off, switches that account to the next healthy proxy, and reloads the store in that account's real browser so the site can set fresh cookies. If the reloaded page is still a challenge, a window opens on the PC and the phone is notified for you to solve it. After the configured number of tries the task pauses and a Discord notification is sent.
 
 ## What you get
 
@@ -10,14 +10,16 @@ Retailer terms often restrict automated purchasing. TCGAIO uses the account, pro
 - **Profiles** — shipping and billing. Card number and CVV are encrypted locally.
 - **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
-- **Settings** — Discord webhook and Target monitor delay, store ID, ZIP, and state.
+- **Settings** — Discord webhook, block retries, and Target monitor delay, store ID, ZIP, and state.
+- **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. Card numbers and passwords stay on the PC.
 
 On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Pokémon Center payment fetches a CyberSource Flex capture context with a GET that does not include the card, then posts the encrypted card only to `flex.cybersource.com`. Crunchyroll payment posts the card form only to `api.stripe.com` and sends the store a `pm_` id plus a masked card. Amazon checkout uses the address and payment already saved on the Amazon account and does not send the card number or CVV. Walmart's PIE key is fetched with a GET that does not include the card.
 
 ## Requirements
 
-- Windows 10 or 11 to run the packaged app
+- Windows 10 or 11 to run the packaged desktop app
 - Node.js 22 to build from source
+- Android 8 or newer for the phone APK. iOS needs an Apple Developer account (see below)
 - A Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, or Amazon account you control, plus a browser session if password sign-in is challenged
 
 ## Setup
@@ -53,15 +55,61 @@ npm ci
 npm run dist:win
 ```
 
-The NSIS installer is written to `release/TCGAIO-Setup-0.1.0.exe`. The installer is per-user and lets you choose the directory.
+The NSIS installer is written to `release/TCGAIO-Setup-0.2.0.exe`. The installer is per-user and lets you choose the directory. `dist:win` passes `--publish never`, so a branch build does not need a GitHub token. A `v*` tag publishes the installer as a GitHub Release.
 
-GitHub Actions also builds it. The workflow `.github/workflows/windows.yml` runs the tests, typecheck, and production build on Ubuntu, then runs `npm run dist:win` on `windows-latest` and uploads the `.exe` as the `TCGAIO-Windows-Setup` artifact.
+GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and production build on Ubuntu, then `npm run dist:win` on `windows-latest` and uploads the `.exe`. The same workflow builds the Android APK.
 
 App data lives in Electron's user data directory (`%APPDATA%\tcgaio` on Windows): `tcgaio.json` for tasks and ciphertext, and `tcgaio.key` only when the AES fallback is used.
 
+## Phone app
+
+The desktop app is the engine. Leave it running. The phone does not check out by itself, and it never receives the card number, CVV, account password, store session, or proxy password. Profiles show the name, card last four, city, and state. Accounts show a masked username. Proxy groups show a name and a count.
+
+### How the connection works
+
+Pairing is a one-time QR code on the desktop **Phone** page. The code contains the PC's LAN address, an optional relay URL, and a 32-byte secret that expires in three minutes and works once. Every later frame is AES-256-GCM. The pairing secret wraps the first exchange, which issues a device token stored on the phone (Expo SecureStore) and encrypted on the PC with the same cipher as the card data. The token is not written in the clear. Revoke a phone from the desktop list and its token stops working.
+
+Two paths:
+
+| Path | When it works | Tradeoff |
+| --- | --- | --- |
+| Direct WebSocket on the LAN (`ws://<pc>:47321`) | Phone and PC on the same Wi-Fi. Windows may ask to allow TCGAIO on private networks. | Fast, and no third party sees the frames. It does not work away from home, and an unencrypted socket is fine only because the frames themselves are AES-GCM with a key that came from the QR. |
+| Optional relay | Phone is away from home. On the PC, save a `ws://` or `wss://` relay URL, then pair again so the QR includes it. | The phone and PC both dial out, so home NAT does not have to accept an inbound port. The relay only routes ciphertext. Whoever runs the relay can drop traffic and can see that a PC id is connected, but cannot read tasks. You run the relay yourself: `npm run phone:relay` (port 47322, or `PHONE_RELAY_PORT`). Put it on a VPS and prefer `wss://` in front of it (Caddy or nginx). There is no TCGAIO-hosted relay. |
+
+The phone tries the LAN address first, then the relay. "PC online" means the socket is up. If the app is suspended, iOS will drop the socket; Android can keep it while the app is in the foreground. Checkout success, failure, and paused/challenge notices are local notifications delivered while the socket is connected. Remote push after the app is killed needs Apple Push Notification service or Firebase, which requires your developer accounts and is not wired in this beta.
+
+### Android
+
+The installable debug APK is `TCGAIO-Phone-0.2.0.apk` (arm64-v8a, which covers current phones). Enable install from unknown sources, install it, and pair. A debug APK is signed with the Android debug key, so a later build from another machine will not update over it until you uninstall.
+
+To build it:
+
+```powershell
+cd mobile
+npm ci
+npx expo prebuild --platform android
+cd android
+.\gradlew assembleDebug -PreactNativeArchitectures=arm64-v8a
+```
+
+### iOS, which you have to do
+
+This repo cannot produce an installable iPhone build. Apple only signs iOS apps for an Apple Developer Program account ($99/year).
+
+1. Enroll at https://developer.apple.com/programs/.
+2. From `mobile/`, run `npx eas login` and `npx eas init` so `app.json` gets your EAS project id (it ships with a placeholder).
+3. TestFlight: `npx eas build -p ios --profile production`, then `npx eas submit -p ios --profile production`. Install from the TestFlight email after Apple finishes processing.
+4. Or, on a Mac with Xcode: `npx expo prebuild --platform ios`, open the generated `mobile/ios` workspace, select your team, and run on a device.
+
+`eas.json` also has a `preview` profile (`distribution: internal`) for a device-registered ad hoc build. The bundle id is `com.tcgaio.phone`.
+
+### What pairing tests cover
+
+`npm test` pairs a phone client to the desktop listener on localhost, checks that a second use of the same QR fails, that an expired QR fails, and that revoke closes the phone. A second test pairs only through the relay and checks the relay log does not contain the task SKU, the card number, the account password, or the pairing secret. The masked profile, account, and proxy projections are asserted directly. The camera scan is the same payload as the paste box; the socket tests use that payload.
+
 ## Usage
 
-1. Open **Profiles** and save a US shipping address, billing address, and card. v0.1 ships inside the US only.
+1. Open **Profiles** and save a US shipping address, billing address, and card. Shipping is US only.
 2. Open **Accounts**. Add a Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, or Amazon account.
    - Target password sign-in is attempted when no session is saved. Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon password sign-in are not attempted, because PerimeterX, Akamai, Incapsula, Cloudflare, and Amazon's robot check block them.
    - The reliable path is a browser session. Sign in on the retailer site, open DevTools, and copy the cookies into the session box.
@@ -178,7 +226,7 @@ Each retailer is a `StoreModule` under `src/stores/<store>/`. The registry in `s
 | Crunchyroll | `store.crunchyroll.com` HTTP 301 to `https://www.crunchyroll.com/store`. `www` pages and Shopper Products HTTP 403 Cloudflare. No stock JSON. | Add to cart, sign-in, Stripe, checkout |
 | Amazon | Product pages and All Offers Display HTTP 200 for the Pokémon ETBs below. None were sold or shipped by Amazon.com. No robot check on these requests. | Add to cart, sign-in, checkout with the saved payment |
 
-Automated tests cover TCIN and proxy parsing, local encryption, masked profiles, the task runner, Discord payload redaction, Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon session cookies, Walmart PIE ciphertext against a fixed key, a Pokémon Center Flex JWE that decrypts back to the card, a Crunchyroll Stripe PaymentMethod body, Walmart 412 proxy rotation, and the Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon sequences against a fake HTTP client: in-stock shipping checkout, a Best Buy please-wait queue, a Pokémon Center Queue-it wait that logs the line position, a wait through an out-of-stock or marketplace reading, a captcha pause before add-to-cart, a declined card, a CVV resubmit, and a 3-D Secure pause that does not call Cardinal. Pokémon Center challenge fixtures are trimmed from live DataDome and Incapsula responses. The Crunchyroll fixture is a trimmed Cloudflare "Just a moment..." page. The Amazon fixture is a trimmed All Offers Display block from the live 151 Elite Trainer Box page. The tests do not call the live sites.
+Automated tests cover TCIN and proxy parsing, local encryption, masked profiles, the task runner, Discord payload redaction, phone pairing over a direct socket and through the relay, Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon session cookies, Walmart PIE ciphertext against a fixed key, a Pokémon Center Flex JWE that decrypts back to the card, a Crunchyroll Stripe PaymentMethod body, Walmart 412 proxy rotation, and the Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, and Amazon sequences against a fake HTTP client: in-stock shipping checkout, a Best Buy please-wait queue, a Pokémon Center Queue-it wait that logs the line position, a wait through an out-of-stock or marketplace reading, a captcha pause before add-to-cart, a declined card, a CVV resubmit, and a 3-D Secure pause that does not call Cardinal. Pokémon Center challenge fixtures are trimmed from live DataDome and Incapsula responses. The Crunchyroll fixture is a trimmed Cloudflare "Just a moment..." page. The Amazon fixture is a trimmed All Offers Display block from the live 151 Elite Trainer Box page. The tests do not call the live sites.
 
 A direct Target request from the development network, without a proxy, returned HTTP 435 and a PerimeterX captcha payload. Through a residential proxy, `product_summary_with_fulfillment_v1` returned real JSON: HTTP 200 for a physical store, and HTTP 206 with `Parameter store_id cannot be digital store 3991` when the store id is the old default. The legacy `pdp_fulfillment_v1` path returned HTTP 410. With store `1881` and ZIP `10001`, shipping status was `IN_STOCK` for TCIN `1012916220` (Destined Rivals Elite Trainer Box) and `OUT_OF_STOCK` for TCIN `1010892076` (30th Celebration Elite Trainer Box). New installs use store `1881`. Target checkout against a live cart was not run.
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { AccountsPage } from "./pages/Accounts"
 import { ProfilesPage } from "./pages/Profiles"
 import { ProxiesPage } from "./pages/Proxies"
+import { PhonePage } from "./pages/Phone"
 import { SettingsPage } from "./pages/Settings"
 import { TasksPage } from "./pages/Tasks"
 
@@ -10,6 +11,7 @@ const PAGES = [
   { id: "profiles", label: "Profiles" },
   { id: "proxies", label: "Proxies" },
   { id: "accounts", label: "Accounts" },
+  { id: "phone", label: "Phone" },
   { id: "settings", label: "Settings" }
 ] as const
 
@@ -47,8 +49,8 @@ export function App() {
           ))}
         </nav>
         <footer>
-          <span>v0.1.0</span>
-          <span>Target shipping checkout</span>
+          <span>v0.2.0</span>
+          <span>Desktop + phone</span>
         </footer>
       </aside>
       <main>
@@ -56,6 +58,7 @@ export function App() {
         {page === "profiles" ? <ProfilesPage /> : null}
         {page === "proxies" ? <ProxiesPage /> : null}
         {page === "accounts" ? <AccountsPage /> : null}
+        {page === "phone" ? <PhonePage /> : null}
         {page === "settings" ? <SettingsPage /> : null}
       </main>
     </div>

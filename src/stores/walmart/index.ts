@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto"
-import { proxyLabel } from "../../shared/proxy"
+import { attachSession, isBlockStatus, sendWithRecovery } from "../../engine/block-recovery"
 import { redact } from "../../shared/redact"
-import type { ProxyEndpoint, SessionCookies } from "../../shared/types"
+import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
 import {
@@ -98,6 +98,11 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => {
+    if (cookies.cookie) jar.raw = cookies.cookie
+    if (cookies.accessToken && cookies.accessToken !== "session") jar.accessToken = cookies.accessToken
+    if (cookies.visitorId) jar.visitorId = cookies.visitorId
+  })
   ctx.log("info", "Using the saved Walmart session.")
   const probe = await probeCart(ctx, jar)
   if (probe.kind === "paused") return { outcome: "paused", reason: probe.reason }
@@ -531,78 +536,15 @@ function rememberSession(ctx: StoreRunContext, jar: CookieJar, response: HttpRes
   if (changed && !quiet) void ctx.onSession(jar.toSession())
 }
 
-const lanes = new WeakMap<StoreRunContext, ProxyLane>()
-
-class ProxyLane {
-  private readonly proxies: ProxyEndpoint[]
-  private index: number
-  private strikes = 0
-
-  constructor(ctx: StoreRunContext) {
-    this.proxies = ctx.proxies?.length ? ctx.proxies : ctx.proxy ? [ctx.proxy] : []
-    const start = ctx.proxy
-    const found = start ? this.proxies.findIndex((proxy) => proxy.id === start.id && proxy.host === start.host && proxy.port === start.port) : 0
-    this.index = found >= 0 ? found : 0
-  }
-
-  private current(): ProxyEndpoint | undefined {
-    return this.proxies[this.index]
-  }
-
-  async send(ctx: StoreRunContext, request: HttpRequest): Promise<HttpResponse> {
-    for (;;) {
-      const proxy = this.current()
-      const response = await ctx.http.request({ ...request, proxy, signal: ctx.signal })
-      if (!isProxyBlock(response.status)) {
-        if (!isChallenge(response.status, response.body)) this.strikes = 0
-        return response
-      }
-      this.strikes += 1
-      const budget = Math.max(3, this.proxies.length * 2)
-      const where = proxy ? `proxy ${proxyLabel(proxy)}` : "a direct connection"
-      if (this.strikes >= budget) {
-        ctx.log("warn", `Walmart returned HTTP ${response.status} (PerimeterX) through ${where} again. Pausing after ${this.strikes} blocks.`)
-        return response
-      }
-      const next = this.rotate()
-      const moved = Boolean(next && proxy && (next.host !== proxy.host || next.port !== proxy.port))
-      const wait = Math.min(ctx.settings.monitorDelayMs * 2 ** Math.min(this.strikes - 1, 3), 30000)
-      const action = moved && next ? `Rotating to proxy ${proxyLabel(next)}` : "No other proxy is in the group"
-      ctx.log("warn", `Walmart returned HTTP ${response.status} (PerimeterX) through ${where}. ${action}. Waiting ${formatWait(wait)} before retrying.`)
-      await ctx.sleep(wait)
-    }
-  }
-
-  private rotate(): ProxyEndpoint | undefined {
-    if (this.proxies.length > 1) this.index = (this.index + 1) % this.proxies.length
-    return this.current()
-  }
-}
-
-function laneFor(ctx: StoreRunContext): ProxyLane {
-  const existing = lanes.get(ctx)
-  if (existing) return existing
-  const created = new ProxyLane(ctx)
-  lanes.set(ctx, created)
-  return created
-}
-
-function isProxyBlock(status: number): boolean {
-  return status === 412 || status === 418 || status === 456
-}
-
-function formatWait(ms: number): string {
-  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
-  return `${ms}ms`
-}
-
 async function call(ctx: StoreRunContext, request: HttpRequest, carriesCard = false): Promise<HttpResponse> {
   const host = new URL(request.url).hostname
   if (!ALLOWED_HOSTS.has(host)) throw new Error(`Refusing to contact ${host}.`)
   if (carriesCard && host !== CARD_HOST) throw new Error("Card data can only be sent to the retailer.")
   if (host === PIE_HOST && request.method !== "GET") throw new Error("The PIE key endpoint accepts a key request only.")
-  return laneFor(ctx).send(ctx, request)
+  return sendWithRecovery(ctx, request, {
+    homeUrl: "https://www.walmart.com/",
+    blocked: (response) => isBlockStatus(response.status, response) || isChallenge(response.status, response.body)
+  })
 }
 
 function endpoint(gateway: "home" | "cartxo", name: string, hash: string): string {

@@ -1,3 +1,4 @@
+import { attachSession, isBlockStatus, sendWithRecovery } from "../../engine/block-recovery"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -90,6 +91,11 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => {
+    const bearer = jar.bearer
+    jar.load(cookies)
+    if (!jar.bearer && bearer) jar.bearer = bearer
+  })
   ctx.log("info", "Using the saved Crunchyroll session. store.crunchyroll.com now redirects to www.crunchyroll.com.")
   ctx.phase("monitoring")
   ctx.log("info", `Watching product ${sku} for Crunchyroll store availability.`)
@@ -359,7 +365,10 @@ async function store(ctx: StoreRunContext, request: HttpRequest): Promise<Step<H
 async function send(ctx: StoreRunContext, request: HttpRequest): Promise<HttpResponse> {
   const host = new URL(request.url).hostname
   if (!STORE_HOSTS.has(host)) throw new Error(`Refusing to contact ${host}.`)
-  return ctx.http.request({ ...request, redirect: "manual", proxy: ctx.proxy, signal: ctx.signal })
+  return sendWithRecovery(ctx, { ...request, redirect: "manual" }, {
+    homeUrl: "https://www.crunchyroll.com/",
+    blocked: (response) => isBlockStatus(response.status, response) || isChallenge(response.status, response.body, header(response, "cf-mitigated"))
+  })
 }
 
 async function stripeCall(ctx: StoreRunContext, request: HttpRequest): Promise<HttpResponse> {

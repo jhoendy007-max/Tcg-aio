@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import { attachSession, isBlockStatus, sendWithRecovery } from "../../engine/block-recovery"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -79,6 +80,11 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => {
+    if (cookies.cookie) jar.raw = cookies.cookie
+    if (cookies.accessToken && cookies.accessToken !== "session") jar.accessToken = cookies.accessToken
+    if (cookies.visitorId) jar.visitorId = cookies.visitorId
+  })
   ctx.log("info", "Using the saved Best Buy session.")
   const probe = await probeCart(ctx, jar)
   if (probe.kind === "paused") return { outcome: "paused", reason: probe.reason }
@@ -489,7 +495,10 @@ async function call(ctx: StoreRunContext, request: HttpRequest, carriesCard = fa
   const host = new URL(request.url).hostname
   if (carriesCard && host !== HOST) throw new Error("Card data can only be sent to the retailer.")
   if (host !== HOST) throw new Error(`Refusing to contact ${host}.`)
-  return ctx.http.request({ ...request, proxy: ctx.proxy, signal: ctx.signal })
+  return sendWithRecovery(ctx, request, {
+    homeUrl: "https://www.bestbuy.com/",
+    blocked: (response) => isBlockStatus(response.status, response) || isChallenge(response.status, response.body)
+  })
 }
 
 function pageHeaders(jar: CookieJar, referer: string): Record<string, string> {

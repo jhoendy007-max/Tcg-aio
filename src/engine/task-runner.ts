@@ -1,3 +1,4 @@
+import type { SessionRefresher } from "./block-recovery"
 import { proxyLabel } from "../shared/proxy"
 import { redact } from "../shared/redact"
 import { storeName } from "../shared/stores"
@@ -5,7 +6,7 @@ import { isAbortError, sleep } from "./sleep"
 import type { Database } from "./database"
 import { defaultHttp, type HttpClient } from "./http"
 import type { StoreModule } from "../stores/module"
-import type { LogLevel, Notice, ProxyEndpoint, StoreId, TaskEvent, TaskStatus } from "../shared/types"
+import { isActiveStatus, type LogLevel, type Notice, type ProxyEndpoint, type StoreId, type TaskEvent, type TaskStatus } from "../shared/types"
 
 export class TaskService {
   private readonly inflight = new Map<string, Promise<void>>()
@@ -16,7 +17,8 @@ export class TaskService {
     private readonly modules: Map<StoreId, StoreModule>,
     private readonly emit: (event: TaskEvent) => void,
     private readonly notify: (notice: Notice) => Promise<boolean>,
-    private readonly http: HttpClient = defaultHttp
+    private readonly http: HttpClient = defaultHttp,
+    private readonly sessionRefresh?: SessionRefresher
   ) {}
 
   isRunning(id: string): boolean {
@@ -48,6 +50,21 @@ export class TaskService {
 
   stopAll(): void {
     for (const controller of this.controllers.values()) controller.abort()
+  }
+
+  startAll(): { started: string[]; errors: { id: string; error: string }[] } {
+    const started: string[] = []
+    const errors: { id: string; error: string }[] = []
+    for (const task of this.db.listTasks()) {
+      if (this.isRunning(task.id) || isActiveStatus(task.status)) continue
+      try {
+        this.start(task.id)
+        started.push(task.id)
+      } catch (err) {
+        errors.push({ id: task.id, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    return { started, errors }
   }
 
   private async execute(id: string, controller: AbortController): Promise<void> {
@@ -86,6 +103,7 @@ export class TaskService {
     try {
       const profile = this.db.readProfile(task.profileId)
       const account = this.db.readAccount(task.accountId)
+      let session = account.session
       if (task.proxyGroupId) {
         const group = this.db.getProxyGroup(task.proxyGroupId)
         proxies = group.proxies
@@ -109,10 +127,32 @@ export class TaskService {
         detail: (message) => update({ detail: redact(message).slice(0, 240) }),
         phase: (status) => update({ status }),
         sleep: (ms) => sleep(ms, controller.signal),
-        onSession: async (session) => {
-          this.db.updateSession(account.id, session)
+        onSession: async (next) => {
+          session = next
+          account.session = next
+          this.db.updateSession(account.id, next)
           update({ log: line("info", `Saved the refreshed ${module.displayName} session locally.`) })
-        }
+        },
+        refreshSession: this.sessionRefresh
+          ? (input) => this.sessionRefresh!({
+            accountId: account.id,
+            store: task.store,
+            homeUrl: input.homeUrl,
+            proxy: input.proxy,
+            existing: session,
+            signal: input.signal,
+            onChallenge: (message) => {
+              update({ detail: message.slice(0, 240), log: line("warn", message) })
+              void this.notify({
+                kind: "paused",
+                storeName: module.displayName,
+                sku: task.sku,
+                profileName: profile.name,
+                detail: message
+              })
+            }
+          })
+          : undefined
       })
       if (controller.signal.aborted || result.outcome === "stopped") {
         finish(update, "stopped", "Stopped", "info")

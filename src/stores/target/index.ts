@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import { attachSession, isBlockStatus, sendWithRecovery } from "../../engine/block-recovery"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -93,6 +94,12 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     state: ctx.settings.targetState.trim().toUpperCase() || "NY"
   }
   const jar = new CookieJar()
+  attachSession(ctx, (cookies) => {
+    if (cookies.accessToken && cookies.accessToken !== "session") jar.accessToken = cookies.accessToken
+    if (cookies.refreshToken) jar.refreshToken = cookies.refreshToken
+    if (cookies.visitorId) jar.visitorId = cookies.visitorId
+    if (cookies.idToken) jar.idToken = cookies.idToken
+  })
   const sessionResult = await ensureSession(ctx, jar, key)
   if (sessionResult) return sessionResult
 
@@ -551,7 +558,10 @@ async function call(ctx: StoreRunContext, request: HttpRequest, carriesCard = fa
   const host = new URL(request.url).hostname
   if (!ALLOWED_HOSTS.has(host)) throw new Error(`Refusing to contact ${host}.`)
   if (carriesCard && host !== "carts.target.com") throw new Error("Card data can only be sent to the retailer.")
-  return ctx.http.request({ ...request, proxy: ctx.proxy, signal: ctx.signal })
+  return sendWithRecovery(ctx, request, {
+    homeUrl: "https://www.target.com/",
+    blocked: (response) => isBlockStatus(response.status, response) || isChallenge(response.status, response.body)
+  })
 }
 
 function monitorHeaders(tcin: string): Record<string, string> {

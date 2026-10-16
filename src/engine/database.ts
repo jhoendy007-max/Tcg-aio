@@ -39,13 +39,23 @@ interface AccountRecord {
   sessionSecret?: string
 }
 
+interface DeviceRecord {
+  id: string
+  name: string
+  tokenSecret: string
+  createdAt: number
+  lastSeenAt: number
+}
+
 interface DbFile {
   version: 1
+  pcId: string
   settings: Settings
   profiles: ProfileRecord[]
   accounts: AccountRecord[]
   proxyGroups: ProxyGroup[]
   tasks: PublicTask[]
+  devices: DeviceRecord[]
 }
 
 export class Database {
@@ -62,17 +72,20 @@ export class Database {
       this.flush()
       return
     }
-    const parsed = JSON.parse(readFileSync(this.file, "utf8")) as DbFile
+    const parsed = JSON.parse(readFileSync(this.file, "utf8")) as Partial<DbFile>
     if (parsed.version !== 1) throw new AppError("This data file was written by a newer TCGAIO version.")
+    const pcId = typeof parsed.pcId === "string" && /^[0-9a-f-]{36}$/i.test(parsed.pcId) ? parsed.pcId : randomUUID()
     this.data = {
       version: 1,
+      pcId,
       settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
       profiles: parsed.profiles ?? [],
       accounts: parsed.accounts ?? [],
       proxyGroups: parsed.proxyGroups ?? [],
-      tasks: parsed.tasks ?? []
+      tasks: parsed.tasks ?? [],
+      devices: Array.isArray(parsed.devices) ? parsed.devices : []
     }
-    let changed = false
+    let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
     for (const task of this.data.tasks) {
       if (isActiveStatus(task.status)) {
         task.status = "paused"
@@ -335,6 +348,49 @@ export class Database {
     return cloneTask(task)
   }
 
+  pcId(): string {
+    return this.data.pcId
+  }
+
+  listDevices(): { id: string; name: string; createdAt: number; lastSeenAt: number }[] {
+    return this.data.devices.map(({ id, name, createdAt, lastSeenAt }) => ({ id, name, createdAt, lastSeenAt }))
+  }
+
+  deviceTokens(): { id: string; name: string; token: string }[] {
+    return this.data.devices.map((device) => ({
+      id: device.id,
+      name: device.name,
+      token: this.cipher.decrypt(device.tokenSecret)
+    }))
+  }
+
+  saveDevice(input: { id: string; name: string; token: string }): void {
+    if (this.data.devices.some((device) => device.id === input.id)) throw new AppError("That phone is already paired.")
+    if (this.data.devices.length >= 20) throw new AppError("Revoke a phone before pairing another. The limit is 20.")
+    this.data.devices.push({
+      id: input.id,
+      name: input.name,
+      tokenSecret: this.cipher.encrypt(input.token),
+      createdAt: Date.now(),
+      lastSeenAt: Date.now()
+    })
+    this.flush()
+  }
+
+  revokeDevice(id: string): void {
+    const next = this.data.devices.filter((device) => device.id !== id)
+    if (next.length === this.data.devices.length) throw new AppError("That phone is not paired.")
+    this.data.devices = next
+    this.flush()
+  }
+
+  touchDevice(id: string): void {
+    const device = this.data.devices.find((item) => item.id === id)
+    if (!device) return
+    device.lastSeenAt = Date.now()
+    this.flush()
+  }
+
   deleteTask(id: string): void {
     const task = this.requireTask(id)
     if (isActiveStatus(task.status)) throw new AppError("Stop the task before deleting it.")
@@ -395,7 +451,7 @@ export class Database {
 }
 
 function emptyDb(): DbFile {
-  return { version: 1, settings: { ...DEFAULT_SETTINGS }, profiles: [], accounts: [], proxyGroups: [], tasks: [] }
+  return { version: 1, pcId: randomUUID(), settings: { ...DEFAULT_SETTINGS }, profiles: [], accounts: [], proxyGroups: [], tasks: [], devices: [] }
 }
 
 function toPublicProfile(record: ProfileRecord): PublicProfile {

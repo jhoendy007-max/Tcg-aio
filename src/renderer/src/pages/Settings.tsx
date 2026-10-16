@@ -66,6 +66,9 @@ export function SettingsPage() {
         <Field className="span-2" label="Discord webhook" hint="https://discord.com/api/webhooks/… Success, failure, and challenge pauses are posted here. Card data is not.">
           <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
         </Field>
+        <Field label="Block retries" hint="After HTTP 429, 403, 412, or 435, or a challenge page. Each try backs off, switches to the next healthy proxy, and reloads the store in that account's browser. 1–8.">
+          <TextInput type="number" min={1} max={8} value={form.blockRetries} onChange={(event) => setForm({ ...form, blockRetries: Number(event.target.value) })} required />
+        </Field>
         <Field label="Monitor delay (ms)" hint="How long to wait between stock checks. 1000–60000.">
           <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
         </Field>

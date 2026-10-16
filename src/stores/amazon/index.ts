@@ -1,3 +1,4 @@
+import { attachSession, isBlockStatus, sendWithRecovery } from "../../engine/block-recovery"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -86,6 +87,7 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => jar.load(cookies))
   ctx.log("info", "Using the saved Amazon session. Checkout uses the address and payment already saved on the account.")
   ctx.phase("monitoring")
   ctx.log("info", `Watching ${asin} for an offer sold and shipped by Amazon.com.`)
@@ -255,7 +257,10 @@ function classify(response: HttpResponse): StepStop | undefined {
 async function send(ctx: StoreRunContext, request: HttpRequest): Promise<HttpResponse> {
   const host = new URL(request.url).hostname
   if (host !== HOST) throw new Error(`Refusing to contact ${host}.`)
-  return ctx.http.request({ ...request, redirect: "manual", proxy: ctx.proxy, signal: ctx.signal })
+  return sendWithRecovery(ctx, { ...request, redirect: "manual" }, {
+    homeUrl: "https://www.amazon.com/",
+    blocked: (response) => isBlockStatus(response.status, response) || isChallenge(response.status, response.body, header(response, "location"))
+  })
 }
 
 function pageHeaders(jar: CookieJar, referer: string, ajax = false): Record<string, string> {
