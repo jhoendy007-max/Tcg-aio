@@ -1,3 +1,4 @@
+import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -86,7 +87,7 @@ interface StepOk<T> {
   value: T
 }
 interface StepStop {
-  kind: "paused" | "failed" | "oos" | "unauthorized" | "retry"
+  kind: "paused" | "failed" | "oos" | "unauthorized" | "retry" | "tested"
   reason: string
 }
 type Step<T> = StepOk<T> | StepStop
@@ -111,6 +112,7 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
   const jar = new CookieJar()
   jar.load(ctx.account.session)
   ctx.log("info", "Using the saved Pokémon Center session.")
+  note(ctx, "session", "pass", "Saved Pokémon Center session loaded.")
   const probe = await probeCart(ctx, jar)
   if (probe.kind !== "ok") return asResult(probe)
 
@@ -140,6 +142,7 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
 
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
+    note(ctx, "monitor", "pass", reading.reason)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, reading, page)
     if (cart.kind === "oos") {
@@ -148,13 +151,23 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
       await ctx.sleep(ctx.settings.monitorDelayMs)
       continue
     }
-    if (cart.kind !== "ok") return asResult(cart)
+    if (cart.kind !== "ok") {
+      note(ctx, "cart", "fail", cart.reason)
+      return asResult(cart)
+    }
+    note(ctx, "cart", "pass", "Added the item to the cart.")
 
     ctx.phase("checking_out")
     const shipped = await shipToHome(ctx, jar, page)
-    if (shipped.kind !== "ok") return asResult(shipped)
+    if (shipped.kind !== "ok") {
+      note(ctx, "address", "fail", shipped.reason)
+      return asResult(shipped)
+    }
+    note(ctx, "address", "pass", "Shipping address accepted.")
+    note(ctx, "shipping", "pass", "Shipping method selected.")
     ctx.log("info", `Submitting payment for the card ending ${ctx.profile.last4}.`)
     const paid = await pay(ctx, jar, page)
+    if (paid.kind === "tested") return finishTest(ctx)
     if (paid.kind === "oos") {
       ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")
       ctx.phase("monitoring")
@@ -329,6 +342,11 @@ async function pay(ctx: StoreRunContext, jar: CookieJar, page: string): Promise<
   }
   const paymentToken = readPaymentToken(tokenResponse.body)
   if (!paymentToken) return { kind: "failed", reason: "CyberSource Flex did not return a payment token." }
+  note(ctx, "payment", "pass", "CyberSource Flex token created. The card was not charged.")
+  if (ctx.testMode) {
+    if (ctx.clearCartAfterTest) note(ctx, "cart", "skip", "Pokémon Center cart clear is left for you. Test mode does not call a cart-delete API.")
+    return { kind: "tested", reason: "Test mode" }
+  }
   const order = await store(ctx, jar, {
     method: "POST",
     url: "https://www.pokemoncenter.com/tpci-ecommweb-api/order?format=nodatalinks",

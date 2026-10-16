@@ -1,3 +1,4 @@
+import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -62,7 +63,7 @@ interface StepOk<T> {
   value: T
 }
 interface StepStop {
-  kind: "paused" | "failed" | "oos" | "unauthorized" | "retry"
+  kind: "paused" | "failed" | "oos" | "unauthorized" | "retry" | "tested"
   reason: string
 }
 type Step<T> = StepOk<T> | StepStop
@@ -87,6 +88,7 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
   const jar = new CookieJar()
   jar.load(ctx.account.session)
   ctx.log("info", "Using the saved Amazon session. Checkout uses the address and payment already saved on the account.")
+  note(ctx, "session", "pass", "Saved Amazon session loaded.")
   ctx.phase("monitoring")
   ctx.log("info", `Watching ${asin} for an offer sold and shipped by Amazon.com.`)
   let waits = 0
@@ -112,6 +114,7 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
 
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
+    note(ctx, "monitor", "pass", reading.reason)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, asin, reading)
     if (cart.kind === "oos") {
@@ -120,11 +123,16 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
       await ctx.sleep(ctx.settings.monitorDelayMs)
       continue
     }
-    if (cart.kind !== "ok") return asResult(cart)
+    if (cart.kind !== "ok") {
+      note(ctx, "cart", "fail", cart.reason)
+      return asResult(cart)
+    }
+    note(ctx, "cart", "pass", "Added the Amazon.com offer to the cart.")
 
     ctx.phase("checking_out")
     ctx.log("info", "Checking out with the address and payment saved on the Amazon account.")
     const placed = await placeOrder(ctx, jar)
+    if (placed.kind === "tested") return finishTest(ctx)
     if (placed.kind === "oos") {
       ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")
       ctx.phase("monitoring")
@@ -204,6 +212,13 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar): Promise<Step<st
   const form = readPlaceOrder(checkout.value.body)
   if (!form) return { kind: "failed", reason: `Amazon did not return a place-order form (${checkout.value.status}).` }
   if (cardField(form.fields)) return { kind: "paused", reason: CVV_PAUSE }
+  note(ctx, "address", "pass", "Amazon checkout returned the saved address.")
+  note(ctx, "shipping", "pass", "Ship-to-home is available.")
+  note(ctx, "payment", "pass", "The saved Amazon payment method is present. No card number was sent.")
+  if (ctx.testMode) {
+    if (ctx.clearCartAfterTest) note(ctx, "cart", "skip", "Amazon cart clear is left on the account. Test mode does not call a cart-delete API.")
+    return { kind: "tested", reason: "Test mode" }
+  }
   const action = new URL(form.action || "/checkout/p/spc/place-order", "https://www.amazon.com")
   if (action.hostname !== HOST) return { kind: "failed", reason: "Amazon place-order left www.amazon.com." }
   const headers = pageHeaders(jar, "https://www.amazon.com/checkout/entry/cart")

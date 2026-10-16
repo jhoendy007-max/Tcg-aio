@@ -77,7 +77,9 @@ export function cleanSettings(input: Settings): Settings {
     targetZip,
     targetState,
     targetApiKey,
-    phoneRelayUrl: cleanRelayUrl(input.phoneRelayUrl ?? "")
+    phoneRelayUrl: cleanRelayUrl(input.phoneRelayUrl ?? ""),
+    testMode: input.testMode === true,
+    clearCartAfterTest: input.clearCartAfterTest === true
   }
 }
 

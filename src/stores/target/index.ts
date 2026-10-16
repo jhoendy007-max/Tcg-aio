@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -94,7 +95,11 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
   }
   const jar = new CookieJar()
   const sessionResult = await ensureSession(ctx, jar, key)
-  if (sessionResult) return sessionResult
+  if (sessionResult) {
+    note(ctx, "session", "fail", "reason" in sessionResult ? sessionResult.reason : "Session check failed.")
+    return sessionResult
+  }
+  note(ctx, "session", "pass", "Session is ready.")
 
   ctx.phase("monitoring")
   ctx.log("info", `Watching TCIN ${tcin} for ship-to-home stock (store ${location.storeId}, ZIP ${location.zip}).`)
@@ -123,6 +128,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
 
     ctx.phase("in_stock")
     ctx.log("success", `Shipping in stock (${reading.status})${reading.title ? ` · ${reading.title}` : ""}.`)
+    note(ctx, "monitor", "pass", `In stock (${reading.status}).`)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, key, tcin)
     if (cart.kind === "oos") {
@@ -136,15 +142,37 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
       if (recovered !== true) return recovered
       continue
     }
-    if (cart.kind !== "ok") return asResult(cart)
+    if (cart.kind !== "ok") {
+      note(ctx, "cart", "fail", cart.reason)
+      return asResult(cart)
+    }
+    note(ctx, "cart", "pass", `Added ${ctx.task.quantity} to the cart.`)
 
     ctx.phase("checking_out")
     ctx.log("info", "Submitting the shipping address from the saved profile.")
     const shipped = await submitShipping(ctx, jar, key)
-    if (shipped.kind !== "ok") return asResult(shipped)
+    if (shipped.kind !== "ok") {
+      note(ctx, "address", "fail", shipped.reason)
+      return asResult(shipped)
+    }
+    note(ctx, "address", "pass", "Shipping address accepted.")
+    note(ctx, "shipping", "pass", "Ship-to-home selected.")
     ctx.log("info", `Submitting payment for the card ending ${ctx.profile.last4}.`)
     const paid = await submitPayment(ctx, jar, key, cart.value.cartId)
-    if (paid.kind !== "ok") return asResult(paid)
+    if (paid.kind !== "ok") {
+      note(ctx, "payment", "fail", paid.reason)
+      return asResult(paid)
+    }
+    note(ctx, "payment", "pass", "Payment instruction accepted. The card was not charged.")
+    if (ctx.testMode) {
+      if (ctx.clearCartAfterTest && cart.value.itemId) {
+        const cleared = await clearTargetLine(ctx, jar, key, tcin, cart.value.itemId)
+        note(ctx, "cart", cleared ? "pass" : "fail", cleared ? "Removed the test line from the cart." : "The test line could not be removed.")
+      } else if (ctx.clearCartAfterTest) {
+        note(ctx, "cart", "skip", "Target did not return a cart line id, so the cart was left as-is.")
+      }
+      return finishTest(ctx)
+    }
     const order = await placeOrder(ctx, jar, key, cart.value.cartId)
     if (order.kind === "oos") {
       ctx.log("warn", "Checkout returned an empty cart. Returning to the monitor.")
@@ -279,7 +307,7 @@ async function probeCart(ctx: StoreRunContext, jar: CookieJar, key: string): Pro
   return { kind: "ok", value: true }
 }
 
-async function addToCart(ctx: StoreRunContext, jar: CookieJar, key: string, tcin: string): Promise<Step<{ cartId: string }>> {
+async function addToCart(ctx: StoreRunContext, jar: CookieJar, key: string, tcin: string): Promise<Step<{ cartId: string; itemId?: string }>> {
   const url = `https://carts.target.com/web_checkouts/v1/cart_items?field_groups=CART,CART_ITEMS,SUMMARY&key=${encodeURIComponent(key)}`
   const response = await call(ctx, {
     method: "POST",
@@ -305,7 +333,7 @@ async function addToCart(ctx: StoreRunContext, jar: CookieJar, key: string, tcin
     ctx.log("success", `Added ${ctx.task.quantity} to cart.`)
     const itemId = findCartItemId(response.body)
     if (itemId) await setShipFulfillment(ctx, jar, key, tcin, itemId)
-    return { kind: "ok", value: { cartId } }
+    return { kind: "ok", value: { cartId, itemId } }
   }
   return { kind: "failed", reason: `Add to cart failed (${response.status}): ${snippet(response.body)}` }
 }
@@ -448,6 +476,17 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar, key: string, car
     return { kind: "ok", value: orderId }
   }
   return { kind: "failed", reason: `Checkout failed (${response.status}): ${snippet(response.body)}` }
+}
+
+async function clearTargetLine(ctx: StoreRunContext, jar: CookieJar, key: string, tcin: string, itemId: string): Promise<boolean> {
+  const url = `https://carts.target.com/web_checkouts/v1/cart_items/${encodeURIComponent(itemId)}?field_groups=CART&key=${encodeURIComponent(key)}`
+  const response = await call(ctx, {
+    method: "PUT",
+    url,
+    headers: apiHeaders(jar, "https://www.target.com/cart"),
+    body: JSON.stringify({ cart_type: "REGULAR", channel_id: "10", cart_item: { tcin, quantity: 0 } })
+  })
+  return response.status >= 200 && response.status < 300
 }
 
 function checkout(ctx: StoreRunContext, jar: CookieJar, key: string): Promise<HttpResponse> {

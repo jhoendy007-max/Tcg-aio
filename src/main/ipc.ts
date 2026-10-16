@@ -1,6 +1,8 @@
 import { ipcMain, type BrowserWindow } from "electron"
 import QRCode from "qrcode"
 import { postDiscord } from "../engine/discord"
+import { checkStoreHealth } from "../engine/health"
+import { defaultHttp } from "../engine/http"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
@@ -30,6 +32,14 @@ export function registerIpc(
   handle(channels.tasksStart, (id: string) => {
     runner.start(id)
     return { started: true as const }
+  })
+  handle(channels.tasksTest, (id: string) => {
+    runner.start(id, { test: true })
+    return { started: true as const }
+  })
+  handle(channels.healthCheck, (proxyGroupId: string | null) => {
+    const proxies = proxyGroupId ? db.getProxyGroup(proxyGroupId).proxies : []
+    return checkStoreHealth(defaultHttp, proxies)
   })
   handle(channels.tasksStop, (id: string) => {
     runner.stop(id)

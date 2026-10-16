@@ -20,13 +20,15 @@ export function assertDiscordWebhook(url: string): void {
 }
 
 export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string, unknown>> } {
-  const color = notice.kind === "success" ? 0x3cba8b : notice.kind === "paused" ? 0xe0a045 : 0xe25b5b
+  const color = notice.kind === "success" ? 0x3cba8b : notice.kind === "tested" ? 0x6aa6ff : notice.kind === "paused" ? 0xe0a045 : 0xe25b5b
   const title =
     notice.kind === "success"
       ? `${notice.storeName} checkout succeeded`
-      : notice.kind === "paused"
-        ? `${notice.storeName} task paused`
-        : `${notice.storeName} checkout failed`
+      : notice.kind === "tested"
+        ? `${notice.storeName} test finished`
+        : notice.kind === "paused"
+          ? `${notice.storeName} task paused`
+          : `${notice.storeName} checkout failed`
   const lines = [
     `Product: ${notice.sku}`,
     `Profile: ${notice.profileName}`,
@@ -35,6 +37,9 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
   if (notice.orderId) lines.push(`Order: ${notice.orderId}`)
   if (notice.kind === "paused") {
     lines.push("Update the account session in TCGAIO, then resume the task.")
+  }
+  if (notice.kind === "tested") {
+    lines.push("Place order was not sent.")
   }
   return {
     embeds: [

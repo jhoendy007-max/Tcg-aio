@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   test:
@@ -76,23 +77,41 @@ jobs:
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
       - run: npm ci
         working-directory: mobile
-      - run: npx expo prebuild --platform android --no-install
-        working-directory: mobile
-      - run: chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
-        working-directory: mobile/android
-      - name: Name the APK
-        run: |
-          mkdir -p release
-          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk release/TCGAIO-Phone-0.2.0.apk
+      - name: Build the release APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TCGAIO_GENERATE_KEYSTORE: "1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash mobile/scripts/assemble-release.sh
       - uses: actions/upload-artifact@v4
         with:
           name: TCGAIO-Android-APK
-          path: release/TCGAIO-Phone-0.2.0.apk
+          path: release/TCGAIO-Phone-*.apk
+          if-no-files-found: error
+      - name: Save the release keystore for the next tagged build
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tcgaio-release-keystore
+          path: |
+            mobile/release.keystore
+            mobile/keystore.properties
+          retention-days: 90
           if-no-files-found: error
       - name: Publish prerelease
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
-          files: release/TCGAIO-Phone-0.2.0.apk
+          files: release/TCGAIO-Phone-*.apk
           generate_release_notes: true
+      - name: Replace the broken debug APK on v0.2.0-beta
+        if: github.ref == 'refs/tags/v0.2.1-beta'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp release/TCGAIO-Phone-0.2.1.apk release/TCGAIO-Phone-0.2.0.apk
+          gh release upload v0.2.0-beta release/TCGAIO-Phone-0.2.0.apk --clobber

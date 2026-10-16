@@ -13,7 +13,8 @@ import type {
   StoreInfo,
   TaskEvent,
   TaskInput,
-  ProfileInput
+  ProfileInput,
+  StoreHealth
 } from "./types"
 import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
 
@@ -23,8 +24,12 @@ export interface AioApi {
     save: (input: TaskInput) => Promise<Result<PublicTask>>
     delete: (id: string) => Promise<Result<{ id: string }>>
     start: (id: string) => Promise<Result<{ started: true }>>
+    test: (id: string) => Promise<Result<{ started: true }>>
     stop: (id: string) => Promise<Result<{ stopped: true }>>
     onEvent: (cb: (event: TaskEvent) => void) => () => void
+  }
+  health: {
+    check: (proxyGroupId: string | null) => Promise<Result<StoreHealth[]>>
   }
   profiles: {
     list: () => Promise<Result<PublicProfile[]>>

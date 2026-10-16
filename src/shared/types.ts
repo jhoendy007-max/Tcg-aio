@@ -151,6 +151,7 @@ export type TaskStatus =
   | "failed"
   | "paused"
   | "stopped"
+  | "tested"
 
 export const ACTIVE_STATUSES: TaskStatus[] = [
   "monitoring",
@@ -172,6 +173,7 @@ export interface PublicTask {
   accountId: string
   proxyGroupId: string | null
   confirmPurchase: boolean
+  testMode: boolean
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -189,6 +191,7 @@ export interface TaskInput {
   accountId: string
   proxyGroupId: string | null
   confirmPurchase: boolean
+  testMode?: boolean
 }
 
 export interface Settings {
@@ -200,6 +203,10 @@ export interface Settings {
   targetApiKey: string
   /** Optional ws:// or wss:// relay so a paired phone can connect away from home. */
   phoneRelayUrl: string
+  /** When on, every task runs as a test and cannot place an order. */
+  testMode: boolean
+  /** After a passed test, clear the cart on stores that support it. */
+  clearCartAfterTest: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -209,7 +216,9 @@ export const DEFAULT_SETTINGS: Settings = {
   targetZip: "10001",
   targetState: "NY",
   targetApiKey: "",
-  phoneRelayUrl: ""
+  phoneRelayUrl: "",
+  testMode: false,
+  clearCartAfterTest: false
 }
 
 export interface SecurityInfo {
@@ -228,8 +237,18 @@ export type TaskEvent =
   | { type: "upsert"; task: PublicTask }
   | { type: "delete"; id: string }
 
+export interface StoreHealth {
+  store: StoreId
+  storeName: string
+  proxy: string
+  status: number | null
+  verdict: "up" | "challenge" | "down"
+  detail: string
+  ms: number
+}
+
 export interface Notice {
-  kind: "success" | "failure" | "paused"
+  kind: "success" | "failure" | "paused" | "tested"
   storeName: string
   sku: string
   profileName: string

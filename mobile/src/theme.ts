@@ -22,7 +22,8 @@ export const STATUS_LABEL: Record<string, string> = {
   success: "Success",
   failed: "Failed",
   paused: "Paused",
-  stopped: "Stopped"
+  stopped: "Stopped",
+  tested: "Tested"
 }
 
 export function isActive(status: string): boolean {

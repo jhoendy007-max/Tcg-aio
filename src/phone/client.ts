@@ -14,6 +14,7 @@ import {
   type PhoneTaskDraft,
   type ServerMessage
 } from "./protocol"
+import type { StoreHealth } from "../shared/types"
 
 export interface SavedPhoneLink {
   token: string
@@ -31,6 +32,7 @@ export interface PhoneCommandResult {
   started?: string[]
   errors?: { id: string; error: string }[]
   task?: PhoneTask
+  health?: StoreHealth[]
 }
 
 export class PhoneRevoked extends Error {
@@ -174,6 +176,14 @@ export class PhoneSession {
     return this.request({ type: "task.start", req: rid(), conn: this.conn, taskId })
   }
 
+  runTest(taskId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "task.test", req: rid(), conn: this.conn, taskId })
+  }
+
+  async checkHealth(proxyGroupId: string | null): Promise<PhoneCommandResult> {
+    return this.request({ type: "health.check", req: rid(), conn: this.conn, proxyGroupId })
+  }
+
   stop(taskId: string): Promise<PhoneCommandResult> {
     return this.request({ type: "task.stop", req: rid(), conn: this.conn, taskId })
   }
@@ -202,7 +212,7 @@ export class PhoneSession {
     const response = await pending
     if (response.type !== "result") throw new Error("The PC did not answer.")
     if (!response.ok) return { ok: false, error: response.error }
-    return { ok: true, started: response.started, errors: response.errors, task: response.task }
+    return { ok: true, started: response.started, errors: response.errors, task: response.task, health: response.health }
   }
 
   private send(message: ClientMessage): void {

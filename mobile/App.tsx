@@ -6,6 +6,7 @@ import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from
 import type { PhoneSnapshot, PhoneTask, PhoneTaskDraft } from "../src/phone/protocol"
 import { ensureNotificationPermission, notify } from "./src/notify"
 import { clearLink, loadLink, saveLink } from "./src/storage"
+import type { StoreHealth } from "../src/shared/types"
 import { colors, isActive, STATUS_LABEL } from "./src/theme"
 
 type Screen = "boot" | "pair" | "dash" | "edit"
@@ -17,7 +18,8 @@ const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
   profileId: snap?.profiles[0]?.id ?? "",
   accountId: "",
   proxyGroupId: null,
-  confirmPurchase: false
+  confirmPurchase: false,
+  testMode: false
 })
 
 export default function App() {
@@ -29,6 +31,7 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null)
   const [draft, setDraft] = useState<PhoneTaskDraft | null>(null)
   const [error, setError] = useState("")
+  const [health, setHealth] = useState<StoreHealth[] | null>(null)
   const [deviceName, setDeviceName] = useState("My phone")
   const [paste, setPaste] = useState("")
   const [scanning, setScanning] = useState(false)
@@ -92,6 +95,9 @@ export default function App() {
       }
       setPcName(link.pcName)
       void connect(link)
+    }).catch(() => {
+      setScreen("pair")
+      setError("Saved pairing could not be read. Pair again.")
     })
     return () => {
       if (retry.current) clearTimeout(retry.current)
@@ -228,7 +234,11 @@ export default function App() {
                 ))}
               </View>
               <View style={styles.switchRow}>
-                <Text style={styles.p}>This task may place a real shipping order.</Text>
+                <Text style={styles.p}>Test mode. Runs the real flow and stops before place order.</Text>
+                <Switch value={draft.testMode === true} onValueChange={(testMode) => setDraft({ ...draft, testMode })} trackColor={{ true: colors.accent, false: colors.line }} />
+              </View>
+              <View style={styles.switchRow}>
+                <Text style={styles.p}>This task may place a real shipping order. Ignored while test mode is on.</Text>
                 <Switch value={draft.confirmPurchase} onValueChange={(confirmPurchase) => setDraft({ ...draft, confirmPurchase })} trackColor={{ true: colors.accent, false: colors.line }} />
               </View>
               <View style={styles.row}>
@@ -246,15 +256,25 @@ export default function App() {
             </View>
           ) : (
             <>
+              {snap?.testMode ? <Text style={styles.p}>Global test mode is on. Every task stops before place order.</Text> : null}
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => void run(async () => {
+                  const result = await session.current!.checkHealth(snap?.proxyGroups[0]?.id ?? null)
+                  if (result.ok) setHealth(result.health ?? [])
+                  return result
+                })}><Text style={styles.secondaryText}>Check stores</Text></Pressable>
               </View>
+              {health ? health.map((row) => (
+                <Text key={row.store} style={styles.p}>{row.storeName} · {row.proxy} · {row.verdict} · {row.detail}</Text>
+              )) : null}
               {(snap?.tasks ?? []).map((item) => (
                 <Pressable key={item.id} style={[styles.card, selected === item.id && styles.cardOn]} onPress={() => setSelected(item.id)}>
                   <View style={styles.row}>
                     <Text style={styles.h2}>{item.storeName}</Text>
+                    {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
                     <Text style={styles.pill}>{STATUS_LABEL[item.status] ?? item.status}</Text>
                   </View>
                   <Text style={styles.sku}>{item.sku}</Text>
@@ -269,7 +289,8 @@ export default function App() {
                       profileId: item.profileId,
                       accountId: item.accountId,
                       proxyGroupId: item.proxyGroupId,
-                      confirmPurchase: item.confirmPurchase
+                      confirmPurchase: item.confirmPurchase,
+                      testMode: item.testMode
                     })
                     setScreen("edit")
                   }} /> : null}
@@ -299,6 +320,9 @@ function TaskDetail({ task, onRun, session, onEdit }: {
         ) : (
           <Pressable style={styles.primary} onPress={() => void onRun(() => session!.start(task.id))}><Text style={styles.primaryText}>{task.status === "paused" ? "Resume" : "Start"}</Text></Pressable>
         )}
+        {!isActive(task.status) ? (
+          <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.runTest(task.id))}><Text style={styles.secondaryText}>Run test</Text></Pressable>
+        ) : null}
         <Pressable style={styles.secondary} onPress={onEdit}><Text style={styles.secondaryText}>Edit</Text></Pressable>
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.deleteTask(task.id))}><Text style={styles.secondaryText}>Delete</Text></Pressable>
       </View>

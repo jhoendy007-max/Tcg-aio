@@ -335,6 +335,7 @@ export class Database {
       accountId: input.accountId,
       proxyGroupId: input.proxyGroupId || null,
       confirmPurchase: Boolean(input.confirmPurchase),
+      testMode: input.testMode === true,
       status: existing?.status === "paused" ? "paused" : "idle",
       detail: existing?.detail ?? "",
       logs: existing?.logs ?? [],
@@ -485,7 +486,7 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 }
 
 function cloneTask(task: PublicTask): PublicTask {
-  return { ...task, logs: task.logs.map((line) => ({ ...line })) }
+  return { ...task, testMode: task.testMode === true, logs: task.logs.map((line) => ({ ...line })) }
 }
 
 export function addressesEqual(a: Address, b: Address): boolean {

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
+import { isFinalSubmit } from "../src/engine/test-mode"
 import { BESTBUY_PAUSE, createBestBuyModule } from "../src/stores/bestbuy"
 import { encryptBestBuyPan } from "../src/stores/bestbuy/card"
 import { decodeQueueSeconds, monitorUrl, parseSku, readStock } from "../src/stores/bestbuy/parse"
@@ -363,6 +364,14 @@ describe("best buy module", () => {
     const result = await createBestBuyModule().run(ctx(fake.http, { sleep: async (ms) => { sleeps.push(ms) } }))
     expect(result.outcome).toBe("success")
     expect(sleeps).toContain(7000)
+  })
+
+  it("runs payment and never sends place order in test mode", async () => {
+    const fake = client((req) => happy(req))
+    const result = await createBestBuyModule().run(ctx(fake.http, { testMode: true }))
+    expect(result.outcome).toBe("tested")
+    expect(fake.calls.some((call) => call.url.includes("/creditCard") || (call.body ?? "").includes("creditCard"))).toBe(true)
+    expect(fake.calls.some((call) => isFinalSubmit("bestbuy", call))).toBe(false)
   })
 })
 

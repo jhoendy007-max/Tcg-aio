@@ -1,4 +1,6 @@
 import { hostname } from "node:os"
+import { checkStoreHealth } from "../engine/health"
+import { defaultHttp } from "../engine/http"
 import type { Database } from "../engine/database"
 import type { TaskService } from "../engine/task-runner"
 import { STORE_CATALOG } from "../shared/stores"
@@ -15,8 +17,11 @@ export function createPhoneHost(db: Database, getRunner: () => TaskService | nul
     const profiles = db.listProfiles()
     const accounts = db.listAccounts()
     const groups = db.listProxyGroups()
+    const settings = db.getSettings()
     return {
       pcName,
+      testMode: settings.testMode,
+      clearCartAfterTest: settings.clearCartAfterTest,
       tasks: db.listTasks().map((task) => projectTask(task, profiles, accounts, groups)),
       profiles: profiles.map(projectProfile),
       accounts: accounts.map(projectAccount),
@@ -37,10 +42,14 @@ export function createPhoneHost(db: Database, getRunner: () => TaskService | nul
       if (getRunner()?.isRunning(id)) throw new Error("Stop the task before deleting it.")
       db.deleteTask(id)
     },
-    start(id: string) {
+    start(id: string, options?: { test?: boolean }) {
       const runner = getRunner()
       if (!runner) throw new Error("The desktop app is still starting.")
-      runner.start(id)
+      runner.start(id, options)
+    },
+    async checkHealth(proxyGroupId: string | null) {
+      const proxies = proxyGroupId ? db.getProxyGroup(proxyGroupId).proxies : []
+      return checkStoreHealth(defaultHttp, proxies)
     },
     stop(id: string) {
       getRunner()?.stop(id)

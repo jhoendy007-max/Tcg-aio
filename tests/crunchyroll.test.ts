@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
+import { isFinalSubmit } from "../src/engine/test-mode"
 import { CRUNCHYROLL_PAUSE, createCrunchyrollModule } from "../src/stores/crunchyroll"
 import { commerceCardType, readPaymentMethod, stripePaymentMethodBody } from "../src/stores/crunchyroll/card"
 import { isChallenge, parseSku, productApiUrl, readStock } from "../src/stores/crunchyroll/parse"
@@ -306,5 +307,13 @@ describe("crunchyroll checkout", () => {
     const result = await createCrunchyrollModule().run(ctx(fake.http))
     expect(result).toMatchObject({ outcome: "success", orderId: "CR100" })
     expect(baskets).toBe(2)
+  })
+
+  it("tokenizes the card and never sends place order in test mode", async () => {
+    const fake = client((req) => happy(req))
+    const result = await createCrunchyrollModule().run(ctx(fake.http, { testMode: true }))
+    expect(result.outcome).toBe("tested")
+    expect(fake.calls.some((call) => call.url.includes("api.stripe.com"))).toBe(true)
+    expect(fake.calls.some((call) => isFinalSubmit("crunchyroll", call))).toBe(false)
   })
 })

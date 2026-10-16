@@ -1,3 +1,4 @@
+import { guardTestMode, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
 import { proxyLabel } from "../shared/proxy"
 import { redact } from "../shared/redact"
 import { storeName } from "../shared/stores"
@@ -23,15 +24,16 @@ export class TaskService {
     return this.inflight.has(id)
   }
 
-  start(id: string): void {
+  start(id: string, options?: { test?: boolean }): void {
     if (this.inflight.has(id)) return
     const task = this.db.getTask(id)
-    if (!task.confirmPurchase) {
+    const testMode = options?.test === true || task.testMode === true || this.db.getSettings().testMode === true
+    if (!testMode && !task.confirmPurchase) {
       throw new Error("Confirm that this task may place a real shipping order before starting it.")
     }
     const controller = new AbortController()
     this.controllers.set(id, controller)
-    const promise = this.execute(id, controller).finally(() => {
+    const promise = this.execute(id, controller, testMode).finally(() => {
       this.inflight.delete(id)
       this.controllers.delete(id)
     })
@@ -65,7 +67,7 @@ export class TaskService {
     return { started, errors }
   }
 
-  private async execute(id: string, controller: AbortController): Promise<void> {
+  private async execute(id: string, controller: AbortController, testMode: boolean): Promise<void> {
     const task = this.db.getTask(id)
     const module = this.modules.get(task.store)
     const profileName = () => {
@@ -111,15 +113,27 @@ export class TaskService {
       } else {
         update({ log: line("info", "Direct connection. No proxy group selected.") })
       }
+      const settings = this.db.getSettings()
+      const checks: string[] = []
+      if (testMode) update({ log: line("warn", "TEST MODE. The real flow runs through payment, then stops. The place-order request is not sent.") })
       const result = await module.run({
         task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store },
         profile,
         account,
-        settings: this.db.getSettings(),
+        settings,
         proxy,
         proxies,
         signal: controller.signal,
-        http: this.http,
+        http: testMode ? guardTestMode(task.store, this.http) : this.http,
+        testMode,
+        clearCartAfterTest: testMode && settings.clearCartAfterTest,
+        mark: (stage: TestStage, result: CheckResult, detail: string) => {
+          const label = result === "pass" ? "PASS" : result === "fail" ? "FAIL" : "SKIP"
+          const message = `${label} ${STAGE_LABEL[stage]} — ${detail}`
+          checks.push(message)
+          update({ log: line(result === "fail" ? "error" : result === "skip" ? "warn" : "success", message) })
+        },
+        checklistText: () => checks.join("\n"),
         log: (level, message) => update({ log: line(level, message) }),
         detail: (message) => update({ detail: redact(message).slice(0, 240) }),
         phase: (status) => update({ status }),
@@ -142,6 +156,17 @@ export class TaskService {
           profileName: profile.name,
           detail: result.detail,
           orderId: result.orderId
+        })
+        return
+      }
+      if (result.outcome === "tested") {
+        finish(update, "tested", "Test passed. Place order was not sent.", "success")
+        await this.safeNotify(update, {
+          kind: "tested",
+          storeName: module.displayName,
+          sku: task.sku,
+          profileName: profile.name,
+          detail: result.detail
         })
         return
       }

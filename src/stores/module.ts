@@ -1,3 +1,4 @@
+import type { CheckResult, TestStage } from "../engine/test-mode"
 import type { HttpClient } from "../engine/http"
 import type {
   FullAccount,
@@ -27,6 +28,11 @@ export interface StoreRunContext {
   phase: (status: TaskPhase) => void
   sleep: (ms: number) => Promise<void>
   onSession: (session: SessionCookies) => Promise<void>
+  /** Set for a test run. The HTTP client also refuses place-order requests. */
+  testMode?: boolean
+  clearCartAfterTest?: boolean
+  mark?: (stage: TestStage, result: CheckResult, detail: string) => void
+  checklistText?: () => string
 }
 
 export type StoreRunResult =
@@ -34,6 +40,7 @@ export type StoreRunResult =
   | { outcome: "paused"; reason: string }
   | { outcome: "failed"; reason: string }
   | { outcome: "stopped"; reason: string }
+  | { outcome: "tested"; detail: string }
 
 export interface StoreModule {
   id: StoreId

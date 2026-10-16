@@ -19,7 +19,8 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   success: "Checked out",
   failed: "Failed",
   paused: "Paused",
-  stopped: "Stopped"
+  stopped: "Stopped",
+  tested: "Tested"
 }
 
 export function errorText(err: unknown): string {

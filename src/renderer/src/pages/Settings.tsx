@@ -66,6 +66,14 @@ export function SettingsPage() {
         <Field className="span-2" label="Discord webhook" hint="https://discord.com/api/webhooks/… Success, failure, and challenge pauses are posted here. Card data is not.">
           <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
         </Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.testMode} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
+          <span>Test mode for every task. The real flow runs through payment and stops before place order. Nothing is charged.</span>
+        </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.clearCartAfterTest} onChange={(event) => setForm({ ...form, clearCartAfterTest: event.target.checked })} />
+          <span>After a passed test, remove the test line from the Target or Walmart cart. Other stores leave the cart for you.</span>
+        </label>
         <Field label="Monitor delay (ms)" hint="How long to wait between stock checks. 1000–60000.">
           <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
         </Field>

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -80,6 +81,7 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
   const jar = new CookieJar()
   jar.load(ctx.account.session)
   ctx.log("info", "Using the saved Best Buy session.")
+  note(ctx, "session", "pass", "Saved Best Buy session loaded.")
   const probe = await probeCart(ctx, jar)
   if (probe.kind === "paused") return { outcome: "paused", reason: probe.reason }
   if (probe.kind === "unauthorized") return pause(EXPIRED_PAUSE)
@@ -112,6 +114,7 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
 
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
+    note(ctx, "monitor", "pass", reading.reason)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, sku, pageUrl)
     if (cart.kind === "oos") {
@@ -121,7 +124,11 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
       continue
     }
     if (cart.kind === "unauthorized") return pause(EXPIRED_PAUSE)
-    if (cart.kind !== "ok") return asResult(cart)
+    if (cart.kind !== "ok") {
+      note(ctx, "cart", "fail", cart.reason)
+      return asResult(cart)
+    }
+    note(ctx, "cart", "pass", "Added the item to the cart.")
 
     ctx.phase("checking_out")
     const started = await startCheckout(ctx, jar, cart.value)
@@ -130,17 +137,30 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (!started.value.shippingEligible) return fail("Best Buy is not offering ship-to-home for this item. v1 does not place pickup orders.")
     const shipped = await setShipping(ctx, jar, started.value)
     if (shipped.kind === "unauthorized") return pause(EXPIRED_PAUSE)
-    if (shipped.kind !== "ok") return asResult(shipped)
+    if (shipped.kind !== "ok") {
+      note(ctx, "address", "fail", shipped.reason)
+      return asResult(shipped)
+    }
+    note(ctx, "address", "pass", "Shipping address accepted.")
+    note(ctx, "shipping", "pass", "Ship-to-home selected.")
     const lookedUp = await prelookup(ctx, jar, started.value)
     if (lookedUp.kind === "unauthorized") return pause(EXPIRED_PAUSE)
     if (lookedUp.kind !== "ok") return asResult(lookedUp)
     ctx.log("info", `Submitting payment for the card ending ${ctx.profile.last4}.`)
     const paid = await saveCard(ctx, jar, started.value)
     if (paid.kind === "unauthorized") return pause(EXPIRED_PAUSE)
-    if (paid.kind !== "ok") return asResult(paid)
+    if (paid.kind !== "ok") {
+      note(ctx, "payment", "fail", paid.reason)
+      return asResult(paid)
+    }
+    note(ctx, "payment", "pass", "Card encryption accepted. The card was not charged.")
     const refreshed = await refreshPayments(ctx, jar, started.value.orderId)
     if (refreshed.kind === "unauthorized") return pause(EXPIRED_PAUSE)
     if (refreshed.kind !== "ok") return asResult(refreshed)
+    if (ctx.testMode) {
+      if (ctx.clearCartAfterTest) note(ctx, "cart", "skip", "Best Buy cart clear is left for you. Test mode does not call a cart-delete API.")
+      return finishTest(ctx)
+    }
     const order = await placeOrder(ctx, jar, started.value.orderId)
     if (order.kind === "oos") {
       ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")

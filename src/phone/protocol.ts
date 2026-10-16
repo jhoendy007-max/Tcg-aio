@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2"
 import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils"
 import { redact } from "../shared/redact"
 import { isStoreId, storeName } from "../shared/stores"
-import type { LogLine, PublicAccount, PublicProfile, PublicTask, StoreId, StoreInfo, TaskStatus } from "../shared/types"
+import type { LogLine, PublicAccount, PublicProfile, PublicTask, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
 
 export const PHONE_PROTOCOL = 1
 export const INVITE_TTL_MS = 3 * 60 * 1000
@@ -82,6 +82,7 @@ export interface PhoneTask {
   proxyGroupId: string | null
   proxyGroupName: string | null
   confirmPurchase: boolean
+  testMode: boolean
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -90,6 +91,8 @@ export interface PhoneTask {
 
 export interface PhoneSnapshot {
   pcName: string
+  testMode: boolean
+  clearCartAfterTest: boolean
   tasks: PhoneTask[]
   profiles: PhoneProfile[]
   accounts: PhoneAccount[]
@@ -98,7 +101,7 @@ export interface PhoneSnapshot {
 }
 
 export interface PhoneNotice {
-  kind: "success" | "failure" | "paused"
+  kind: "success" | "failure" | "paused" | "tested"
   storeName: string
   sku: string
   profileName: string
@@ -116,6 +119,7 @@ export interface PhoneTaskDraft {
   accountId: string
   proxyGroupId: string | null
   confirmPurchase: boolean
+  testMode?: boolean
 }
 
 export type ClientMessage =
@@ -123,6 +127,8 @@ export type ClientMessage =
   | { type: "hello" }
   | { type: "sync"; req: string; conn: string }
   | { type: "task.start"; req: string; conn: string; taskId: string }
+  | { type: "task.test"; req: string; conn: string; taskId: string }
+  | { type: "health.check"; req: string; conn: string; proxyGroupId: string | null }
   | { type: "task.stop"; req: string; conn: string; taskId: string }
   | { type: "task.startAll"; req: string; conn: string }
   | { type: "task.stopAll"; req: string; conn: string }
@@ -136,7 +142,7 @@ export type ServerMessage =
   | { type: "task"; task: PhoneTask }
   | { type: "task.deleted"; id: string }
   | { type: "notice"; notice: PhoneNotice }
-  | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask }
+  | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: StoreHealth[] }
   | { type: "result"; req: string; ok: false; error: string }
   | { type: "error"; error: string }
 
@@ -291,6 +297,7 @@ export function projectTask(task: PublicTask, profiles: PublicProfile[], account
     proxyGroupId: task.proxyGroupId,
     proxyGroupName: task.proxyGroupId ? groups.find((group) => group.id === task.proxyGroupId)?.name ?? "Missing" : null,
     confirmPurchase: task.confirmPurchase,
+    testMode: task.testMode === true,
     status: task.status,
     detail: redact(task.detail).slice(0, 240),
     logs: task.logs.slice(-LOG_LIMIT).map((line) => ({ ...line, message: redact(line.message).slice(0, 500) })),
@@ -316,7 +323,8 @@ export function parseTaskDraft(value: unknown): PhoneTaskDraft {
     profileId: input.profileId,
     accountId: input.accountId,
     proxyGroupId,
-    confirmPurchase: input.confirmPurchase === true
+    confirmPurchase: input.confirmPurchase === true,
+    testMode: input.testMode === true
   }
 }
 
@@ -328,11 +336,15 @@ export function asClientMessage(value: unknown): ClientMessage {
   if (!("conn" in message) || typeof message.conn !== "string" || !message.conn) throw new Error("Phone session is not ready.")
   if (!("req" in message) || typeof message.req !== "string" || !message.req) throw new Error("Phone request is missing an id.")
   if (message.type === "sync") return { type: "sync", conn: message.conn, req: message.req }
-  if (message.type === "task.start" || message.type === "task.stop" || message.type === "task.delete") {
+  if (message.type === "task.start" || message.type === "task.test" || message.type === "task.stop" || message.type === "task.delete") {
     if (typeof message.taskId !== "string" || !message.taskId) throw new Error("Choose a task.")
     return { type: message.type, req: message.req, conn: message.conn, taskId: message.taskId }
   }
   if (message.type === "task.startAll" || message.type === "task.stopAll") return { type: message.type, req: message.req, conn: message.conn }
+  if (message.type === "health.check") {
+    const proxyGroupId = "proxyGroupId" in message && typeof message.proxyGroupId === "string" && message.proxyGroupId ? message.proxyGroupId : null
+    return { type: "health.check", req: message.req, conn: message.conn, proxyGroupId }
+  }
   if (message.type === "task.save") return { type: "task.save", req: message.req, conn: message.conn, task: parseTaskDraft(message.task) }
   throw new Error("Unknown phone request.")
 }

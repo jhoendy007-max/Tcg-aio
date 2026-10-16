@@ -2,7 +2,9 @@
 
 Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, and Amazon by ASIN or product URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
 
-Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, or Amazon shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
+Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If a store shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
+
+Test mode, from Settings or a task, runs the real monitor, cart, address, shipping, and payment-token steps and stops before place order. The place-order request is refused by the task HTTP client, so it cannot be sent. A TEST badge shows on the desktop and the phone. Run test starts that path for one task. Store health check sends one read-only GET per store through the selected proxy group.
 
 ## What you get
 

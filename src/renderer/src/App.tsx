@@ -49,7 +49,7 @@ export function App() {
           ))}
         </nav>
         <footer>
-          <span>v0.2.0</span>
+          <span>v0.2.1</span>
           <span>Desktop + phone</span>
         </footer>
       </aside>

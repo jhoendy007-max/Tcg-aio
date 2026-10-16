@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
+import { isFinalSubmit } from "../src/engine/test-mode"
 import { createTargetModule, TARGET_PAUSE } from "../src/stores/target"
 import { createRegistry } from "../src/stores/registry"
 import type { StoreRunContext } from "../src/stores/module"
@@ -181,6 +182,14 @@ describe("target module", () => {
     const cvv = fake.calls.find((call) => call.method === "PUT" && call.url.includes("payment_instructions/pay-9"))
     expect(JSON.parse(cvv?.body ?? "{}").card_details.cvv).toBe("123")
     expect(new URL(cvv?.url ?? "https://invalid").hostname).toBe("carts.target.com")
+  })
+
+  it("runs payment and never sends place order in test mode", async () => {
+    const fake = client((req) => happy(req))
+    const result = await createTargetModule().run(ctx(fake.http, { testMode: true }))
+    expect(result.outcome).toBe("tested")
+    expect(fake.calls.some((call) => call.url.includes("payment_instructions"))).toBe(true)
+    expect(fake.calls.some((call) => isFinalSubmit("target", call))).toBe(false)
   })
 })
 

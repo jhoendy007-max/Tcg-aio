@@ -78,6 +78,7 @@ function task(partial: Partial<PublicTask> = {}): PublicTask {
     accountId: "a1",
     proxyGroupId: null,
     confirmPurchase: partial.confirmPurchase ?? true,
+    testMode: partial.testMode === true,
     status: "idle",
     detail: partial.detail ?? "",
     logs: partial.logs ?? [],
@@ -103,7 +104,9 @@ function memoryHost() {
       profiles: [projectProfile(profile)],
       accounts: [projectAccount(account)],
       proxyGroups: [projectProxyGroup({ id: "g1", name: "Home proxies", proxies: [{ password: PROXY_PASSWORD }] })],
-      stores: [{ id: "target", name: "Target", skuHint: "TCIN", implemented: true }]
+      stores: [{ id: "target", name: "Target", skuHint: "TCIN", implemented: true }],
+      testMode: false,
+      clearCartAfterTest: false
     }),
     saveTask(draft) {
       const next = task({ ...draft, id: draft.id ?? `t${tasks.length + 1}`, detail: "" })
@@ -117,11 +120,14 @@ function memoryHost() {
       if (index < 0) throw new Error("Task not found.")
       tasks.splice(index, 1)
     },
-    start(id) {
+    start(id, options) {
       const found = tasks.find((item) => item.id === id)
       if (!found) throw new Error("Task not found.")
-      if (!found.confirmPurchase) throw new Error("Confirm that this task may place a real shipping order before starting it.")
+      if (!options?.test && !found.testMode && !found.confirmPurchase) throw new Error("Confirm that this task may place a real shipping order before starting it.")
       started.push(id)
+    },
+    async checkHealth() {
+      return []
     },
     stop(id) {
       stopped.push(id)

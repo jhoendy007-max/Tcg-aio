@@ -10,12 +10,16 @@ const api: AioApi = {
     save: (input) => ipcRenderer.invoke(channels.tasksSave, input),
     delete: (id) => ipcRenderer.invoke(channels.tasksDelete, id),
     start: (id) => ipcRenderer.invoke(channels.tasksStart, id),
+    test: (id) => ipcRenderer.invoke(channels.tasksTest, id),
     stop: (id) => ipcRenderer.invoke(channels.tasksStop, id),
     onEvent: (cb) => {
       const listener = (_event: IpcRendererEvent, payload: TaskEvent) => cb(payload)
       ipcRenderer.on(channels.taskEvent, listener)
       return () => ipcRenderer.removeListener(channels.taskEvent, listener)
     }
+  },
+  health: {
+    check: (proxyGroupId) => ipcRenderer.invoke(channels.healthCheck, proxyGroupId)
   },
   profiles: {
     list: () => ipcRenderer.invoke(channels.profilesList),

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
+import { isFinalSubmit } from "../src/engine/test-mode"
 import { createWalmartModule, WALMART_PAUSE } from "../src/stores/walmart"
 import { isChallenge, parseItemId, readStock } from "../src/stores/walmart/parse"
 import { parsePieKey, protectPanAndCvv } from "../src/stores/walmart/pie"
@@ -361,6 +362,14 @@ describe("walmart module", () => {
     expect(cards.every((call) => new URL(call.url).hostname === "www.walmart.com")).toBe(true)
     expect(fake.calls.filter((call) => call.url.includes("getkey.js"))).toHaveLength(2)
     expect(cards.every((call) => !(call.body ?? "").includes(pieFixture.pan))).toBe(true)
+  })
+
+  it("runs payment and never sends place order in test mode", async () => {
+    const fake = client((req) => happy(req))
+    const result = await createWalmartModule().run(ctx(fake.http, { testMode: true }))
+    expect(result.outcome).toBe("tested")
+    expect(fake.calls.some((call) => call.url.includes("CreateAccountCreditCard"))).toBe(true)
+    expect(fake.calls.some((call) => isFinalSubmit("walmart", call))).toBe(false)
   })
 })
 

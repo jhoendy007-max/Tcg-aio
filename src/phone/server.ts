@@ -31,7 +31,8 @@ export interface PhoneHost {
   snapshot(): PhoneSnapshot
   saveTask(draft: PhoneTaskDraft): PhoneTask
   deleteTask(id: string): void
-  start(id: string): void
+  start(id: string, options?: { test?: boolean }): void
+  checkHealth(proxyGroupId: string | null): Promise<import("../shared/types").StoreHealth[]>
   stop(id: string): void
   startAll(): { started: string[]; errors: { id: string; error: string }[] }
   stopAll(): void
@@ -326,7 +327,7 @@ export class PhoneServer {
     return null
   }
 
-  private handle(conn: Conn, message: ClientMessage): void {
+  private async handle(conn: Conn, message: ClientMessage): Promise<void> {
     if (message.type === "pair" || message.type === "hello") throw new Error("The phone is already paired.")
     if (!conn.connId || message.conn !== conn.connId) throw new Error("Phone session is not ready.")
     const req = message.req
@@ -339,6 +340,16 @@ export class PhoneServer {
       if (message.type === "task.start") {
         this.host.start(message.taskId)
         this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "task.test") {
+        this.host.start(message.taskId, { test: true })
+        this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "health.check") {
+        const health = await this.host.checkHealth(message.proxyGroupId)
+        this.reply(conn, req, { ok: true, health })
         return
       }
       if (message.type === "task.stop") {
@@ -372,10 +383,10 @@ export class PhoneServer {
     }
   }
 
-  private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask } | { ok: false; error: string }): void {
+  private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: import("../shared/types").StoreHealth[] } | { ok: false; error: string }): void {
     if (!conn.key) return
     this.send(conn, conn.key, "session", body.ok
-      ? { type: "result", req, ok: true, started: body.started, errors: body.errors, task: body.task }
+      ? { type: "result", req, ok: true, started: body.started, errors: body.errors, task: body.task, health: body.health }
       : { type: "result", req, ok: false, error: body.error })
   }
 
