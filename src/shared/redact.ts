@@ -7,5 +7,7 @@ export function redact(text: string): string {
     .replace(/(accessToken=)[^;\s]+/gi, "$1[redacted]")
     .replace(/(refreshToken=)[^;\s]+/gi, "$1[redacted]")
     .replace(/(idToken=)[^;\s]+/gi, "$1[redacted]")
+    .replace(/(auth=)[^;\s]+/gi, "$1[redacted]")
+    .replace(/(CID=)[^;\s]+/gi, "$1[redacted]")
     .replace(/(Bearer\s+)[A-Za-z0-9\-._~+/]+=*/gi, "$1[redacted]")
 }

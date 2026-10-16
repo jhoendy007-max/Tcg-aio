@@ -1,0 +1,33 @@
+{
+  "data": {
+    "product": {
+      "transactableOfferCountByCondition": [{ "conditionCode": 1, "count": 41 }],
+      "allOffers": [
+        {
+          "usItemId": "13816151308",
+          "offerId": "4763C7752084369991730F1A1E2CF118",
+          "offerType": "ONLINE_ONLY",
+          "availabilityStatus": "IN_STOCK",
+          "fulfillmentType": "FC",
+          "fulfillmentOptions": [
+            { "__typename": "ShippingOptionV2", "type": "SHIPPING", "availabilityStatus": "IN_STOCK" },
+            { "__typename": "PickupOptionV2", "type": "PICKUP", "availabilityStatus": "NOT_AVAILABLE" },
+            { "__typename": "DeliveryOptionV2", "type": "DELIVERY", "availabilityStatus": "NOT_AVAILABLE" }
+          ],
+          "sellerId": "6C87064F4CD84CD7AC915109DD8FE719",
+          "catalogSellerId": 103101239,
+          "sellerName": "1000607114.ontario.inc",
+          "sellerDisplayName": "Unbeatable deals",
+          "sellerType": "EXTERNAL",
+          "wfsEnabled": true,
+          "priceInfo": {
+            "currentPrice": { "price": 134.66, "priceString": "$134.66" },
+            "wasPrice": { "price": 199.99, "priceString": "$199.99" },
+            "listPrice": null
+          },
+          "shippingOption": { "availabilityStatus": "AVAILABLE", "shipPrice": null }
+        }
+      ]
+    }
+  }
+}

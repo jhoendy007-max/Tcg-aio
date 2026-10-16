@@ -39,10 +39,12 @@ describe("cards and redaction", () => {
   it("checks luhn and strips secrets", () => {
     expect(luhnOk("4242424242424242")).toBe(true)
     expect(luhnOk("4242424242424243")).toBe(false)
-    const hidden = redact('{"card_number":"4242424242424242","cvv":"123","password":"hunter2"} accessToken=abc refreshToken=def Bearer tok.en')
+    const hidden = redact('{"card_number":"4242424242424242","cvv":"123","password":"hunter2"} accessToken=abc refreshToken=def Bearer tok.en auth=secret-auth; CID=customer-1')
     expect(hidden).not.toContain("4242424242424242")
     expect(hidden).not.toContain("hunter2")
     expect(hidden).not.toContain("accessToken=abc")
+    expect(hidden).not.toContain("secret-auth")
+    expect(hidden).not.toContain("customer-1")
   })
 })
 
@@ -72,6 +74,10 @@ describe("sessions and stock", () => {
   it("parses a cookie string and JSON session", () => {
     expect(parseSession("accessToken=aaa; visitorId=bbb; refreshToken=ccc").accessToken).toBe("aaa")
     expect(parseSession('{"access_token":"zzz","visitor_id":"yyy"}').visitorId).toBe("yyy")
+    const walmart = parseSession("auth=secret-auth; CID=customer-1; other=1")
+    expect(walmart.accessToken).toBe("secret-auth")
+    expect(walmart.visitorId).toBe("customer-1")
+    expect(walmart.cookie).toContain("CID=customer-1")
     expect(() => parseSession("visitorId=only")).toThrow(/accessToken/)
   })
 

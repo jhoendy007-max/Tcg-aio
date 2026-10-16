@@ -108,7 +108,7 @@ export class TaskService {
         sleep: (ms) => sleep(ms, controller.signal),
         onSession: async (session) => {
           this.db.updateSession(account.id, session)
-          update({ log: line("info", "Saved the refreshed Target session locally.") })
+          update({ log: line("info", `Saved the refreshed ${module.displayName} session locally.`) })
         }
       })
       if (controller.signal.aborted || result.outcome === "stopped") {

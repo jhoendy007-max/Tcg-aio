@@ -72,6 +72,8 @@ export interface SessionCookies {
   visitorId?: string
   refreshToken?: string
   idToken?: string
+  /** Original cookie header when the account pasted more than the named tokens. */
+  cookie?: string
 }
 
 export interface PublicAccount {
