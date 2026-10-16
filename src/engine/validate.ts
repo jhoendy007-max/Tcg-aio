@@ -77,8 +77,17 @@ export function cleanSettings(input: Settings): Settings {
     targetZip,
     targetState,
     targetApiKey,
-    phoneRelayUrl: cleanRelayUrl(input.phoneRelayUrl ?? "")
+    phoneRelayUrl: cleanRelayUrl(input.phoneRelayUrl ?? ""),
+    blockRetries: cleanBlockRetries(input.blockRetries)
   }
+}
+
+function cleanBlockRetries(value: number): number {
+  const retries = Math.round(Number(value))
+  if (!Number.isInteger(retries) || retries < 1 || retries > 8) {
+    throw new AppError("Block retries must be from 1 to 8.")
+  }
+  return retries
 }
 
 export function cleanRelayUrl(value: string): string {

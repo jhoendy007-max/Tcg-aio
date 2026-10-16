@@ -68,7 +68,7 @@ export function ProxiesPage() {
       <header className="page-head">
         <div>
           <h1>Proxies</h1>
-          <p>Import a list, then test each proxy. A task starts on one proxy from its group. Walmart rotates to another proxy in the group when PerimeterX returns HTTP 412.</p>
+          <p>Import a list, then test each proxy. A task starts on one proxy from its group and keeps that account on it while it works. A block rotates to the next healthy proxy in the group.</p>
         </div>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}

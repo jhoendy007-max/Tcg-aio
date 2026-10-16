@@ -200,6 +200,8 @@ export interface Settings {
   targetApiKey: string
   /** Optional ws:// or wss:// relay so a paired phone can connect away from home. */
   phoneRelayUrl: string
+  /** How many times to back off, rotate proxy, and reload the store session after a block. */
+  blockRetries: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -209,7 +211,8 @@ export const DEFAULT_SETTINGS: Settings = {
   targetZip: "10001",
   targetState: "NY",
   targetApiKey: "",
-  phoneRelayUrl: ""
+  phoneRelayUrl: "",
+  blockRetries: 3
 }
 
 export interface SecurityInfo {

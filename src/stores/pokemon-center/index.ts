@@ -1,3 +1,4 @@
+import { attachSession, isBlockStatus, sendWithRecovery } from "../../engine/block-recovery"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -110,6 +111,7 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => jar.load(cookies))
   ctx.log("info", "Using the saved Pokémon Center session.")
   const probe = await probeCart(ctx, jar)
   if (probe.kind !== "ok") return asResult(probe)
@@ -449,7 +451,10 @@ async function send(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest, 
     if (cookie) headers.cookie = cookie
     else delete headers.cookie
   }
-  const response = await ctx.http.request({ ...request, headers, proxy: ctx.proxy, signal: ctx.signal })
+  const response = await sendWithRecovery(ctx, { ...request, headers }, {
+    homeUrl: "https://www.pokemoncenter.com/",
+    blocked: (result) => isBlockStatus(result.status, result) || isChallenge(result.status, result.body)
+  })
   if (jar.absorb(response.headers, purpose === "queue")) {
     await ctx.onSession({
       accessToken: ctx.account.session?.accessToken || "session",

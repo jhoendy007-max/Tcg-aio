@@ -3,6 +3,8 @@ import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
 import { Database } from "../engine/database"
 import { postDiscord } from "../engine/discord"
+import { defaultHttp } from "../engine/http"
+import { refreshStoreSession } from "../engine/store-browser"
 import { TaskService } from "../engine/task-runner"
 import { channels } from "../shared/ipc"
 import type { TaskEvent } from "../shared/types"
@@ -94,7 +96,9 @@ if (gotLock) void app.whenReady().then(async () => {
       if (!webhook) return false
       await postDiscord(webhook, notice)
       return true
-    }
+    },
+    defaultHttp,
+    refreshStoreSession
   )
   registerIpc(db, runner, registry, () => window, desktop)
   createWindow()

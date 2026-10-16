@@ -2,7 +2,7 @@
 
 Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, and Amazon by ASIN or product URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
 
-Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If Target, Walmart, Best Buy, Pokémon Center, Crunchyroll, or Amazon shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
+Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not forge cookies or send challenges to a solving service. On HTTP 429, 403, 412, or 435, or a challenge page, a task backs off, switches that account to the next healthy proxy, and reloads the store in that account's real browser so the site can set fresh cookies. If the reloaded page is still a challenge, a window opens on the PC and the phone is notified for you to solve it. After the configured number of tries the task pauses and a Discord notification is sent.
 
 ## What you get
 
@@ -10,7 +10,7 @@ Retailer terms often restrict automated purchasing. TCGAIO uses the account, pro
 - **Profiles** — shipping and billing. Card number and CVV are encrypted locally.
 - **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
-- **Settings** — Discord webhook and Target monitor delay, store ID, ZIP, and state.
+- **Settings** — Discord webhook, block retries, and Target monitor delay, store ID, ZIP, and state.
 - **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. Card numbers and passwords stay on the PC.
 
 On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Pokémon Center payment fetches a CyberSource Flex capture context with a GET that does not include the card, then posts the encrypted card only to `flex.cybersource.com`. Crunchyroll payment posts the card form only to `api.stripe.com` and sends the store a `pm_` id plus a masked card. Amazon checkout uses the address and payment already saved on the Amazon account and does not send the card number or CVV. Walmart's PIE key is fetched with a GET that does not include the card.
