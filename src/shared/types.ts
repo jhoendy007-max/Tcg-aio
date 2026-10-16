@@ -76,6 +76,8 @@ export interface SessionCookies {
   cookie?: string
 }
 
+export type SessionState = "missing" | "saved" | "expired"
+
 export interface PublicAccount {
   id: string
   store: StoreId
@@ -83,6 +85,9 @@ export interface PublicAccount {
   username: string
   hasPassword: boolean
   hasSession: boolean
+  proxyGroupId: string | null
+  sessionState: SessionState
+  lastWarmAt: number | null
 }
 
 export interface AccountInput {
@@ -94,6 +99,7 @@ export interface AccountInput {
   passwordAction: "keep" | "replace" | "clear"
   session: string
   sessionAction: "keep" | "replace" | "clear"
+  proxyGroupId?: string | null
 }
 
 export interface FullAccount {
@@ -103,7 +109,10 @@ export interface FullAccount {
   username: string
   password?: string
   session?: SessionCookies
+  proxyGroupId?: string | null
 }
+
+export type ProxyNetwork = "residential" | "datacenter"
 
 export interface ProxyEndpoint {
   id: string
@@ -116,6 +125,7 @@ export interface ProxyEndpoint {
 export interface ProxyGroup {
   id: string
   name: string
+  network: ProxyNetwork
   proxies: ProxyEndpoint[]
 }
 
@@ -123,6 +133,23 @@ export interface ProxyGroupInput {
   id?: string
   name: string
   text: string
+  network?: ProxyNetwork
+}
+
+export interface ProxyScore {
+  proxyId: string
+  streak: number
+  ok: number
+  blocks: number
+  benchedUntil: number
+  lastStatus: number | null
+}
+
+export interface StoreBlockRate {
+  store: StoreId
+  samples: number
+  blocked: number
+  rate: number
 }
 
 export interface ProxyTestResult {
@@ -211,6 +238,12 @@ export interface Settings {
   clearCartAfterTest: boolean
   /** How long a person has to solve a store challenge before the task pauses. */
   challengeTimeoutSec: number
+  /** Open the real browser session on a timer and save the cookies it already has. */
+  sessionWarmup: boolean
+  /** Minutes between session warm-ups. */
+  sessionWarmupMin: number
+  /** Percent of jitter added to monitor sleeps. */
+  monitorJitterPct: number
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -223,7 +256,10 @@ export const DEFAULT_SETTINGS: Settings = {
   phoneRelayUrl: "",
   testMode: false,
   clearCartAfterTest: false,
-  challengeTimeoutSec: 180
+  challengeTimeoutSec: 180,
+  sessionWarmup: false,
+  sessionWarmupMin: 30,
+  monitorJitterPct: 20
 }
 
 export interface SecurityInfo {
@@ -250,6 +286,9 @@ export interface StoreHealth {
   verdict: "up" | "challenge" | "down"
   detail: string
   ms: number
+  blockSamples: number
+  blockCount: number
+  blockRate: number
 }
 
 /** A store challenge waiting for a person. No proxy password and no cookie header. */
@@ -266,7 +305,7 @@ export interface PublicChallenge {
 }
 
 export interface Notice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session"
   storeName: string
   sku: string
   profileName: string

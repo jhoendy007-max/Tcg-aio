@@ -7,7 +7,10 @@ import { parseKeywordQuery } from "./keywords"
 import { assertStore, cleanAddress, cleanCard, cleanEmail, cleanPhone, cleanSettings } from "./validate"
 import { AppError } from "../shared/errors"
 import { parseProxyList } from "../shared/proxy"
-import { isActiveStatus } from "../shared/types"
+import { applyBlockRates } from "./health"
+import { isBlockStatus } from "./polite"
+import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
+import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
 import type {
   AccountInput,
   Address,
@@ -17,21 +20,26 @@ import type {
   ProfileInput,
   ProxyGroup,
   ProxyGroupInput,
+  ProxyNetwork,
+  ProxyScore,
+  StoreBlockRate,
   PublicAccount,
   PublicProfile,
   AlertLog,
   DiscordWatchInput,
   KeywordWatch,
   KeywordWatchInput,
+  ProxyEndpoint,
   PublicTask,
   RestockRule,
   RestockRuleInput,
   SecurityInfo,
   SessionCookies,
   Settings,
+  StoreHealth,
+  StoreId,
   TaskInput
 } from "../shared/types"
-import { DEFAULT_SETTINGS } from "../shared/types"
 
 interface ProfileRecord extends PublicProfile {
   cardSecret: string
@@ -44,6 +52,15 @@ interface AccountRecord {
   username: string
   passwordSecret?: string
   sessionSecret?: string
+  proxyGroupId?: string | null
+  sessionState?: PublicAccount["sessionState"]
+  lastWarmAt?: number | null
+}
+
+interface HygieneFile {
+  pins: StickyPin[]
+  scores: ProxyScore[]
+  blocks: BlockTally[]
 }
 
 interface DeviceRecord {
@@ -75,6 +92,7 @@ interface DbFile {
   tasks: PublicTask[]
   devices: DeviceRecord[]
   restock?: RestockFile
+  hygiene?: HygieneFile
 }
 
 export class Database {
@@ -103,7 +121,8 @@ export class Database {
       proxyGroups: parsed.proxyGroups ?? [],
       tasks: parsed.tasks ?? [],
       devices: Array.isArray(parsed.devices) ? parsed.devices : [],
-      restock: normalizeRestock(parsed.restock)
+      restock: normalizeRestock(parsed.restock),
+      hygiene: normalizeHygiene(parsed.hygiene)
     }
     let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
     for (const task of this.data.tasks) {
@@ -249,16 +268,17 @@ export class Database {
     if (input.sessionAction === "replace") {
       sessionSecret = this.cipher.encrypt(JSON.stringify(parseSession(input.session)))
     }
-    if (!existing && !passwordSecret && !sessionSecret) {
-      throw new AppError("Save a password or a browser session for this account.")
-    }
+    const proxyGroupId = input.proxyGroupId ? this.getProxyGroup(input.proxyGroupId).id : input.proxyGroupId === null ? null : existing?.proxyGroupId ?? null
     const record: AccountRecord = {
       id: existing?.id ?? randomUUID(),
       store,
       label,
       username,
       passwordSecret,
-      sessionSecret
+      sessionSecret,
+      proxyGroupId,
+      sessionState: sessionSecret ? existing?.sessionState === "expired" && input.sessionAction !== "replace" ? "expired" : "saved" : "missing",
+      lastWarmAt: sessionSecret ? existing?.lastWarmAt ?? null : null
     }
     if (existing) this.data.accounts = this.data.accounts.map((account) => (account.id === record.id ? record : account))
     else this.data.accounts.push(record)
@@ -282,18 +302,72 @@ export class Database {
       label: record.label,
       username: record.username,
       password: record.passwordSecret ? this.cipher.decrypt(record.passwordSecret) : undefined,
-      session: record.sessionSecret ? (JSON.parse(this.cipher.decrypt(record.sessionSecret)) as SessionCookies) : undefined
+      session: record.sessionSecret ? (JSON.parse(this.cipher.decrypt(record.sessionSecret)) as SessionCookies) : undefined,
+      proxyGroupId: record.proxyGroupId ?? null
     }
   }
 
   updateSession(id: string, session: SessionCookies): void {
     const record = this.requireAccount(id)
     record.sessionSecret = this.cipher.encrypt(JSON.stringify(session))
+    record.sessionState = "saved"
     this.flush()
   }
 
+  markSession(id: string, state: PublicAccount["sessionState"], warmed: boolean): void {
+    const record = this.requireAccount(id)
+    record.sessionState = state
+    if (warmed) record.lastWarmAt = Date.now()
+    this.flush()
+  }
+
+  noteTraffic(store: StoreId, proxyId: string | undefined, status: number | null): void {
+    const hygiene = this.hygiene()
+    hygiene.scores = noteScore(hygiene.scores, proxyId, status, Date.now())
+    hygiene.blocks = noteBlock(hygiene.blocks, store, isBlockStatus(status))
+    this.flush()
+  }
+
+  recordHealth(rows: StoreHealth[], proxies: ProxyEndpoint[]): StoreHealth[] {
+    const hygiene = this.hygiene()
+    const now = Date.now()
+    rows.forEach((row, index) => {
+      const proxy = proxies.length ? proxies[index % proxies.length] : undefined
+      hygiene.scores = noteScore(hygiene.scores, proxy?.id, row.status, now)
+      hygiene.blocks = noteBlock(hygiene.blocks, row.store, isBlockStatus(row.status))
+    })
+    this.flush()
+    return applyBlockRates(rows, STORE_IDS.map((store) => tallyRate(hygiene.blocks, store)))
+  }
+
+  blockRate(store: StoreId): StoreBlockRate {
+    return tallyRate(this.hygiene().blocks, store)
+  }
+
+  proxyScores(): ProxyScore[] {
+    const known = new Set(this.data.proxyGroups.flatMap((group) => group.proxies.map((proxy) => proxy.id)))
+    return this.hygiene().scores.filter((score) => known.has(score.proxyId)).map((score) => ({ ...score }))
+  }
+
+  private hygiene(): HygieneFile {
+    if (!this.data.hygiene) this.data.hygiene = emptyHygiene()
+    return this.data.hygiene
+  }
+
+  assignProxy(accountId: string, groupId: string, proxies: ProxyEndpoint[], now = Date.now()) {
+    const hygiene = this.hygiene()
+    const result = chooseSticky(proxies, hygiene.pins, hygiene.scores, accountId, groupId, now)
+    hygiene.pins = result.pins
+    this.flush()
+    return result.choice
+  }
+
   listProxyGroups(): ProxyGroup[] {
-    return this.data.proxyGroups.map((group) => ({ ...group, proxies: group.proxies.map((proxy) => ({ ...proxy })) }))
+    return this.data.proxyGroups.map((group) => ({
+      ...group,
+      network: group.network === "residential" ? "residential" : "datacenter",
+      proxies: group.proxies.map((proxy) => ({ ...proxy }))
+    }))
   }
 
   saveProxyGroup(input: ProxyGroupInput): ProxyGroup {
@@ -305,10 +379,16 @@ export class Database {
       throw new AppError(`Could not parse: ${parsed.skipped.slice(0, 3).join(", ")}`)
     }
     const existing = input.id ? this.data.proxyGroups.find((group) => group.id === input.id) : undefined
+    const network: ProxyNetwork = input.network === "residential" ? "residential" : "datacenter"
+    const previous = new Map((existing?.proxies ?? []).map((proxy) => [`${proxy.host}:${proxy.port}:${proxy.username ?? ""}`, proxy.id]))
     const group: ProxyGroup = {
       id: existing?.id ?? randomUUID(),
       name,
-      proxies: parsed.proxies.map((proxy) => ({ ...proxy, id: randomUUID() }))
+      network,
+      proxies: parsed.proxies.map((proxy) => ({
+        ...proxy,
+        id: previous.get(`${proxy.host}:${proxy.port}:${proxy.username ?? ""}`) ?? randomUUID()
+      }))
     }
     if (existing) this.data.proxyGroups = this.data.proxyGroups.map((item) => (item.id === group.id ? group : item))
     else this.data.proxyGroups.push(group)
@@ -327,6 +407,7 @@ export class Database {
   getProxyGroup(id: string): ProxyGroup {
     const group = this.data.proxyGroups.find((item) => item.id === id)
     if (!group) throw new AppError("Proxy group not found.")
+    if (group.network !== "residential" && group.network !== "datacenter") group.network = "datacenter"
     return group
   }
 
@@ -615,7 +696,8 @@ function emptyDb(): DbFile {
     proxyGroups: [],
     tasks: [],
     devices: [],
-    restock: emptyRestock()
+    restock: emptyRestock(),
+    hygiene: emptyHygiene()
   }
 }
 
@@ -639,13 +721,31 @@ function toPublicProfile(record: ProfileRecord): PublicProfile {
 }
 
 function toPublicAccount(record: AccountRecord): PublicAccount {
+  const hasSession = Boolean(record.sessionSecret)
   return {
     id: record.id,
     store: record.store,
     label: record.label,
     username: record.username,
     hasPassword: Boolean(record.passwordSecret),
-    hasSession: Boolean(record.sessionSecret)
+    hasSession,
+    proxyGroupId: record.proxyGroupId ?? null,
+    sessionState: hasSession ? record.sessionState === "expired" ? "expired" : "saved" : "missing",
+    lastWarmAt: record.lastWarmAt ?? null
+  }
+}
+
+function emptyHygiene(): HygieneFile {
+  return { pins: [], scores: [], blocks: [] }
+}
+
+function normalizeHygiene(value: HygieneFile | undefined): HygieneFile {
+  const base = emptyHygiene()
+  if (!value) return base
+  return {
+    pins: Array.isArray(value.pins) ? value.pins : [],
+    scores: Array.isArray(value.scores) ? value.scores : [],
+    blocks: Array.isArray(value.blocks) ? value.blocks : []
   }
 }
 

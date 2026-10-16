@@ -74,6 +74,16 @@ export function SettingsPage() {
           <input type="checkbox" checked={form.clearCartAfterTest} onChange={(event) => setForm({ ...form, clearCartAfterTest: event.target.checked })} />
           <span>After a passed test, remove the test line from the Target or Walmart cart. Other stores leave the cart for you.</span>
         </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.sessionWarmup} onChange={(event) => setForm({ ...form, sessionWarmup: event.target.checked })} />
+          <span>Keep saved sessions warm in the real browser. The PC opens the store homepage and one product page, then saves the cookies that browser already has.</span>
+        </label>
+        <Field label="Warm-up interval (minutes)" hint="How often each signed-in account is opened. 10–240. An expired session asks you to sign in again.">
+          <TextInput type="number" min={10} max={240} value={form.sessionWarmupMin} onChange={(event) => setForm({ ...form, sessionWarmupMin: Number(event.target.value) })} required />
+        </Field>
+        <Field label="Monitor jitter (%)" hint="Random spread around each monitor wait. 0–40. Blocks (403, 412, 429, 435) also back off.">
+          <TextInput type="number" min={0} max={40} value={form.monitorJitterPct} onChange={(event) => setForm({ ...form, monitorJitterPct: Number(event.target.value) })} required />
+        </Field>
         <Field label="Challenge timeout (seconds)" hint="How long a person has to solve a store challenge before the task pauses. 30–600.">
           <TextInput type="number" min={30} max={600} value={form.challengeTimeoutSec} onChange={(event) => setForm({ ...form, challengeTimeoutSec: Number(event.target.value) })} required />
         </Field>

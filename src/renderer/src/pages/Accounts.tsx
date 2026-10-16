@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { AccountInput, PublicAccount, StoreId, StoreInfo } from "../../../shared/types"
+import type { AccountInput, ProxyGroup, PublicAccount, StoreId, StoreInfo } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
@@ -11,6 +11,7 @@ interface FormState {
   password: string
   session: string
   clearSession: boolean
+  proxyGroupId: string
 }
 
 const blank = (): FormState => ({
@@ -19,23 +20,27 @@ const blank = (): FormState => ({
   username: "",
   password: "",
   session: "",
-  clearSession: false
+  clearSession: false,
+  proxyGroupId: ""
 })
 
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<PublicAccount[]>([])
   const [stores, setStores] = useState<StoreInfo[]>([])
+  const [groups, setGroups] = useState<ProxyGroup[]>([])
   const [form, setForm] = useState<FormState | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
 
   async function reload() {
-    const [nextAccounts, nextStores] = await Promise.all([
+    const [nextAccounts, nextStores, nextGroups] = await Promise.all([
       unwrap(window.aio.accounts.list()),
-      unwrap(window.aio.stores.list())
+      unwrap(window.aio.stores.list()),
+      unwrap(window.aio.proxies.list())
     ])
     setAccounts(nextAccounts)
     setStores(nextStores)
+    setGroups(nextGroups)
   }
 
   useEffect(() => {
@@ -56,7 +61,8 @@ export function AccountsPage() {
         password: form.password,
         passwordAction: form.password ? "replace" : form.id ? "keep" : "clear",
         session: form.session,
-        sessionAction: form.clearSession ? "clear" : form.session.trim() ? "replace" : form.id ? "keep" : "clear"
+        sessionAction: form.clearSession ? "clear" : form.session.trim() ? "replace" : form.id ? "keep" : "clear",
+        proxyGroupId: form.proxyGroupId || null
       }
       await unwrap(window.aio.accounts.save(input))
       setForm(null)
@@ -86,7 +92,7 @@ export function AccountsPage() {
       <header className="page-head">
         <div>
           <h1>Accounts</h1>
-          <p>Use your own store login. A pasted browser session is the reliable path for Target, Walmart, Best Buy, Pokémon Center, and Crunchyroll. If sign-in hits a challenge, the task pauses for you.</p>
+          <p>Sign in inside the app browser, or paste a session. The browser uses the account proxy. Warm-up reopens that same browser and saves the cookies it already has.</p>
         </div>
         <button type="button" className="primary" onClick={() => { setForm(blank()); setError("") }}>New account</button>
       </header>
@@ -101,7 +107,13 @@ export function AccountsPage() {
             </Field>
             <Field label="Label"><TextInput value={form.label} onChange={(event) => setForm({ ...form, label: event.target.value })} required /></Field>
             <Field label="Username"><TextInput type="email" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} required /></Field>
-            <Field label="Password" hint={form.id ? "Leave blank to keep the saved password." : "Optional when a session is pasted."}>
+            <Field label="Proxy group" hint="Sticky IP for this account. A benched proxy rotates to the next one in the group.">
+              <Select value={form.proxyGroupId} onChange={(event) => setForm({ ...form, proxyGroupId: event.target.value })}>
+                <option value="">No assigned proxy</option>
+                {groups.map((group) => <option key={group.id} value={group.id}>{group.name} · {group.network}</option>)}
+              </Select>
+            </Field>
+            <Field label="Password" hint={form.id ? "Leave blank to keep the saved password." : "Optional. You can sign in with the browser instead."}>
               <TextInput type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
             </Field>
           </div>
@@ -130,9 +142,11 @@ export function AccountsPage() {
                 <td>{account.label}</td>
                 <td>{account.username}</td>
                 <td>{account.hasPassword ? "Saved" : "None"}</td>
-                <td>{account.hasSession ? "Saved" : "None"}</td>
+                <td>{account.sessionState === "expired" ? "Sign in again" : account.hasSession ? "Saved" : "None"}{account.lastWarmAt ? <div className="detail">Warmed {new Date(account.lastWarmAt).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}</div> : null}</td>
                 <td className="row-actions">
-                  <button type="button" onClick={() => setForm({ id: account.id, store: account.store, label: account.label, username: account.username, password: "", session: "", clearSession: false })}>Edit</button>
+                  <button type="button" onClick={() => void unwrap(window.aio.accounts.openBrowser(account.id)).catch((err) => setError(errorText(err)))}>Sign in</button>
+                  <button type="button" onClick={() => void unwrap(window.aio.accounts.captureBrowser(account.id)).then(() => reload()).catch((err) => setError(errorText(err)))}>Save cookies</button>
+                  <button type="button" onClick={() => setForm({ id: account.id, store: account.store, label: account.label, username: account.username, password: "", session: "", clearSession: false, proxyGroupId: account.proxyGroupId ?? "" })}>Edit</button>
                   <button type="button" className="danger" onClick={() => void remove(account.id)}>Delete</button>
                 </td>
               </tr>

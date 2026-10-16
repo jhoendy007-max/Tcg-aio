@@ -8,12 +8,15 @@ import { postDiscord } from "../engine/discord"
 import { ChallengeGate } from "../engine/challenge-gate"
 import { TaskService } from "../engine/task-runner"
 import { channels } from "../shared/ipc"
-import type { TaskEvent } from "../shared/types"
+import type { Notice, TaskEvent } from "../shared/types"
 import { createPhoneHost } from "../phone/backend"
 import { projectTask } from "../phone/protocol"
 import { PhoneServer } from "../phone/server"
 import { createRegistry } from "../stores/registry"
+import { warmupDue } from "../engine/session-care"
+import { storeName } from "../shared/stores"
 import { createChallengeController } from "./challenge-window"
+import { createSessionBrowser, type SessionBrowser } from "./session-window"
 import { registerIpc } from "./ipc"
 
 const gotLock = app.requestSingleInstanceLock()
@@ -23,6 +26,8 @@ let window: BrowserWindow | null = null
 let runner: TaskService | null = null
 let phone: PhoneServer | null = null
 let alerts: AlertService | null = null
+let sessions: SessionBrowser | null = null
+let sessionTimer: ReturnType<typeof setInterval> | null = null
 
 function createCipher(): Cipher {
   if (safeStorage.isEncryptionAvailable()) return createDpapiCipher(safeStorage)
@@ -72,12 +77,15 @@ if (gotLock) void app.whenReady().then(async () => {
   const registry = createRegistry()
   const gate = new ChallengeGate()
   const challenge = createChallengeController(gate, () => window)
+  sessions = createSessionBrowser(db, () => window)
   phone = new PhoneServer(createPhoneHost(db, () => runner, () => alerts, {
     open: () => challenge.open(),
     complete: () => challenge.complete(),
     dismiss: () => challenge.dismiss(),
     submit: (cookie) => challenge.submit(cookie),
     current: () => challenge.current()
+  }, {
+    open: (id) => sessions!.open(id)
   }), {
     onDevices: () => {
       if (phone) window?.webContents.send(channels.phoneEvent, phone.status())
@@ -85,33 +93,7 @@ if (gotLock) void app.whenReady().then(async () => {
   })
   await phone.start()
   const desktop = phone
-  runner = new TaskService(
-    db,
-    registry,
-    (event: TaskEvent) => {
-      window?.webContents.send(channels.taskEvent, event)
-      if (event.type === "delete") desktop.publishDelete(event.id)
-      else desktop.publishTask(projectTask(event.task, db.listProfiles(), db.listAccounts(), db.listProxyGroups()))
-    },
-    async (notice) => {
-      desktop.publishNotice({
-        kind: notice.kind,
-        storeName: notice.storeName,
-        sku: notice.sku,
-        profileName: notice.profileName,
-        detail: notice.detail,
-        orderId: notice.orderId,
-        ts: Date.now()
-      })
-      const webhook = db.getSettings().discordWebhook
-      if (!webhook) return false
-      await postDiscord(webhook, notice)
-      return true
-    },
-    defaultHttp,
-    gate
-  )
-  alerts = new AlertService(db, () => runner, async (notice) => {
+  const publish = async (notice: Notice) => {
     desktop.publishNotice({
       kind: notice.kind,
       storeName: notice.storeName,
@@ -125,7 +107,20 @@ if (gotLock) void app.whenReady().then(async () => {
     if (!webhook) return false
     await postDiscord(webhook, notice)
     return true
-  }, defaultHttp)
+  }
+  runner = new TaskService(
+    db,
+    registry,
+    (event: TaskEvent) => {
+      window?.webContents.send(channels.taskEvent, event)
+      if (event.type === "delete") desktop.publishDelete(event.id)
+      else desktop.publishTask(projectTask(event.task, db.listProfiles(), db.listAccounts(), db.listProxyGroups()))
+    },
+    publish,
+    defaultHttp,
+    gate
+  )
+  alerts = new AlertService(db, () => runner, publish, defaultHttp)
   desktop.setRestock((authorization, alternate, body) => alerts!.ingestHttp(authorization, alternate, body))
   alerts.onChange(() => {
     const status = desktop.status()
@@ -150,7 +145,10 @@ if (gotLock) void app.whenReady().then(async () => {
     }
     else void challenge.close()
   })
-  registerIpc(db, runner, registry, () => window, desktop, alerts, challenge)
+  registerIpc(db, runner, registry, () => window, desktop, alerts, challenge, sessions)
+  sessionTimer = setInterval(() => {
+    void warmNext(db, publish)
+  }, 60_000)
   createWindow()
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -164,8 +162,30 @@ app.on("second-instance", () => {
 })
 
 app.on("before-quit", () => {
+  if (sessionTimer) clearInterval(sessionTimer)
+  void sessions?.close()
   alerts?.stop()
   runner?.stopAll()
   void phone?.stop()
 })
+
+async function warmNext(db: Database, publish: (notice: Notice) => Promise<boolean>): Promise<void> {
+  const settings = db.getSettings()
+  if (!settings.sessionWarmup || !sessions) return
+  const due = db.listAccounts().find((account) => account.hasSession && account.sessionState !== "expired" && warmupDue(account.lastWarmAt, settings.sessionWarmupMin, Date.now()))
+  if (!due) return
+  try {
+    const result = await sessions.warm(due.id)
+    if (!result.expired) return
+    await publish({
+      kind: "session",
+      storeName: storeName(due.store),
+      sku: due.label,
+      profileName: "Session",
+      detail: result.detail
+    })
+  } catch {
+    db.markSession(due.id, due.sessionState, true)
+  }
+}
 app.on("window-all-closed", () => app.quit())

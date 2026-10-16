@@ -66,7 +66,10 @@ const account: PublicAccount = {
   label: "Main",
   username: EMAIL,
   hasPassword: true,
-  hasSession: true
+  hasSession: true,
+  proxyGroupId: null,
+  sessionState: "saved",
+  lastWarmAt: null
 }
 
 function task(partial: Partial<PublicTask> = {}): PublicTask {

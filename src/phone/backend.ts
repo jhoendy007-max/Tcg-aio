@@ -25,7 +25,8 @@ export function createPhoneHost(
   db: Database,
   getRunner: () => TaskService | null,
   getAlerts: () => AlertService | null = () => null,
-  challenge?: PhoneChallengeActions
+  challenge?: PhoneChallengeActions,
+  session?: { open(accountId: string): Promise<void> | void }
 ): PhoneHost {
   const pcName = desktopName()
   const snapshot = (): PhoneSnapshot => {
@@ -70,7 +71,7 @@ export function createPhoneHost(
     },
     async checkHealth(proxyGroupId: string | null) {
       const proxies = proxyGroupId ? db.getProxyGroup(proxyGroupId).proxies : []
-      return checkStoreHealth(defaultHttp, proxies)
+      return db.recordHealth(await checkStoreHealth(defaultHttp, proxies), proxies)
     },
     stop(id: string) {
       getRunner()?.stop(id)
@@ -139,6 +140,10 @@ export function createPhoneHost(
     },
     currentChallenge() {
       return challenge?.current() ?? null
+    },
+    openAccountLogin(id: string) {
+      if (!session) throw new Error("Browser sign-in is not available.")
+      return session.open(id)
     }
   }
 }

@@ -261,6 +261,10 @@ export class PhoneSession {
     return this.request({ type: "challenge.submit", req: rid(), conn: this.conn, cookie })
   }
 
+  openAccountLogin(accountId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "account.login", req: rid(), conn: this.conn, accountId })
+  }
+
   private async request(message: ClientMessage): Promise<PhoneCommandResult> {
     if (!("req" in message)) throw new Error("Phone request is missing an id.")
     const req = message.req

@@ -3,6 +3,7 @@ import type {
   AccountInput,
   ProxyGroup,
   ProxyGroupInput,
+  ProxyScore,
   ProxyTestResult,
   PublicAccount,
   PublicProfile,
@@ -48,11 +49,15 @@ export interface AioApi {
     save: (input: ProxyGroupInput) => Promise<Result<ProxyGroup>>
     delete: (id: string) => Promise<Result<{ id: string }>>
     test: (id: string) => Promise<Result<ProxyTestResult[]>>
+    health: () => Promise<Result<ProxyScore[]>>
   }
   accounts: {
     list: () => Promise<Result<PublicAccount[]>>
     save: (input: AccountInput) => Promise<Result<PublicAccount>>
     delete: (id: string) => Promise<Result<{ id: string }>>
+    openBrowser: (id: string) => Promise<Result<{ opened: true }>>
+    captureBrowser: (id: string) => Promise<Result<{ saved: true }>>
+    warm: (id: string) => Promise<Result<{ expired: boolean; detail: string }>>
   }
   settings: {
     get: () => Promise<Result<SettingsPayload>>

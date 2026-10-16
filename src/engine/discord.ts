@@ -24,7 +24,7 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
     ? 0x3cba8b
     : notice.kind === "tested" || notice.kind === "alert"
       ? 0x6aa6ff
-      : notice.kind === "paused" || notice.kind === "challenge"
+      : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session"
         ? 0xe0a045
         : 0xe25b5b
   const title =
@@ -36,9 +36,11 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
           ? `${notice.storeName} match`
           : notice.kind === "challenge"
             ? `${notice.storeName} needs a person`
-            : notice.kind === "paused"
-              ? `${notice.storeName} needs attention`
-              : `${notice.storeName} checkout failed`
+            : notice.kind === "session"
+              ? `${notice.storeName} needs a sign-in`
+              : notice.kind === "paused"
+                ? `${notice.storeName} needs attention`
+                : `${notice.storeName} checkout failed`
   const lines = [
     `Product: ${notice.sku}`,
     `Profile: ${notice.profileName}`,
@@ -50,6 +52,9 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
   }
   if (notice.kind === "challenge") {
     lines.push("A person solves this in TCGAIO. It is not sent to a solving service.")
+  }
+  if (notice.kind === "session") {
+    lines.push("Open the account browser and sign in again. TCGAIO does not create a session for you.")
   }
   if (notice.kind === "tested") {
     lines.push("Place order was not sent.")

@@ -185,7 +185,7 @@ export class AlertService {
         url: `https://discord.com/api/v10/channels/${encodeURIComponent(config.channelId)}/messages?limit=20`,
         headers: {
           authorization: `Bot ${config.token}`,
-          "user-agent": "TCGAIO (tcgaio, 0.2.3)"
+          "user-agent": "TCGAIO (tcgaio, 0.2.4)"
         },
         timeoutMs: 15000
       })

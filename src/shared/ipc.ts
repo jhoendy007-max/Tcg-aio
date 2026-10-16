@@ -14,6 +14,7 @@ export const channels = {
   proxiesSave: "proxies:save",
   proxiesDelete: "proxies:delete",
   proxiesTest: "proxies:test",
+  proxiesHealth: "proxies:health",
   accountsList: "accounts:list",
   accountsSave: "accounts:save",
   accountsDelete: "accounts:delete",
@@ -40,5 +41,8 @@ export const channels = {
   challengeDone: "challenge:done",
   challengeSubmit: "challenge:submit",
   challengeDismiss: "challenge:dismiss",
-  challengeEvent: "challenge:event"
+  challengeEvent: "challenge:event",
+  sessionOpen: "session:open",
+  sessionCapture: "session:capture",
+  sessionWarm: "session:warm"
 } as const

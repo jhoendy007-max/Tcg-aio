@@ -1,7 +1,7 @@
 import type { HttpClient } from "./http"
 import { proxyLabel } from "../shared/proxy"
 import { storeName } from "../shared/stores"
-import { STORE_IDS, type ProxyEndpoint, type StoreHealth, type StoreId } from "../shared/types"
+import { STORE_IDS, type ProxyEndpoint, type StoreBlockRate, type StoreHealth, type StoreId } from "../shared/types"
 
 export type { StoreHealth }
 
@@ -37,7 +37,10 @@ export async function checkStoreHealth(http: HttpClient, proxies: ProxyEndpoint[
         status: response.status,
         verdict,
         detail: verdict === "up" ? `HTTP ${response.status}` : verdict === "challenge" ? `HTTP ${response.status} looks like a challenge or block` : `HTTP ${response.status}`,
-        ms: Date.now() - started
+        ms: Date.now() - started,
+        blockSamples: 0,
+        blockCount: 0,
+        blockRate: 0
       })
     } catch (err) {
       results.push({
@@ -47,11 +50,31 @@ export async function checkStoreHealth(http: HttpClient, proxies: ProxyEndpoint[
         status: null,
         verdict: "down",
         detail: err instanceof Error ? err.message : "The monitor request failed.",
-        ms: Date.now() - started
+        ms: Date.now() - started,
+        blockSamples: 0,
+        blockCount: 0,
+        blockRate: 0
       })
     }
   }
   return results
+}
+
+export function applyBlockRates(rows: StoreHealth[], rates: StoreBlockRate[]): StoreHealth[] {
+  return rows.map((row) => {
+    const rate = rates.find((item) => item.store === row.store)
+    const samples = rate?.samples ?? row.blockSamples
+    const blocked = rate?.blocked ?? row.blockCount
+    const blockRate = samples ? blocked / samples : 0
+    const pct = samples ? `${Math.round(blockRate * 100)}% of ${samples}` : "no samples yet"
+    return {
+      ...row,
+      blockSamples: samples,
+      blockCount: blocked,
+      blockRate,
+      detail: `${row.detail} · block rate ${pct}`
+    }
+  })
 }
 
 function classify(status: number, body: string): StoreHealth["verdict"] {

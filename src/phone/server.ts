@@ -57,6 +57,7 @@ export interface PhoneHost {
   dismissChallenge?(): void
   submitChallenge?(cookie: string): void
   currentChallenge?(): PhoneChallenge | null
+  openAccountLogin?(id: string): Promise<void> | void
 }
 
 interface DeviceKey {
@@ -488,6 +489,12 @@ export class PhoneServer {
       if (message.type === "challenge.submit") {
         if (!this.host.submitChallenge) throw new Error("Challenge handoff is not available.")
         this.host.submitChallenge(message.cookie)
+        this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "account.login") {
+        if (!this.host.openAccountLogin) throw new Error("Browser sign-in is not available.")
+        await this.host.openAccountLogin(message.accountId)
         this.reply(conn, req, { ok: true })
         return
       }

@@ -4,6 +4,7 @@ import { relayRestockUrl, type AlertService } from "../engine/alerts"
 import type { ChallengeController } from "./challenge-window"
 import { postDiscord } from "../engine/discord"
 import { checkStoreHealth } from "../engine/health"
+import type { SessionBrowser } from "./session-window"
 import { defaultHttp } from "../engine/http"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
@@ -23,7 +24,8 @@ export function registerIpc(
   getWindow: () => BrowserWindow | null,
   phone: PhoneServer,
   alerts: AlertService,
-  challenge: ChallengeController
+  challenge: ChallengeController,
+  sessions: SessionBrowser
 ): void {
   const publishAlerts = () => {
     const status = phone.status()
@@ -55,9 +57,9 @@ export function registerIpc(
     runner.start(id, { test: true })
     return { started: true as const }
   })
-  handle(channels.healthCheck, (proxyGroupId: string | null) => {
+  handle(channels.healthCheck, async (proxyGroupId: string | null) => {
     const proxies = proxyGroupId ? db.getProxyGroup(proxyGroupId).proxies : []
-    return checkStoreHealth(defaultHttp, proxies)
+    return db.recordHealth(await checkStoreHealth(defaultHttp, proxies), proxies)
   })
   handle(channels.tasksStop, (id: string) => {
     runner.stop(id)
@@ -76,12 +78,22 @@ export function registerIpc(
     return { id }
   })
   handle(channels.proxiesTest, (id: string) => testProxies(db.getProxyGroup(id).proxies))
+  handle(channels.proxiesHealth, () => db.proxyScores())
   handle(channels.accountsList, () => db.listAccounts())
   handle(channels.accountsSave, (input) => db.saveAccount(input))
   handle(channels.accountsDelete, (id: string) => {
     db.deleteAccount(id)
     return { id }
   })
+  handle(channels.sessionOpen, async (id: string) => {
+    await sessions.open(id)
+    return { opened: true as const }
+  })
+  handle(channels.sessionCapture, async (id: string) => {
+    await sessions.capture(id)
+    return { saved: true as const }
+  })
+  handle(channels.sessionWarm, (id: string) => sessions.warm(id))
   handle(channels.settingsGet, () => ({ settings: db.getSettings(), security: db.security() }))
   handle(channels.settingsSave, (input: Settings) => {
     db.saveSettings(input)

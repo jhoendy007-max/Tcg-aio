@@ -30,12 +30,16 @@ const api: AioApi = {
     list: () => ipcRenderer.invoke(channels.proxiesList),
     save: (input) => ipcRenderer.invoke(channels.proxiesSave, input),
     delete: (id) => ipcRenderer.invoke(channels.proxiesDelete, id),
-    test: (id) => ipcRenderer.invoke(channels.proxiesTest, id)
+    test: (id) => ipcRenderer.invoke(channels.proxiesTest, id),
+    health: () => ipcRenderer.invoke(channels.proxiesHealth)
   },
   accounts: {
     list: () => ipcRenderer.invoke(channels.accountsList),
     save: (input) => ipcRenderer.invoke(channels.accountsSave, input),
-    delete: (id) => ipcRenderer.invoke(channels.accountsDelete, id)
+    delete: (id) => ipcRenderer.invoke(channels.accountsDelete, id),
+    openBrowser: (id) => ipcRenderer.invoke(channels.sessionOpen, id),
+    captureBrowser: (id) => ipcRenderer.invoke(channels.sessionCapture, id),
+    warm: (id) => ipcRenderer.invoke(channels.sessionWarm, id)
   },
   settings: {
     get: () => ipcRenderer.invoke(channels.settingsGet),

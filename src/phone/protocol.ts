@@ -107,7 +107,7 @@ export interface PhoneChallenge extends PublicChallenge {
 }
 
 export interface PhoneNotice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session"
   storeName: string
   sku: string
   profileName: string
@@ -173,6 +173,7 @@ export type ClientMessage =
   | { type: "challenge.done"; req: string; conn: string }
   | { type: "challenge.dismiss"; req: string; conn: string }
   | { type: "challenge.submit"; req: string; conn: string; cookie: string }
+  | { type: "account.login"; req: string; conn: string; accountId: string }
 
 export type ServerMessage =
   | { type: "paired"; token: string; deviceId: string; pcName: string }
@@ -406,6 +407,10 @@ export function asClientMessage(value: unknown): ClientMessage {
   if (message.type === "challenge.submit") {
     if (typeof message.cookie !== "string" || !message.cookie.trim()) throw new Error("Solved cookies are missing.")
     return { type: "challenge.submit", req: message.req, conn: message.conn, cookie: message.cookie.replace(/[\r\n]/g, "").slice(0, 8192) }
+  }
+  if (message.type === "account.login") {
+    if (typeof message.accountId !== "string" || !message.accountId) throw new Error("Choose an account.")
+    return { type: "account.login", req: message.req, conn: message.conn, accountId: message.accountId }
   }
   throw new Error("Unknown phone request.")
 }

@@ -74,6 +74,14 @@ export function cleanSettings(input: Settings): Settings {
   if (!Number.isFinite(challengeTimeoutSec) || challengeTimeoutSec < 30 || challengeTimeoutSec > 600) {
     throw new AppError("Challenge timeout must be between 30 and 600 seconds.")
   }
+  const sessionWarmupMin = Math.round(Number(input.sessionWarmupMin ?? DEFAULT_SETTINGS.sessionWarmupMin))
+  if (!Number.isFinite(sessionWarmupMin) || sessionWarmupMin < 10 || sessionWarmupMin > 240) {
+    throw new AppError("Session warm-up interval must be between 10 and 240 minutes.")
+  }
+  const monitorJitterPct = Math.round(Number(input.monitorJitterPct ?? DEFAULT_SETTINGS.monitorJitterPct))
+  if (!Number.isFinite(monitorJitterPct) || monitorJitterPct < 0 || monitorJitterPct > 40) {
+    throw new AppError("Monitor jitter must be between 0 and 40 percent.")
+  }
   return {
     discordWebhook: input.discordWebhook.trim(),
     monitorDelayMs,
@@ -84,7 +92,10 @@ export function cleanSettings(input: Settings): Settings {
     phoneRelayUrl: cleanRelayUrl(input.phoneRelayUrl ?? ""),
     testMode: input.testMode === true,
     clearCartAfterTest: input.clearCartAfterTest === true,
-    challengeTimeoutSec
+    challengeTimeoutSec,
+    sessionWarmup: input.sessionWarmup === true,
+    sessionWarmupMin,
+    monitorJitterPct
   }
 }
 

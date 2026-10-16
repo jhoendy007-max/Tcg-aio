@@ -1,5 +1,6 @@
 import { applySolvedCookies, challengePageUrl, classifyChallenge, cookieHeader } from "./challenge"
 import type { ChallengeGate } from "./challenge-gate"
+import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
 import { guardTestMode, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
 import { proxyLabel } from "../shared/proxy"
 import { redact } from "../shared/redact"
@@ -12,6 +13,7 @@ import { isActiveStatus, type FullAccount, type LogLevel, type Notice, type Prox
 export class TaskService {
   private readonly inflight = new Map<string, Promise<void>>()
   private readonly controllers = new Map<string, AbortController>()
+  private readonly polite = new PoliteLimiter()
 
   constructor(
     private readonly db: Database,
@@ -108,14 +110,22 @@ export class TaskService {
       if (task.proxyGroupId) {
         const group = this.db.getProxyGroup(task.proxyGroupId)
         proxies = group.proxies
-        proxy = pickProxy(group.proxies, task.id)
-        update({
-          log: line("info", proxy ? `Using proxy ${proxyLabel(proxy)} from ${group.name}.` : `Proxy group ${group.name} is empty. Using a direct connection.`)
-        })
+        const choice = this.db.assignProxy(account.id, group.id, group.proxies)
+        proxy = choice.proxy
+        const network = group.network === "residential" ? "residential" : "datacenter"
+        const detail = !proxy
+          ? `Proxy group ${group.name} is empty. Using a direct connection.`
+          : choice.allBenched
+            ? `Every proxy in ${group.name} is benched after repeated blocks. Still using ${proxyLabel(proxy)} (${network}).`
+            : `Using ${network} proxy ${proxyLabel(proxy)} from ${group.name}${choice.rotated ? " after the previous one was benched" : ""}.`
+        update({ log: line(choice.allBenched ? "warn" : "info", detail) })
       } else {
         update({ log: line("info", "Direct connection. No proxy group selected.") })
       }
       const settings = this.db.getSettings()
+      const http = this.polite.wrap(task.store, proxy?.id, this.http, (proxyId, status) => {
+        this.db.noteTraffic(task.store, proxyId, status)
+      }, controller.signal)
       const checks: string[] = []
       if (testMode) update({ log: line("warn", "TEST MODE. The real flow runs through payment, then stops. The place-order request is not sent.") })
       let handoffs = 0
@@ -128,7 +138,7 @@ export class TaskService {
           proxy,
           proxies,
           signal: controller.signal,
-          http: testMode ? guardTestMode(task.store, this.http) : this.http,
+          http: testMode ? guardTestMode(task.store, http) : http,
           testMode,
           clearCartAfterTest: testMode && settings.clearCartAfterTest,
           mark: (stage: TestStage, result: CheckResult, detail: string) => {
@@ -141,7 +151,11 @@ export class TaskService {
           log: (level, message) => update({ log: line(level, message) }),
           detail: (message) => update({ detail: redact(message).slice(0, 240) }),
           phase: (status) => update({ status }),
-          sleep: (ms) => sleep(ms, controller.signal),
+          sleep: (ms) => {
+            const score = proxy ? this.db.proxyScores().find((item) => item.proxyId === proxy?.id) : undefined
+            const wait = jitterDelay(ms, settings.monitorJitterPct, Math.random()) + backoffDelay(score?.streak ?? 0, settings.monitorDelayMs)
+            return sleep(wait, controller.signal)
+          },
           onSession: async (session) => {
             this.db.updateSession(account.id, session)
             account = this.db.readAccount(account.id)
@@ -334,9 +348,3 @@ function line(level: LogLevel, message: string) {
   return { ts: Date.now(), level, message: redact(message).slice(0, 500) }
 }
 
-function pickProxy(proxies: ProxyEndpoint[], taskId: string): ProxyEndpoint | undefined {
-  if (!proxies.length) return undefined
-  let hash = 0
-  for (const char of taskId) hash = (hash + char.charCodeAt(0)) >>> 0
-  return proxies[hash % proxies.length]
-}

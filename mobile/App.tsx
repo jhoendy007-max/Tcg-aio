@@ -343,6 +343,7 @@ function TaskDetail({ task, onRun, session, onEdit }: {
         {!isActive(task.status) ? (
           <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.runTest(task.id))}><Text style={styles.secondaryText}>Run test</Text></Pressable>
         ) : null}
+        <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.openAccountLogin(task.accountId))}><Text style={styles.secondaryText}>Sign in on PC</Text></Pressable>
         <Pressable style={styles.secondary} onPress={onEdit}><Text style={styles.secondaryText}>Edit</Text></Pressable>
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.deleteTask(task.id))}><Text style={styles.secondaryText}>Delete</Text></Pressable>
       </View>

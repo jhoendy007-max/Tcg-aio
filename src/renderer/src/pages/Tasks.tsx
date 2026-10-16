@@ -248,13 +248,14 @@ export function TasksPage() {
         {health ? (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Store</th><th>Proxy</th><th>Status</th><th>Result</th></tr></thead>
+              <thead><tr><th>Store</th><th>Proxy</th><th>Status</th><th>Block rate</th><th>Result</th></tr></thead>
               <tbody>
                 {health.map((row) => (
                   <tr key={row.store}>
                     <td>{row.storeName}</td>
                     <td>{row.proxy}</td>
                     <td>{row.status ?? "—"} · {row.ms}ms</td>
+                    <td>{row.blockSamples ? `${row.blockCount}/${row.blockSamples} · ${Math.round(row.blockRate * 100)}%` : "—"}</td>
                     <td><span className={`pill ${row.verdict === "up" ? "success" : row.verdict === "challenge" ? "paused" : "failed"}`}>{row.verdict}</span> <span className="detail">{row.detail}</span></td>
                   </tr>
                 ))}
