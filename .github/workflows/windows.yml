@@ -67,7 +67,13 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          SM=$(find "$SDK/cmdline-tools" -type f -name sdkmanager | head -1)
+          test -n "$SM"
+          yes | "$SM" --sdk_root="$SDK" --licenses >/dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
       - run: npm ci
         working-directory: mobile
       - run: npx expo prebuild --platform android --no-install
