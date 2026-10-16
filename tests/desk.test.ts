@@ -8,6 +8,7 @@ import { createAesCipher } from "../src/engine/cipher"
 import { Database } from "../src/engine/database"
 import { planDrops, scheduleAction } from "../src/engine/drops"
 import { compareVersions, pickRelease, readReleases } from "../src/engine/releases"
+import { countdown } from "../src/shared/clock"
 import { astDay, formatAst, parseAstLocal, toAstInput } from "../src/engine/time"
 import type { CheckoutRecord } from "../src/shared/types"
 
@@ -20,6 +21,14 @@ describe("Atlantic time", () => {
     expect(toAstInput(morning)).toBe("2026-11-13T09:00")
     expect(astDay(morning - 60_000)).toBe("2026-11-13")
     expect(formatAst(morning)).toContain("09:00")
+  })
+
+  it("counts a drop down from an absolute timestamp", () => {
+    const now = 1_000_000
+    expect(countdown(now - 1, now)).toBe("now")
+    expect(countdown(now + 45_000, now)).toBe("0m 45s")
+    expect(countdown(now + 3_700_000, now)).toBe("1h 1m")
+    expect(countdown(now + 90_000_000, now)).toBe("1d 1h")
   })
 })
 

@@ -10,7 +10,7 @@ import { ensureNotificationPermission, notify } from "./src/notify"
 import { clearLink, loadLink, saveLink } from "./src/storage"
 import type { StoreHealth } from "../src/shared/types"
 import { colors, isActive, STATUS_LABEL } from "./src/theme"
-import { countdown } from "../src/engine/time"
+import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
 
 type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats"

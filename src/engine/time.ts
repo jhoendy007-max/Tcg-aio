@@ -1,5 +1,6 @@
 /** Puerto Rico is Atlantic Standard Time, UTC−4, with no daylight-saving shift. */
 export const AST_ZONE = "America/Puerto_Rico"
+export { countdown } from "../shared/clock"
 const AST_OFFSET_MS = 4 * 60 * 60 * 1000
 
 export function parseAstLocal(value: string): number {
@@ -51,15 +52,3 @@ export function astDay(ms: number): string {
   }).format(ms)
 }
 
-export function countdown(target: number, now: number): string {
-  const delta = target - now
-  if (delta <= 0) return "now"
-  const total = Math.floor(delta / 1000)
-  const days = Math.floor(total / 86_400)
-  const hours = Math.floor((total % 86_400) / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const seconds = total % 60
-  if (days > 0) return `${days}d ${hours}h`
-  if (hours > 0) return `${hours}h ${minutes}m`
-  return `${minutes}m ${String(seconds).padStart(2, "0")}s`
-}
