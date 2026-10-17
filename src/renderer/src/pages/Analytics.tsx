@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { AnalyticsReport, CheckoutRecord, ResaleQuote } from "../../../shared/types"
+import type { AnalyticsReport, CheckoutRecord, InventoryReport, ResaleQuote } from "../../../shared/types"
 import { formatAst } from "../../../engine/time"
 import { SpeedChart, SpendChart, WinChart } from "../components/charts"
 import { Banner, Field } from "../components/ui"
@@ -136,6 +136,7 @@ export function AnalyticsPage() {
         </table>
       </div>
       <ResaleCard wins={report.recent.filter((row) => row.outcome === "success")} />
+      <InventoryCard />
       <div className="table-wrap card">
         <table>
           <thead><tr><th>When</th><th>Store</th><th>Product</th><th>Price</th><th>Result</th></tr></thead>
@@ -233,6 +234,70 @@ function ResaleCard({ wins }: { wins: CheckoutRecord[] }) {
           <button type="button" onClick={() => void copyDraft().catch((err) => setError(errorText(err)))}>{copied ? "Copied" : "Copy draft"}</button>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function InventoryCard() {
+  const [report, setReport] = useState<InventoryReport | null>(null)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    void unwrap(window.aio.inventory.get()).then(setReport).catch((err) => setError(errorText(err)))
+  }, [])
+
+  async function save(id: string, raw: string) {
+    const value = raw.trim() === "" ? null : Number(raw)
+    if (value !== null && !Number.isFinite(value)) throw new Error("Current value must be a dollar amount.")
+    setReport(await unwrap(window.aio.inventory.setValue(id, value)))
+  }
+
+  async function download() {
+    const file = await unwrap(window.aio.inventory.csv())
+    const blob = new Blob([file.csv], { type: "text/csv" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = "tcgaio-inventory.csv"
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="card">
+      <header className="page-head">
+        <div>
+          <h2>Inventory</h2>
+          <p className="hint">Successful purchases on this PC. Cost is the recorded price. Current value is what you enter. Profit is value minus cost. Test runs are not purchases.</p>
+        </div>
+        <button type="button" onClick={() => void download().catch((err) => setError(errorText(err)))}>Export inventory CSV</button>
+      </header>
+      {error ? <Banner tone="error">{error}</Banner> : null}
+      {report ? (
+        <div className="stats">
+          <div className="stat"><strong>{report.purchases}</strong><span>purchases</span></div>
+          <div className="stat"><strong>${report.cost.toFixed(2)}</strong><span>cost</span></div>
+          <div className="stat"><strong>${report.value.toFixed(2)}</strong><span>valued</span></div>
+          <div className="stat"><strong>${report.profit.toFixed(2)}</strong><span>profit on valued</span></div>
+          <div className="stat"><strong>{report.unvalued}</strong><span>need a value</span></div>
+        </div>
+      ) : null}
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Product</th><th>Qty</th><th>Cost</th><th>Current value</th><th>Profit</th></tr></thead>
+          <tbody>
+            {!report || report.rows.length === 0 ? <tr><td colSpan={5} className="empty">Purchases show up after a successful checkout.</td></tr> : report.rows.map((row) => (
+              <tr key={row.id}>
+                <td className="sku">{row.product}</td>
+                <td>{row.quantity}</td>
+                <td>{money(row.cost)}</td>
+                <td><input defaultValue={row.value === null ? "" : String(row.value)} inputMode="decimal" onBlur={(event) => void save(row.id, event.target.value).catch((err) => setError(errorText(err)))} /></td>
+                <td>{money(row.profit)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

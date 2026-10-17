@@ -137,6 +137,11 @@ const api: AioApi = {
   resale: {
     quote: (input) => ipcRenderer.invoke(channels.resaleQuote, input)
   },
+  inventory: {
+    get: () => ipcRenderer.invoke(channels.inventoryGet),
+    setValue: (id, value) => ipcRenderer.invoke(channels.inventoryValue, id, value),
+    csv: () => ipcRenderer.invoke(channels.inventoryCsv)
+  },
   vault: {
     list: () => ipcRenderer.invoke(channels.vaultList),
     unlink: (deviceId: string, accountId: string) => ipcRenderer.invoke(channels.vaultUnlink, deviceId, accountId),
