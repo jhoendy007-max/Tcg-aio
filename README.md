@@ -12,8 +12,8 @@ Test mode, from Settings or a task, runs the real monitor, cart, address, shippi
 - **Tasks** — separate monitor and checkout tasks. A monitor watches a SKU, URL, or keywords and can start several linked checkouts. A checkout can start by hand, on a schedule, from a monitor, from a restock alert, or with its own monitor. Delays, caps, hours, and the webhook can change while a task is running. The same editor is on the phone, in English or Spanish. Compact or detailed. Dark, light, and accent colors, plus a name and logo, are in Settings.
 - **Setup** — a first-run wizard for a profile, an account, optional proxies, and one test-mode task. It stays hidden once you have a profile or an account, or after you skip it.
 - **Profiles** — shipping and billing. Card number and CVV are encrypted locally.
-- **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.
-- **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
+- **Proxies** — import `host:port` or `host:port:user:pass` lists and test them. A proxy is quarantined after repeated HTTP 403, 412, or 435 responses. Use a residential proxy you control. Datacenter addresses are challenged more often. TCGAIO does not hide TLS or change the browser fingerprint.
+- **Accounts** — per-store logins. Each account keeps one Chromium profile and one sticky proxy. Passwords and browser sessions are encrypted. Optional warm-up browses the store before a drop and does not add to cart.
 - **Stores** — one settings page per store, with recommended defaults, reset, and JSON presets. A task override wins over the store, which wins over global Settings. The same page is on the phone, in English or Spanish.
 - **Settings** — Discord webhook, Target monitor delay, store ID, ZIP, and state, and read-only IMAP mailboxes. An email address fills the server settings. Google and Microsoft can sign in; iCloud and Yahoo use an app password. The same mail screen is on the phone, in English or Spanish. An encrypted backup uses a passphrase you keep. The optional cloud copy is the same sealed file.
 - **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. One phone can switch among several PCs. Card numbers and passwords stay on the PC.
@@ -69,7 +69,7 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on the stores in the catalog (Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer). It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.20.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.21.zip` next to the Windows installer and the phone APK.
 
 Analytics can check a win against the public TCGplayer market price and the public eBay sold search, show profit, and copy a listing draft. It does not post the listing. Inventory lists those purchases, the current value you enter, total profit, and a CSV export.
 

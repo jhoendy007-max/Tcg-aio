@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { consistencyText, effectiveBinding } from "../../../shared/consistency"
 import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type Settings, type StartMode, type StoreHealth, type StoreInfo, type TaskInput, type TaskKind, type TaskStatus } from "../../../shared/types"
 import { moduleScope, moduleText, resolveModule, sourceLabel } from "../../../shared/module-settings"
 import { taskText } from "../../../shared/task-role"
@@ -384,6 +385,9 @@ export function TasksPage() {
                 globalTest={globalTest}
                 dragId={dragId}
                 names={names}
+                accounts={accounts}
+                groups={groups}
+                lang={lang}
                 onSelect={setSelectedId}
                 onDrag={setDragId}
                 onDrop={(target) => { if (dragId) place(dragId, target, false); setDragId(null) }}
@@ -416,7 +420,7 @@ export function TasksPage() {
   )
 }
 
-function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
+function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, accounts, groups, lang, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
   section: { label: string; rows: PublicTask[] }
   grouped: boolean
   taskView: "compact" | "detailed"
@@ -424,6 +428,9 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
   globalTest: boolean
   dragId: string | null
   names: { profile: Map<string, string>; account: Map<string, string>; group: Map<string, string> }
+  accounts: PublicAccount[]
+  groups: ProxyGroup[]
+  lang: "en" | "es"
   onSelect: (id: string) => void
   onDrag: (id: string | null) => void
   onDrop: (id: string) => void
@@ -463,8 +470,8 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
           </td>
           {taskView === "detailed" ? <td>{task.quantity}</td> : null}
           {taskView === "detailed" ? <td>{names.profile.get(task.profileId) ?? "Missing"}</td> : null}
-          {taskView === "detailed" ? <td>{names.account.get(task.accountId) ?? "Missing"}</td> : null}
-          {taskView === "detailed" ? <td>{task.proxyGroupId ? names.group.get(task.proxyGroupId) ?? "Missing" : "Direct"}</td> : null}
+          {taskView === "detailed" ? <td>{bindingCell(task, accounts, groups, lang).account}</td> : null}
+          {taskView === "detailed" ? <td>{bindingCell(task, accounts, groups, lang).proxy}</td> : null}
           <td>
             <span className={`pill ${task.status}`}>{STATUS_LABEL[task.status]}</span>
             {task.detail ? <div className="detail">{task.detail}</div> : null}
@@ -487,6 +494,38 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
       ))}
     </>
   )
+}
+
+function bindingCell(task: PublicTask, accounts: PublicAccount[], groups: ProxyGroup[], lang: "en" | "es") {
+  const account = accounts.find((item) => item.id === task.accountId) ?? null
+  const binding = effectiveBinding({
+    accountId: task.accountId,
+    proxyGroupId: task.proxyGroupId,
+    monitorProxyGroupId: task.monitorProxyGroupId,
+    account,
+    groups
+  })
+  const accountLabel = binding.accountSource === "none"
+    ? consistencyText(lang, "fromNone")
+    : binding.accountLabel || "Missing"
+  const proxyLabel = binding.proxyLabel || consistencyText(lang, "fromDirect")
+  const source = binding.proxySource === "account" ? "fromAccount" : binding.proxySource === "task" ? "fromTask" : "fromDirect"
+  return {
+    account: (
+      <>
+        <div>{accountLabel}</div>
+        {binding.profileSource === "account" ? <div className="detail">{consistencyText(lang, "profile")} · {binding.profileLabel}</div> : null}
+        <div className="detail">{consistencyText(lang, binding.accountSource === "task" ? "fromAccount" : "fromNone")}</div>
+      </>
+    ),
+    proxy: (
+      <>
+        <div>{proxyLabel}</div>
+        <div className="detail">{consistencyText(lang, source)}</div>
+        {binding.warnings.map((warning) => <div key={warning} className="detail">{consistencyText(lang, warning === "sticky" ? "stickyWarning" : "monitorWarning")}</div>)}
+      </>
+    )
+  }
 }
 
 function toInput(task: PublicTask): TaskInput {
@@ -647,11 +686,29 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, groups,
         <Banner tone="info">{selectedStore.name} is registered, and starting a task records that checkout is not implemented yet.</Banner>
       ) : null}
       {settings ? <TaskOverrides form={form} settings={settings} onChange={onChange} /> : null}
+      <BindingNote form={form} accounts={accounts} groups={groups} lang={lang} />
       <div className="actions span-2">
         <button className="primary" type="submit" disabled={busy}>{form.id ? "Save task" : "Create task"}</button>
         <button type="button" onClick={onCancel}>Cancel</button>
       </div>
     </form>
+  )
+}
+
+function BindingNote({ form, accounts, groups, lang }: { form: TaskInput; accounts: PublicAccount[]; groups: ProxyGroup[]; lang: "en" | "es" }) {
+  const account = accounts.find((item) => item.id === form.accountId) ?? null
+  const binding = effectiveBinding({
+    accountId: form.accountId,
+    proxyGroupId: form.proxyGroupId ?? null,
+    monitorProxyGroupId: form.monitorProxyGroupId ?? null,
+    account,
+    groups
+  })
+  return (
+    <div className="span-2">
+      <p className="hint">{consistencyText(lang, "effective")}: {binding.accountSource === "none" ? consistencyText(lang, "fromNone") : binding.accountLabel} · {binding.profileLabel || consistencyText(lang, "fromNone")} · {binding.proxyLabel || consistencyText(lang, "fromDirect")} ({consistencyText(lang, binding.proxySource === "account" ? "fromAccount" : binding.proxySource === "task" ? "fromTask" : "fromDirect")})</p>
+      {binding.warnings.map((warning) => <Banner key={warning} tone="info">{consistencyText(lang, warning === "sticky" ? "stickyWarning" : "monitorWarning")}</Banner>)}
+    </div>
   )
 }
 

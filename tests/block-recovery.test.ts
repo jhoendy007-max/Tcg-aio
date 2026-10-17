@@ -76,7 +76,7 @@ describe("block recovery", () => {
     expect(pageLooksLikeChallenge("Pokemon ETB in stock")).toBe(false)
   })
 
-  it("rotates, copies the cookies the browser returned, and retries", async () => {
+  it("keeps an account on its sticky proxy and still copies the cookies the browser returned", async () => {
     const seen: HttpRequest[] = []
     let hits = 0
     const saved: SessionCookies[] = []
@@ -92,7 +92,7 @@ describe("block recovery", () => {
     const run = ctx({
       http,
       refreshSession: async (input) => {
-        expect(input.proxy?.host).toBe("10.0.0.2")
+        expect(input.proxy?.host).toBe("10.0.0.1")
         return {
           cookies: { accessToken: "fresh-token", visitorId: "fresh-visitor", cookie: "accessToken=fresh-token; visitorId=fresh-visitor" },
           challenged: false
@@ -116,13 +116,42 @@ describe("block recovery", () => {
     })
     expect(response.status).toBe(200)
     expect(seen[0]?.proxy?.host).toBe("10.0.0.1")
-    expect(seen[1]?.proxy?.host).toBe("10.0.0.2")
+    expect(seen[1]?.proxy?.host).toBe("10.0.0.1")
     expect(seen[1]?.headers?.cookie).toContain("fresh-token")
     expect(seen[1]?.headers?.authorization).toBe("Bearer fresh-token")
     expect(saved[0]?.accessToken).toBe("fresh-token")
     expect(jar).toContain("fresh-visitor")
     const stuck = selectProxy("target:acct-target", proxies, Date.now())
-    expect(stuck?.host).toBe("10.0.0.2")
+    expect(stuck?.host).toBe("10.0.0.1")
+  })
+
+  it("lets a task with no account move to the next proxy", async () => {
+    const seen: HttpRequest[] = []
+    let hits = 0
+    const http = {
+      async request(input: HttpRequest) {
+        seen.push(input)
+        hits += 1
+        if (hits === 1) return json(403, "blocked")
+        return json(200, { ok: true })
+      }
+    }
+    const run = ctx({
+      account: { id: "", store: "target" } as StoreRunContext["account"],
+      http,
+      refreshSession: async (input) => {
+        expect(input.proxy?.host).toBe("10.0.0.2")
+        return { cookies: { accessToken: "fresh", cookie: "accessToken=fresh" }, challenged: false }
+      }
+    })
+    const response = await sendWithRecovery(run, { method: "GET", url: "https://redsky.target.com/stock" }, {
+      homeUrl: "https://www.target.com/",
+      inner: http,
+      blocked: (result) => isBlockStatus(result.status, result)
+    })
+    expect(response.status).toBe(200)
+    expect(seen[1]?.proxy?.host).toBe("10.0.0.2")
+    expect(selectProxy("target:", proxies, Date.now())?.host).toBe("10.0.0.2")
   })
 
   it("pauses Target on a challenge page before adding to cart", async () => {

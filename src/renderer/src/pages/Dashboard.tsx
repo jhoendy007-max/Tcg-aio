@@ -62,7 +62,7 @@ export function DashboardPage({ onTasks }: { onTasks: () => void }) {
         <article className="stat"><strong>{today.success}</strong><span>checkouts today</span><small>{today.count} recorded</small></article>
         <article className="stat"><strong>${today.spend.toFixed(2)}</strong><span>spend today</span><small>successful orders</small></article>
         <article className="stat"><strong>{Math.round(today.winRate * 100)}%</strong><span>success rate</span><small>today, tests excluded</small></article>
-        <article className="stat"><strong>{scores.length ? scores.length - benched : 0}</strong><span>proxies ready</span><small>{benched ? `${benched} benched` : scores.length ? "none benched" : "no scores yet"}</small></article>
+        <article className="stat"><strong>{scores.length ? scores.length - benched : 0}</strong><span>proxies ready</span><small>{benched ? `${benched} quarantined` : scores.length ? "none quarantined" : "no scores yet"}</small></article>
         <article className="stat"><strong>{saved}</strong><span>sessions saved</span><small>{expired} expired · {missing} missing</small></article>
       </div>
       <div className="card table-wrap">

@@ -10,6 +10,7 @@ import { AppError } from "../shared/errors"
 import { parseProxyList } from "../shared/proxy"
 import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
+import { accountPartition, sessionFreshness } from "../shared/consistency"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
 import { openBackup, sealBackup, type BackupAccount, type BackupDocument, type BackupProfile } from "./backup"
@@ -382,7 +383,22 @@ export class Database {
   }
 
   listAccounts(): PublicAccount[] {
-    return this.data.accounts.map(toPublicAccount)
+    const pins = this.hygiene().pins
+    const proxies = this.data.proxyGroups.flatMap((group) => group.proxies)
+    const freshMin = this.data.settings?.sessionWarmupMin ?? 30
+    const now = Date.now()
+    return this.data.accounts.map((record) => {
+      const account = toPublicAccount(record)
+      const pin = pins.find((item) => item.accountId === account.id && item.exclusive !== false)
+      const proxy = pin ? proxies.find((item) => item.id === pin.proxyId) : undefined
+      return {
+        ...account,
+        stickyProxyId: pin?.proxyId ?? null,
+        stickyProxyLabel: proxy ? `${proxy.host}:${proxy.port}` : null,
+        profilePartition: accountPartition(account.id),
+        freshness: sessionFreshness(account, now, freshMin)
+      }
+    })
   }
 
   saveAccount(input: AccountInput): PublicAccount {
@@ -499,12 +515,20 @@ export class Database {
     return this.data.hygiene
   }
 
-  assignProxy(accountId: string, groupId: string, proxies: ProxyEndpoint[], now = Date.now()) {
+  assignProxy(accountId: string, groupId: string, proxies: ProxyEndpoint[], now = Date.now(), exclusive = true) {
     const hygiene = this.hygiene()
-    const result = chooseSticky(proxies, hygiene.pins, hygiene.scores, accountId, groupId, now)
+    const result = chooseSticky(proxies, hygiene.pins, hygiene.scores, accountId, groupId, now, exclusive)
     hygiene.pins = result.pins
     this.flush()
     return result.choice
+  }
+
+  findProxy(id: string): ProxyEndpoint | undefined {
+    for (const group of this.data.proxyGroups) {
+      const proxy = group.proxies.find((item) => item.id === id)
+      if (proxy) return { ...proxy }
+    }
+    return undefined
   }
 
   listProxyGroups(): ProxyGroup[] {

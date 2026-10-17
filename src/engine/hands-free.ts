@@ -93,9 +93,10 @@ export class HandsFree {
     }
     for (const task of this.db.listTasks()) {
       if (!task.proxyGroupId || !isActiveStatus(task.status)) continue
+      if (task.accountId) continue
       const group = safeGroup(this.db, task.proxyGroupId)
       if (!group) continue
-      const choice = this.db.assignProxy(task.accountId, group.id, group.proxies, now)
+      const choice = this.db.assignProxy(task.id, group.id, group.proxies, now, false)
       if (choice.allBenched) {
         this.runner.stop(task.id)
         await this.runner.wait(task.id)

@@ -94,6 +94,12 @@ export interface PublicAccount {
   proxyGroupId: string | null
   sessionState: SessionState
   lastWarmAt: number | null
+  /** Host:port of the proxy pinned to this account. Empty until the first task start. */
+  stickyProxyId?: string | null
+  stickyProxyLabel?: string | null
+  /** Persistent Chromium partition. One per account. */
+  profilePartition?: string
+  freshness?: "missing" | "expired" | "fresh" | "due" | "stale"
 }
 
 export interface AccountInput {
@@ -337,6 +343,8 @@ export interface Settings {
   sessionWarmup: boolean
   /** Minutes between session warm-ups. */
   sessionWarmupMin: number
+  /** How many hidden session windows can load at once. The rest wait. */
+  sessionWindowCap: number
   /** Percent of jitter added to monitor sleeps. */
   monitorJitterPct: number
   /** How many times to back off, rotate proxy, and reload the store session after a block. */
@@ -419,6 +427,7 @@ export const DEFAULT_SETTINGS: Settings = {
   challengeTimeoutSec: 180,
   sessionWarmup: false,
   sessionWarmupMin: 30,
+  sessionWindowCap: 3,
   monitorJitterPct: 20,
   blockRetries: 3,
   monitorFastDelayMs: 1000,

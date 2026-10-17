@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { consistencyText } from "../../../shared/consistency"
 import { DEFAULT_SETTINGS, type LicenseView, type Settings, type SettingsPayload } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { MailSettings } from "./MailSettings"
@@ -163,6 +164,9 @@ export function SettingsPage() {
         <Field label="Session Keeper interval (minutes)" hint="How often each signed-in account is opened. 10–240. An expired session asks you to sign in again.">
           <TextInput type="number" min={10} max={240} value={form.sessionWarmupMin} onChange={(event) => setForm({ ...form, sessionWarmupMin: Number(event.target.value) })} required />
         </Field>
+        <Field label={consistencyText(form.language === "es" ? "es" : "en", "windowCap")} hint={consistencyText(form.language === "es" ? "es" : "en", "windowCapHint")}>
+          <TextInput type="number" min={1} max={10} value={form.sessionWindowCap} onChange={(event) => setForm({ ...form, sessionWindowCap: Number(event.target.value) })} required />
+        </Field>
         <Field label="Monitor jitter (%)" hint="Random spread around each monitor wait. 0–40. Blocks (403, 412, 429, 435) also back off.">
           <TextInput type="number" min={0} max={40} value={form.monitorJitterPct} onChange={(event) => setForm({ ...form, monitorJitterPct: Number(event.target.value) })} required />
         </Field>
@@ -175,7 +179,7 @@ export function SettingsPage() {
         <Field label="Fast delay (ms)" hint="Used inside a drop window. Each store still waits at least its own gap.">
           <TextInput type="number" min={250} max={60000} value={form.monitorFastDelayMs} onChange={(event) => setForm({ ...form, monitorFastDelayMs: Number(event.target.value) })} required />
         </Field>
-        <Field label="Block retries" hint="After HTTP 403, 412, 429, or 435, rotate to the next proxy and reload the account browser. 1–8.">
+        <Field label="Block retries" hint="After HTTP 403, 412, 429, or 435, reload the account browser on the same sticky proxy. A task with no account can move to another proxy. 1–8.">
           <TextInput type="number" min={1} max={8} value={form.blockRetries} onChange={(event) => setForm({ ...form, blockRetries: Number(event.target.value) })} required />
         </Field>
         <Field className="span-2" label="Drop windows" hint="Atlantic Time, one range per line, like 09:00-09:20. Scheduled drops are windows too.">

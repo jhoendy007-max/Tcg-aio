@@ -22,7 +22,8 @@ import { storeName } from "../shared/stores"
 import { createChallengeController } from "./challenge-window"
 import { createSessionBrowser, type SessionBrowser } from "./session-window"
 import { createUpdateController } from "./auto-update"
-import { planDrops } from "../engine/drops"
+import { planDrops, tasksForSchedule } from "../engine/drops"
+import { dueRefreshes, dueWarmups, SessionWindowQueue } from "../shared/consistency"
 import { HandsFree } from "../engine/hands-free"
 import { openMailbox } from "../engine/imap"
 import { readStoreCode } from "../engine/mail-read"
@@ -40,6 +41,8 @@ let runner: TaskService | null = null
 let phone: PhoneServer | null = null
 let alerts: AlertService | null = null
 let sessions: SessionBrowser | null = null
+const sessionWindows = new SessionWindowQueue()
+const warming = new Set<string>()
 let sessionTimer: ReturnType<typeof setInterval> | null = null
 let dropTimer: ReturnType<typeof setInterval> | null = null
 let handsTimer: ReturnType<typeof setInterval> | null = null
@@ -94,7 +97,7 @@ if (gotLock) void app.whenReady().then(async () => {
   const registry = createRegistry()
   const gate = new ChallengeGate()
   const challenge = createChallengeController(gate, () => window)
-  sessions = createSessionBrowser(db, () => window)
+  sessions = createSessionBrowser(db, () => window, sessionWindows)
   phone = new PhoneServer(createPhoneHost(db, () => runner, () => alerts, {
     open: () => challenge.open(),
     complete: () => challenge.complete(),
@@ -148,7 +151,10 @@ if (gotLock) void app.whenReady().then(async () => {
     publish,
     defaultHttp,
     gate,
-    refreshStoreSession,
+    (input) => {
+      sessionWindows.setCap(db.getSettings().sessionWindowCap)
+      return sessionWindows.run(() => refreshStoreSession(input))
+    },
     (store) => readStoreCode(db, openMailbox, store)
   )
   alerts = new AlertService(db, () => runner, publish, defaultHttp)
@@ -300,16 +306,9 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
       }
       if (plan.action === "warm") {
         db.setSchedulePhase(plan.id, "warming")
-        for (const accountId of plan.accountIds) {
-          try {
-            await sessions.warm(accountId)
-          } catch {
-            // A page that fails to load does not erase the saved session.
-          }
-        }
         const matched = db.listTasks().filter((task) => plan.taskIds.includes(task.id))
         await warmTaskMonitors(defaultHttp, matched, db.listProxyGroups()).catch(() => undefined)
-        await publish({ kind: "drop", storeName: "Session Keeper", sku: plan.name, profileName: "Drop", detail: "Session Keeper opened the store pages before the drop." })
+        await publish({ kind: "drop", storeName: "Session Keeper", sku: plan.name, profileName: "Drop", detail: "Near-expiry sessions refresh a few at a time before the drop. Warm-up does not add to cart." })
       }
       if (plan.action === "start") {
         db.setSchedulePhase(plan.id, "started")
@@ -335,8 +334,46 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
       }
     }
     if (plans.length) desktop.publishSnapshot()
+    await preDropCare(db)
   } finally {
     dropBusy = false
+  }
+}
+
+async function preDropCare(db: Database): Promise<void> {
+  if (!sessions) return
+  const now = Date.now()
+  const settings = db.getSettings()
+  const accounts = db.listAccounts()
+  const tasks = db.listTasks()
+  let started = 0
+  for (const schedule of db.listSchedules()) {
+    if (!schedule.enabled || schedule.phase === "stopped" || schedule.phase === "started") continue
+    if (now >= schedule.startAt) continue
+    const ids = new Set(tasksForSchedule(schedule, tasks).map((task) => task.accountId).filter(Boolean))
+    const matched = accounts.filter((account) => ids.has(account.id))
+    const refreshes = dueRefreshes(matched, schedule.startAt, now, settings.sessionWarmupMin)
+    const warms = dueWarmups(matched, schedule.startAt, now, settings.sessionWarmup)
+    const inStagger = now >= schedule.startAt - 180_000
+    const limit = inStagger ? settings.sessionWindowCap : 1
+    for (const step of [...refreshes, ...warms]) {
+      if (started >= limit || warming.has(step.accountId)) continue
+      started += 1
+      void warmTracked(db, step.accountId)
+    }
+  }
+}
+
+async function warmTracked(db: Database, accountId: string): Promise<void> {
+  if (!sessions || warming.has(accountId)) return
+  warming.add(accountId)
+  try {
+    await sessions.warm(accountId)
+  } catch {
+    const current = db.listAccounts().find((account) => account.id === accountId)
+    if (current) db.markSession(accountId, current.sessionState, true)
+  } finally {
+    warming.delete(accountId)
   }
 }
 
