@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/sha
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
 import { isFinalSubmit } from "../src/engine/test-mode"
 import { AMAZON_PAUSE, createAmazonModule } from "../src/stores/amazon"
-import { isChallenge, parseAsin, readOffers, readStock } from "../src/stores/amazon/parse"
+import { isChallenge, parseAsin, readOffers, readOtpForm, readStock } from "../src/stores/amazon/parse"
 import type { StoreRunContext } from "../src/stores/module"
 
 const thirdParty = readFileSync(new URL("./fixtures/amazon-aod.html", import.meta.url), "utf8")
@@ -217,11 +217,52 @@ describe("amazon checkout", () => {
     expect(fake.calls.some((call) => call.url.includes("/cart/"))).toBe(false)
   })
 
+  it("reads an OTP form and ignores a captcha form", () => {
+    const otp = `<form action="/ap/cvf/verify" method="post"><input type="hidden" name="csrf" value="tok"><input name="otpCode" autocomplete="one-time-code"></form>`
+    expect(readOtpForm(otp)).toMatchObject({ action: "/ap/cvf/verify", field: "otpCode" })
+    expect(readOtpForm(`<form action="/errors/validateCaptcha"><input name="otpCode"></form>`)).toBeUndefined()
+    expect(readOtpForm("<p>enter otp</p>")).toBeUndefined()
+  })
+
   it("pauses on two-step verification", async () => {
     const fake = client(() => json(302, "", { location: "https://www.amazon.com/ap/cvf/request" }))
     const result = await createAmazonModule().run(ctx(fake.http))
     expect(result.outcome).toBe("paused")
     if (result.outcome === "paused") expect(result.reason).toMatch(/two-step/i)
+  })
+
+  it("posts a mailbox code only when Amazon rendered an OTP form", async () => {
+    const form = `<form action="/ap/cvf/verify" method="post"><input type="hidden" name="csrf" value="tok"><input name="otpCode" autocomplete="one-time-code"></form><p>Enter OTP</p>`
+    const logs: string[] = []
+    let posts = 0
+    const fake = client((req) => {
+      if (req.method === "POST" && req.url.includes("/ap/cvf/verify")) {
+        posts += 1
+        return json(302, "", { location: "https://www.amazon.com/ap/cvf/request" })
+      }
+      return json(200, form)
+    })
+    const result = await createAmazonModule().run(ctx(fake.http, {
+      mailCode: async () => "123456",
+      log: (_level, message) => logs.push(message)
+    }))
+    expect(posts).toBe(1)
+    expect(fake.calls.some((call) => call.method === "POST" && call.body?.includes("otpCode=123456"))).toBe(true)
+    expect(result.outcome).toBe("paused")
+    expect(logs.join(" ")).toContain("Filled the verification code from your mailbox.")
+    expect(logs.join(" ")).not.toContain("123456")
+
+    const bare = client(() => json(200, "<html>enter otp</html>"))
+    let asked = false
+    const bareResult = await createAmazonModule().run(ctx(bare.http, {
+      mailCode: async () => {
+        asked = true
+        return "123456"
+      }
+    }))
+    expect(bareResult.outcome).toBe("paused")
+    expect(asked).toBe(false)
+    expect(bare.calls.every((call) => call.method !== "POST")).toBe(true)
   })
 
   it("makes no requests without a signed-in at-main cookie", async () => {

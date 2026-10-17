@@ -58,9 +58,14 @@ import type {
   OrderStatus,
   ImapView,
   ImapInput,
+  MailboxInput,
+  MailboxStatus,
+  MailboxView,
+  MailProvider,
   VaultLink,
   PublicVault
 } from "../shared/types"
+import { isMailProvider, providerForHost } from "../shared/mail"
 
 interface ProfileRecord extends PublicProfile {
   cardSecret: string
@@ -133,7 +138,30 @@ interface DbFile {
   learnedKeys?: string[]
   reportDay?: string
   imap?: { enabled: boolean; host: string; port: number; user: string; mailbox: string; passwordSecret?: string }
+  mailboxes?: MailboxFile[]
   vault?: VaultLink[]
+}
+
+interface MailboxFile {
+  id: string
+  name: string
+  enabled: boolean
+  provider: MailProvider
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  mailbox: string
+  passwordSecret?: string
+  refreshSecret?: string
+  auth: "password" | "xoauth2"
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+  lastOkAt: number | null
+  lastError: string
+  folders: string[]
+  seenAlertIds: string[]
 }
 
 export class Database {
@@ -176,9 +204,11 @@ export class Database {
       learnedKeys: Array.isArray(parsed.learnedKeys) ? parsed.learnedKeys.slice(0, 200) : [],
       reportDay: typeof parsed.reportDay === "string" ? parsed.reportDay : "",
       imap: normalizeImap(parsed.imap),
+      mailboxes: loadMailboxes(parsed.mailboxes, parsed.imap),
       vault: Array.isArray(parsed.vault) ? parsed.vault : []
     }
-    let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
+    const migratedMail = !Array.isArray(parsed.mailboxes) && (this.data.mailboxes?.length ?? 0) > 0
+    let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices) || migratedMail
     const interrupted: string[] = []
     for (const task of this.data.tasks) {
       task.group = typeof task.group === "string" ? task.group : ""
@@ -1245,18 +1275,18 @@ export class Database {
   }
 
   imapView(): ImapView {
-    const imap = this.imapFile()
-    return { enabled: imap.enabled, host: imap.host, port: imap.port, user: imap.user, mailbox: imap.mailbox, hasPassword: Boolean(imap.passwordSecret) }
+    const first = this.listMailboxes()[0]
+    if (!first) return { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX", hasPassword: false }
+    return { enabled: first.enabled, host: first.host, port: first.port, user: first.user, mailbox: first.mailbox, hasPassword: first.hasPassword }
   }
 
   imapLogin(): { host: string; port: number; user: string; mailbox: string; password: string } | null {
-    const imap = this.imapFile()
-    if (!imap.enabled || !imap.host || !imap.user || !imap.passwordSecret) return null
-    return { host: imap.host, port: imap.port, user: imap.user, mailbox: imap.mailbox, password: this.cipher.decrypt(imap.passwordSecret) }
+    const login = this.mailboxLogins("orders")[0]
+    if (!login) return null
+    return { host: login.host, port: login.port, user: login.user, mailbox: login.mailbox, password: login.password }
   }
 
   saveImap(input: ImapInput): ImapView {
-    const imap = this.imapFile()
     const host = input.host.trim()
     const user = input.user.trim()
     const mailbox = (input.mailbox || "INBOX").trim() || "INBOX"
@@ -1264,25 +1294,243 @@ export class Database {
     if (input.enabled && (!host || !user)) throw new AppError("Enter the mail host and username before turning mail tracking on.")
     if (host && !/^[A-Za-z0-9.-]{1,253}$/.test(host)) throw new AppError("Mail host must be a hostname.")
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AppError("Mail port must be from 1 to 65535.")
-    if (input.passwordAction === "clear") imap.passwordSecret = undefined
-    if (input.passwordAction === "replace") {
-      const password = input.password
-      if (!password) throw new AppError("Enter the mail password.")
-      imap.passwordSecret = this.cipher.encrypt(password)
-    }
-    if (input.enabled && !imap.passwordSecret) throw new AppError("Save the mail password before turning mail tracking on.")
-    imap.enabled = input.enabled === true
-    imap.host = host
-    imap.port = port
-    imap.user = user.slice(0, 180)
-    imap.mailbox = mailbox.slice(0, 80)
+    const boxes = this.mailboxes()
+    if (!host && !user && input.passwordAction !== "replace" && !boxes[0]) return this.imapView()
+    const row = boxes[0] ?? this.blankMailbox()
+    if (!boxes[0]) boxes.push(row)
+    this.applyPassword(row, input.password, input.passwordAction)
+    if (input.enabled && !row.passwordSecret) throw new AppError("Save the mail password before turning mail tracking on.")
+    row.enabled = input.enabled === true
+    row.host = host.toLowerCase()
+    row.port = port
+    row.secure = true
+    row.user = user.slice(0, 180)
+    row.mailbox = mailbox.slice(0, 80)
+    row.provider = providerForHost(host)
+    row.orders = true
+    if (!row.name || row.name === "Mailbox") row.name = user || "Mailbox"
+    this.syncLegacyImap()
     this.flush()
     return this.imapView()
   }
 
-  private imapFile(): NonNullable<DbFile["imap"]> {
-    if (!this.data.imap) this.data.imap = { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" }
-    return this.data.imap
+  listMailboxes(): MailboxView[] {
+    return this.mailboxes().map((row) => this.toMailboxView(row))
+  }
+
+  mailboxStatus(): MailboxStatus {
+    const rows = this.listMailboxes()
+    const enabled = rows.filter((row) => row.enabled)
+    return {
+      accounts: rows.length,
+      enabled: enabled.length,
+      ready: enabled.filter((row) => row.hasPassword && !row.lastError).length,
+      lastError: rows.find((row) => row.lastError)?.lastError ?? ""
+    }
+  }
+
+  saveMailbox(input: MailboxInput): MailboxView {
+    const host = input.host.trim().toLowerCase()
+    const user = input.user.trim()
+    const mailbox = (input.mailbox || "INBOX").trim() || "INBOX"
+    const port = Math.round(Number(input.port))
+    const provider = isMailProvider(input.provider) ? input.provider : "custom"
+    const name = (input.name || user || "Mailbox").trim().slice(0, 80)
+    if (!host || !user) throw new AppError("Enter the mail host and username.")
+    if (!/^[a-z0-9.-]{1,253}$/.test(host)) throw new AppError("Mail host must be a hostname.")
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AppError("Mail port must be from 1 to 65535.")
+    const boxes = this.mailboxes()
+    const existing = input.id ? boxes.find((row) => row.id === input.id) : undefined
+    if (input.id && !existing) throw new AppError("Mailbox not found.")
+    if (!existing && boxes.length >= 8) throw new AppError("Save at most 8 mailboxes.")
+    const row = existing ?? this.blankMailbox()
+    this.applyPassword(row, input.password, input.passwordAction)
+    if (input.enabled && !row.passwordSecret && !row.refreshSecret) throw new AppError("Save the app password, or sign in, before turning this mailbox on.")
+    row.name = name
+    row.enabled = input.enabled === true
+    row.provider = provider
+    row.host = host
+    row.port = port
+    row.secure = input.secure !== false
+    row.user = user.slice(0, 180)
+    row.mailbox = mailbox.slice(0, 80)
+    row.orders = input.orders === true
+    row.alerts = input.alerts === true
+    row.codes = input.codes === true
+    if (!existing) boxes.push(row)
+    this.syncLegacyImap()
+    this.flush()
+    return this.toMailboxView(row)
+  }
+
+  deleteMailbox(id: string): void {
+    const boxes = this.mailboxes()
+    const next = boxes.filter((row) => row.id !== id)
+    if (next.length === boxes.length) throw new AppError("Mailbox not found.")
+    this.data.mailboxes = next
+    this.syncLegacyImap()
+    this.flush()
+  }
+
+  saveOAuthMailbox(input: { user: string; provider: "gmail" | "outlook"; refreshToken: string; id?: string }): MailboxView {
+    const user = input.user.trim()
+    if (!user || !user.includes("@")) throw new AppError("Enter the email address before signing in.")
+    if (!input.refreshToken || /[\r\n]/.test(input.refreshToken)) throw new AppError("The sign-in did not return a usable token.")
+    const preset = input.provider === "gmail"
+      ? { host: "imap.gmail.com", port: 993 }
+      : { host: "outlook.office365.com", port: 993 }
+    const boxes = this.mailboxes()
+    const existing = (input.id ? boxes.find((row) => row.id === input.id) : undefined) ?? boxes.find((row) => row.user.toLowerCase() === user.toLowerCase() && row.provider === input.provider)
+    if (!existing && boxes.length >= 8) throw new AppError("Save at most 8 mailboxes.")
+    const row = existing ?? this.blankMailbox()
+    row.name = user.slice(0, 80)
+    row.enabled = true
+    row.provider = input.provider
+    row.host = preset.host
+    row.port = preset.port
+    row.secure = true
+    row.user = user.slice(0, 180)
+    row.mailbox = row.mailbox || "INBOX"
+    row.auth = "xoauth2"
+    row.passwordSecret = undefined
+    row.refreshSecret = this.cipher.encrypt(input.refreshToken)
+    row.orders = true
+    row.codes = true
+    row.lastError = ""
+    if (!existing) boxes.push(row)
+    this.syncLegacyImap()
+    this.flush()
+    return this.toMailboxView(row)
+  }
+
+  mailboxLogins(purpose: "orders" | "alerts" | "codes"): MailboxLogin[] {
+    const logins: MailboxLogin[] = []
+    for (const row of this.mailboxes()) {
+      const login = this.loginFrom(row)
+      if (!login || !row.enabled) continue
+      if (purpose === "orders" && !row.orders) continue
+      if (purpose === "alerts" && !row.alerts) continue
+      if (purpose === "codes" && !row.codes) continue
+      logins.push(login)
+    }
+    return logins
+  }
+
+  mailboxSecret(id: string): MailboxLogin | null {
+    const row = this.mailboxes().find((item) => item.id === id)
+    return row ? this.loginFrom(row) : null
+  }
+
+  noteMailbox(id: string, update: { ok: boolean; error?: string; folders?: string[] }): void {
+    const row = this.mailboxes().find((item) => item.id === id)
+    if (!row) return
+    if (update.ok) {
+      row.lastOkAt = Date.now()
+      row.lastError = ""
+    } else if (update.error) {
+      row.lastError = redact(update.error).replace(/\s+/g, " ").trim().slice(0, 280)
+    }
+    if (update.folders) row.folders = update.folders.map((name) => name.slice(0, 80)).filter(Boolean).slice(0, 80)
+    this.flush()
+  }
+
+  claimMailAlert(id: string, uid: string): boolean {
+    const row = this.mailboxes().find((item) => item.id === id)
+    const key = uid.trim().slice(0, 40)
+    if (!row || !key) return false
+    if (row.seenAlertIds.includes(key)) return false
+    row.seenAlertIds = [key, ...row.seenAlertIds].slice(0, 200)
+    this.flush()
+    return true
+  }
+
+  private loginFrom(row: MailboxFile): MailboxLogin | null {
+    const secret = row.auth === "xoauth2" ? row.refreshSecret : row.passwordSecret
+    if (!secret || !row.host || !row.user) return null
+    return {
+      id: row.id,
+      host: row.host,
+      port: row.port,
+      secure: row.secure !== false,
+      user: row.user,
+      password: this.cipher.decrypt(secret),
+      mailbox: row.mailbox || "INBOX",
+      provider: row.provider,
+      auth: row.auth === "xoauth2" ? "xoauth2" : "password"
+    }
+  }
+
+  private mailboxes(): MailboxFile[] {
+    if (!this.data.mailboxes) this.data.mailboxes = []
+    return this.data.mailboxes
+  }
+
+  private blankMailbox(): MailboxFile {
+    return {
+      id: randomUUID(),
+      name: "Mailbox",
+      enabled: false,
+      provider: "custom",
+      host: "",
+      port: 993,
+      secure: true,
+      user: "",
+      mailbox: "INBOX",
+      auth: "password",
+      orders: true,
+      alerts: false,
+      codes: true,
+      lastOkAt: null,
+      lastError: "",
+      folders: [],
+      seenAlertIds: []
+    }
+  }
+
+  private applyPassword(row: MailboxFile, password: string, action: MailboxInput["passwordAction"]): void {
+    if (action === "clear") row.passwordSecret = undefined
+    if (action !== "replace") return
+    if (!password) throw new AppError("Enter the app password.")
+    if (/[\r\n]/.test(password)) throw new AppError("The app password cannot contain a line break.")
+    row.passwordSecret = this.cipher.encrypt(password)
+    row.refreshSecret = undefined
+    row.auth = "password"
+  }
+
+  private toMailboxView(row: MailboxFile): MailboxView {
+    return {
+      id: row.id,
+      name: row.name,
+      enabled: row.enabled,
+      provider: row.provider,
+      host: row.host,
+      port: row.port,
+      secure: row.secure !== false,
+      user: row.user,
+      mailbox: row.mailbox,
+      hasPassword: Boolean(row.passwordSecret || row.refreshSecret),
+      auth: row.auth === "xoauth2" ? "xoauth2" : "password",
+      orders: row.orders,
+      alerts: row.alerts,
+      codes: row.codes,
+      lastOkAt: row.lastOkAt,
+      lastError: row.lastError,
+      folders: [...row.folders]
+    }
+  }
+
+  private syncLegacyImap(): void {
+    const first = this.mailboxes()[0]
+    this.data.imap = first
+      ? {
+          enabled: first.enabled,
+          host: first.host,
+          port: first.port,
+          user: first.user,
+          mailbox: first.mailbox,
+          passwordSecret: first.passwordSecret
+        }
+      : { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" }
   }
 
   private restock(): RestockFile {
@@ -1345,12 +1593,77 @@ function emptyDb(): DbFile {
     learnedKeys: [],
     reportDay: "",
     imap: { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" },
+    mailboxes: [],
     vault: [],
     updates: emptyUpdates()
   }
 }
 
-function normalizeImap(value: DbFile["imap"]): DbFile["imap"] {
+export interface MailboxLogin {
+  id: string
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  password: string
+  mailbox: string
+  provider: MailProvider
+  auth: "password" | "xoauth2"
+}
+
+function loadMailboxes(value: DbFile["mailboxes"], legacy: DbFile["imap"]): MailboxFile[] {
+  if (Array.isArray(value)) return value.map(normalizeMailbox).slice(0, 8)
+  const imap = normalizeImap(legacy)
+  if (!imap.host && !imap.user && !imap.passwordSecret) return []
+  return [{
+    id: randomUUID(),
+    name: imap.user || "Mailbox",
+    enabled: imap.enabled,
+    provider: providerForHost(imap.host),
+    host: imap.host,
+    port: imap.port,
+    secure: true,
+    user: imap.user,
+    mailbox: imap.mailbox,
+    passwordSecret: imap.passwordSecret,
+    auth: "password",
+    orders: true,
+    alerts: false,
+    codes: true,
+    lastOkAt: null,
+    lastError: "",
+    folders: [],
+    seenAlertIds: []
+  }]
+}
+
+function normalizeMailbox(value: Partial<MailboxFile> | undefined): MailboxFile {
+  const host = typeof value?.host === "string" ? value.host : ""
+  const provider = typeof value?.provider === "string" && isMailProvider(value.provider) ? value.provider : providerForHost(host)
+  return {
+    id: typeof value?.id === "string" && value.id ? value.id : randomUUID(),
+    name: typeof value?.name === "string" && value.name ? value.name.slice(0, 80) : "Mailbox",
+    enabled: value?.enabled === true,
+    provider,
+    host,
+    port: typeof value?.port === "number" ? value.port : 993,
+    secure: value?.secure !== false,
+    user: typeof value?.user === "string" ? value.user : "",
+    mailbox: typeof value?.mailbox === "string" && value.mailbox ? value.mailbox : "INBOX",
+    passwordSecret: typeof value?.passwordSecret === "string" ? value.passwordSecret : undefined,
+    refreshSecret: typeof value?.refreshSecret === "string" ? value.refreshSecret : undefined,
+    auth: value?.auth === "xoauth2" ? "xoauth2" : "password",
+    orders: value?.orders !== false,
+    alerts: value?.alerts === true,
+    codes: value?.codes !== false,
+    lastOkAt: typeof value?.lastOkAt === "number" ? value.lastOkAt : null,
+    lastError: typeof value?.lastError === "string" ? value.lastError.slice(0, 180) : "",
+    folders: Array.isArray(value?.folders) ? value.folders.filter((item): item is string => typeof item === "string").slice(0, 80) : [],
+    seenAlertIds: Array.isArray(value?.seenAlertIds) ? value.seenAlertIds.filter((item): item is string => typeof item === "string").slice(0, 200) : []
+  }
+}
+
+function normalizeImap(value: DbFile["imap"]): NonNullable<DbFile["imap"]> {
   return {
     enabled: value?.enabled === true,
     host: typeof value?.host === "string" ? value.host : "",

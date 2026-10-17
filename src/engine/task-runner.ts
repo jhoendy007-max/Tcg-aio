@@ -31,7 +31,8 @@ export class TaskService {
     private readonly notify: (notice: Notice) => Promise<boolean>,
     private readonly http: HttpClient = defaultHttp,
     private readonly challenges?: ChallengeGate,
-    private readonly sessionRefresh?: SessionRefresher
+    private readonly sessionRefresh?: SessionRefresher,
+    private readonly readCode?: (store: StoreId) => Promise<string | null>
   ) {}
 
   isRunning(id: string): boolean {
@@ -294,6 +295,7 @@ export class TaskService {
             })
           }
         },
+        mailCode: this.readCode ? () => this.readCode!(task.store) : undefined,
         refreshSession: this.sessionRefresh
           ? (input: { homeUrl: string; proxy?: ProxyEndpoint; signal: AbortSignal }) => this.sessionRefresh!({
             accountId: account.id,
@@ -302,7 +304,9 @@ export class TaskService {
             proxy: input.proxy,
             existing: account.session,
             signal: input.signal,
-            onChallenge: (message) => update({ log: line("warn", message) })
+            onChallenge: (message) => update({ log: line("warn", message) }),
+            lookupCode: this.readCode ? () => this.readCode!(task.store) : undefined,
+            onMailFilled: () => update({ log: line("info", "Filled the verification code from your mailbox.") })
           })
           : undefined
       }

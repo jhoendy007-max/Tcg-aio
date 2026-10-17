@@ -7,7 +7,9 @@ import type { TaskService } from "../engine/task-runner"
 import { STORE_CATALOG, storeName } from "../shared/stores"
 import type { KeywordWatchInput, RestockRuleInput } from "../shared/types"
 import { parseBulkTasks } from "../engine/bulk"
-import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneAlerts, type PhoneAnalytics, type PhoneChallenge, type PhoneKeeper, type PhoneSchedule, type PhoneSnapshot, type PhoneTaskDraft, type PhoneUpdates } from "./protocol"
+import { completeMailSignIn, mailClientId } from "../engine/mail-oauth"
+import { detectMailbox, MAIL_PRESETS } from "../shared/mail"
+import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneAlerts, type PhoneAnalytics, type PhoneChallenge, type PhoneKeeper, type PhoneMailDraft, type PhoneSchedule, type PhoneSnapshot, type PhoneTaskDraft, type PhoneUpdates } from "./protocol"
 import type { PhoneHost } from "./server"
 
 export function desktopName(): string {
@@ -27,7 +29,8 @@ export function createPhoneHost(
   getRunner: () => TaskService | null,
   getAlerts: () => AlertService | null = () => null,
   challenge?: PhoneChallengeActions,
-  session?: { open(accountId: string): Promise<void> | void }
+  session?: { open(accountId: string): Promise<void> | void },
+  openUrl?: (url: string) => Promise<void> | void
 ): PhoneHost {
   const pcName = desktopName()
   const snapshot = (): PhoneSnapshot => {
@@ -49,6 +52,28 @@ export function createPhoneHost(
       analytics: analytics(),
       updates: updates(),
       keeper: keeper(),
+      imap: {
+        ...db.mailboxStatus(),
+        mailboxes: db.listMailboxes().map((row) => ({
+          id: row.id,
+          name: row.name,
+          user: row.user,
+          provider: row.provider,
+          host: row.host,
+          port: row.port,
+          secure: row.secure,
+          mailbox: row.mailbox,
+          enabled: row.enabled,
+          auth: row.auth,
+          orders: row.orders,
+          alerts: row.alerts,
+          codes: row.codes,
+          lastError: row.lastError
+        })),
+        googleSignIn: Boolean(mailClientId("gmail", settings)),
+        microsoftSignIn: Boolean(mailClientId("outlook", settings))
+      },
+      language: settings.language === "es" ? "es" : "en",
       autopilot: settings.autopilot,
       brand: {
         appName: settings.appName,
@@ -144,6 +169,38 @@ export function createPhoneHost(
     setAutopilot(enabled: boolean) {
       const settings = db.getSettings()
       db.saveSettings({ ...settings, autopilot: enabled })
+    },
+    setLanguage(language: "en" | "es") {
+      db.saveSettings({ ...db.getSettings(), language })
+    },
+    saveMailbox(input: PhoneMailDraft) {
+      const detected = detectMailbox(input.user)
+      const provider = input.provider === "custom" && detected && !detected.guessed ? detected.provider : input.provider
+      const preset = provider === "gmail" || provider === "outlook" || provider === "icloud" || provider === "yahoo" ? MAIL_PRESETS[provider] : null
+      db.saveMailbox({
+        id: input.id,
+        name: input.user,
+        enabled: true,
+        provider,
+        host: input.host || preset?.host || detected?.host || "",
+        port: input.port || preset?.port || detected?.port || 993,
+        secure: input.secure,
+        user: input.user,
+        mailbox: input.mailbox || "INBOX",
+        password: input.password,
+        passwordAction: input.password ? "replace" : "keep",
+        orders: input.orders,
+        alerts: input.alerts,
+        codes: input.codes
+      })
+    },
+    deleteMailbox(id: string) {
+      db.deleteMailbox(id)
+    },
+    async signInMail(input: { provider: "gmail" | "outlook"; user: string }) {
+      const open = openUrl
+      if (!open) throw new Error("Sign-in can only start from the desktop app.")
+      await completeMailSignIn(db, input, { open })
     },
     devices: () => db.listDevices(),
     deviceTokens: () => db.deviceTokens(),

@@ -10,12 +10,14 @@ import { ensureNotificationPermission, notify } from "./src/notify"
 import { clearLink, loadLink, saveLink } from "./src/storage"
 import type { StoreHealth } from "../src/shared/types"
 import { SwipeTask } from "./src/SwipeTask"
+import { MailPanel } from "./src/MailPanel"
+import { mailText } from "../src/shared/mail-text"
 import { updateWidget } from "./src/widget"
 import { colors, isActive, palette, STATUS_LABEL } from "./src/theme"
 import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
 
-type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats"
+type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats" | "mail"
 type Bag = { colors: typeof colors; styles: ReturnType<typeof createStyles> }
 const ThemeContext = createContext<Bag>({ colors, styles: createStyles(colors) })
 function useTheme() { return useContext(ThemeContext) }
@@ -221,7 +223,7 @@ export default function App() {
           ) : null}
         </ScrollView>
       ) : null}
-      {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" ? (
+      {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" || screen === "mail" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <View style={styles.row}>
             <View>
@@ -241,7 +243,9 @@ export default function App() {
           {challenge && screen !== "alerts" ? (
             <ChallengeCard challenge={challenge} now={now} session={session.current} onRun={run} />
           ) : null}
-          {screen === "alerts" ? (
+          {screen === "mail" ? (
+            <MailPanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
+          ) : screen === "alerts" ? (
             <AlertsPanel snap={snap} onRun={run} session={session.current} onBack={() => setScreen("dash")} />
           ) : screen === "drops" ? (
             <DropsPanel snap={snap} now={now} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
@@ -325,12 +329,14 @@ export default function App() {
               </View>
               {snap && isNewer(snap.updates?.phoneVersion ?? null, PHONE_VERSION) ? <Text style={styles.p}>Phone {snap.updates.phoneVersion} is on the PC's GitHub release. Install that APK over this {PHONE_VERSION} build. The download stays on the PC.</Text> : null}
               {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
+              {snap?.imap ? <Text style={styles.p}>{snap.imap.accounts === 0 ? mailText(snap.language === "es" ? "es" : "en", "statusOff") : `${mailText(snap.language === "es" ? "es" : "en", "statusOn")} ${snap.imap.enabled} · ${snap.imap.ready}${snap.imap.lastError ? ` · ${snap.imap.lastError}` : ""}`}</Text> : null}
               {nextDrop(snap, now) ? <Text style={styles.p}>Next drop {nextDrop(snap, now)}</Text> : null}
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.pauseAll())}><Text style={styles.secondaryText}>Pause all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => setScreen("mail")}><Text style={styles.secondaryText}>{mailText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("alerts")}><Text style={styles.secondaryText}>Alerts</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("drops")}><Text style={styles.secondaryText}>Drops</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("stats")}><Text style={styles.secondaryText}>Stats</Text></Pressable>

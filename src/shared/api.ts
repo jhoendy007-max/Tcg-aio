@@ -34,6 +34,8 @@ import type {
   OrderRecord,
   ImapView,
   ImapInput,
+  MailboxInput,
+  MailboxView,
   PublicVault
 } from "./types"
 import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
@@ -136,6 +138,14 @@ export interface AioApi {
     orders: () => Promise<Result<OrderRecord[]>>
     imap: () => Promise<Result<ImapView>>
     saveImap: (input: ImapInput) => Promise<Result<ImapView>>
+  }
+  mail: {
+    list: () => Promise<Result<MailboxView[]>>
+    save: (input: MailboxInput) => Promise<Result<MailboxView>>
+    delete: (id: string) => Promise<Result<{ id: string }>>
+    test: (id: string) => Promise<Result<MailboxView>>
+    signIn: (input: { provider: "gmail" | "outlook"; user: string }) => Promise<Result<MailboxView>>
+    open: (url: string) => Promise<Result<{ opened: true }>>
   }
   vault: {
     list: () => Promise<Result<PublicVault[]>>

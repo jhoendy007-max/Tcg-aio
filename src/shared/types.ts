@@ -311,6 +311,11 @@ export interface Settings {
   successSound: boolean
   taskView: "compact" | "detailed"
   wizardDone: boolean
+  language: "en" | "es"
+  /** Public OAuth client id for Sign in with Google. Not a secret. */
+  googleMailClientId: string
+  /** Public OAuth client id for Sign in with Microsoft. Not a secret. */
+  microsoftMailClientId: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -355,7 +360,10 @@ export const DEFAULT_SETTINGS: Settings = {
   logoDataUrl: "",
   successSound: false,
   taskView: "detailed",
-  wizardDone: false
+  wizardDone: false,
+  language: "en",
+  googleMailClientId: "",
+  microsoftMailClientId: ""
 }
 
 export interface SecurityInfo {
@@ -509,6 +517,52 @@ export interface ImapInput {
   mailbox: string
   password: string
   passwordAction: "keep" | "replace" | "clear"
+}
+
+export type MailProvider = "gmail" | "outlook" | "icloud" | "yahoo" | "custom"
+
+export interface MailboxView {
+  id: string
+  name: string
+  enabled: boolean
+  provider: MailProvider
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  mailbox: string
+  hasPassword: boolean
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+  auth: "password" | "xoauth2"
+  lastOkAt: number | null
+  lastError: string
+  folders: string[]
+}
+
+export interface MailboxInput {
+  id?: string
+  name: string
+  enabled: boolean
+  provider: MailProvider
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  mailbox: string
+  password: string
+  passwordAction: "keep" | "replace" | "clear"
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+}
+
+export interface MailboxStatus {
+  accounts: number
+  enabled: number
+  ready: number
+  lastError: string
 }
 
 export interface RestockRule {

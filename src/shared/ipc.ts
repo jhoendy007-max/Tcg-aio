@@ -67,6 +67,12 @@ export const channels = {
   ordersList: "orders:list",
   imapGet: "imap:get",
   imapSave: "imap:save",
+  mailboxesGet: "mail:list",
+  mailboxSave: "mail:save",
+  mailboxDelete: "mail:delete",
+  mailboxTest: "mail:test",
+  mailboxOAuth: "mail:oauth",
+  mailOpen: "mail:open",
   vaultList: "vault:list",
   vaultUnlink: "vault:unlink",
   vaultTwoWay: "vault:twoWay"

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, session } from "electron"
+import { app, BrowserWindow, safeStorage, session, shell } from "electron"
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
@@ -23,7 +23,8 @@ import { createSessionBrowser, type SessionBrowser } from "./session-window"
 import { createUpdateController } from "./auto-update"
 import { planDrops } from "../engine/drops"
 import { HandsFree } from "../engine/hands-free"
-import { openImap } from "../engine/imap"
+import { openMailbox } from "../engine/imap"
+import { readStoreCode } from "../engine/mail-read"
 import { reportZone, shouldRelaunch } from "../engine/watchdog"
 import { dayKey } from "../engine/limits"
 import { cookieForVault, vaultScan } from "../engine/vault"
@@ -101,7 +102,7 @@ if (gotLock) void app.whenReady().then(async () => {
     current: () => challenge.current()
   }, {
     open: (id) => sessions!.open(id)
-  }), {
+  }, (url) => shell.openExternal(url)), {
     onDevices: () => {
       if (phone) window?.webContents.send(channels.phoneEvent, phone.status())
     }
@@ -142,7 +143,8 @@ if (gotLock) void app.whenReady().then(async () => {
     publish,
     defaultHttp,
     gate,
-    refreshStoreSession
+    refreshStoreSession,
+    (store) => readStoreCode(db, openMailbox, store)
   )
   alerts = new AlertService(db, () => runner, publish, defaultHttp)
   desktop.setRestock((authorization, alternate, body) => alerts!.ingestHttp(authorization, alternate, body))
@@ -173,7 +175,7 @@ if (gotLock) void app.whenReady().then(async () => {
     window?.webContents.send(channels.updatesEvent, status)
   })
   registerIpc(db, runner, registry, () => window, desktop, alerts, challenge, sessions, updates, applyBoot)
-  hands = new HandsFree(db, runner, (id) => sessions!.warm(id), publish, defaultHttp, openImap)
+  hands = new HandsFree(db, runner, (id) => sessions!.warm(id), publish, defaultHttp, (input) => openMailbox(input))
   if (db.getSettings().resumeOnLaunch) hands.resumeInterrupted()
   applyBoot(db.getSettings())
   installCrashRelaunch(db)
@@ -198,6 +200,7 @@ if (gotLock) void app.whenReady().then(async () => {
     void hands?.heal()
     void hands?.learned()
     void hands?.track()
+    void hands?.watchMail()
     void hands?.maybeReport()
     scanVault()
   }, 60_000)

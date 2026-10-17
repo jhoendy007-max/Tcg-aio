@@ -36,6 +36,8 @@ export interface StoreRunContext {
   phase: (status: TaskPhase) => void
   sleep: (ms: number) => Promise<void>
   onSession: (session: SessionCookies) => Promise<void>
+  /** Read a one-time code from the user's own mailbox for this store. Tests omit it. */
+  mailCode?: () => Promise<string | null>
   /** Watch stock only. The module must not add to cart. */
   monitorOnly?: boolean
   /** Set for a test run. The HTTP client also refuses place-order requests. */

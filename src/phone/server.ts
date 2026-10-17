@@ -41,6 +41,10 @@ export interface PhoneHost {
   stopAll(): void
   pauseAll?(): void
   setAutopilot?(enabled: boolean): void
+  setLanguage?(language: "en" | "es"): void
+  saveMailbox?(input: import("./protocol").PhoneMailDraft): void
+  deleteMailbox?(id: string): void
+  signInMail?(input: { provider: "gmail" | "outlook"; user: string }): Promise<void>
   devices(): PhoneDevice[]
   deviceTokens(): { id: string; name: string; token: string }[]
   saveDevice(device: { id: string; name: string; token: string }): void
@@ -427,6 +431,34 @@ export class PhoneServer {
       if (message.type === "autopilot.set") {
         if (!this.host.setAutopilot) throw new Error("Autopilot is not available.")
         this.host.setAutopilot(message.enabled)
+        this.reply(conn, req, { ok: true })
+        this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
+        return
+      }
+      if (message.type === "language.set") {
+        if (!this.host.setLanguage) throw new Error("Language is not available.")
+        this.host.setLanguage(message.language)
+        this.reply(conn, req, { ok: true })
+        this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
+        return
+      }
+      if (message.type === "mail.save") {
+        if (!this.host.saveMailbox) throw new Error("Mail is not available.")
+        this.host.saveMailbox(message.mailbox)
+        this.reply(conn, req, { ok: true })
+        this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
+        return
+      }
+      if (message.type === "mail.delete") {
+        if (!this.host.deleteMailbox) throw new Error("Mail is not available.")
+        this.host.deleteMailbox(message.id)
+        this.reply(conn, req, { ok: true })
+        this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
+        return
+      }
+      if (message.type === "mail.oauth") {
+        if (!this.host.signInMail) throw new Error("Mail sign-in is not available.")
+        await this.host.signInMail({ provider: message.provider, user: message.user })
         this.reply(conn, req, { ok: true })
         this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
         return

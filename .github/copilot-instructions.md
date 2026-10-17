@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.10 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.11 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -65,7 +65,13 @@ Self-healing runs only while autopilot is on. A task with no log for `stuckMinut
 
 Windows launch at boot is opt-in (`launchOnBoot`). A clean quit marks running tasks stopped. A crash leaves them active, and the next launch resumes them when `resumeOnLaunch` is on. An uncaught error can relaunch the process at most once a minute.
 
-Order rows are stored after a win. A later GET of that account's order page, plus an optional IMAP mailbox the user connects, can mark the order cancelled or record a tracking number. The mail password is encrypted with the same cipher as the other secrets.
+Order rows are stored after a win. A later GET of that account's order page, plus mail from Settings, can mark the order cancelled or record a tracking number.
+
+## Mail
+
+Settings stores several IMAP mailboxes. Typing an email address fills the host, port, and SSL from the domain (Gmail, Outlook, iCloud, Yahoo, or a guessed `imap.` host). Gmail and Outlook can use Sign in with Google or Sign in with Microsoft: a public desktop client ID stored in Settings, PKCE on `127.0.0.1`, and IMAP `AUTHENTICATE XOAUTH2`. There is no client secret. The refresh token is encrypted like the other secrets. iCloud and Yahoo stay on an app password, with numbered steps and links only to the official account pages. A failed test is stored as a short English or Spanish sentence. The mail screens follow `Settings.language` (`en` or `es`).
+
+Access is read-only. Do not APPEND, STORE, EXPUNGE, COPY, or MOVE, and do not send mail. A message counts only when its From domain is one of that store's sender domains in `src/shared/mail.ts`. Sign-in codes are filled into the user's own account during session refresh, or posted only when Amazon's page already has an OTP form. The digits are not written to the log, Discord, or the phone. Order mail updates tracking. Restock and newsletter mail is an optional alert and does not start checkout. The phone can add a mailbox, start the desktop sign-in, and shows status without the password or refresh token. `PHONE_PROTOCOL` stays 1.
 
 The daily report uses `healthReportTime` in `healthReportZone` (the host zone when the field is blank) and goes to Discord and the phone.
 

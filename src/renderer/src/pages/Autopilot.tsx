@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { STORE_CATALOG } from "../../../shared/stores"
-import type { ImapView, OrderRecord, PublicAccount, PublicProfile, TaskTemplate, TaskTemplateInput } from "../../../shared/types"
+import type { OrderRecord, PublicAccount, PublicProfile, TaskTemplate, TaskTemplateInput } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
@@ -26,24 +26,20 @@ export function AutopilotPage() {
   const [profiles, setProfiles] = useState<PublicProfile[]>([])
   const [accounts, setAccounts] = useState<PublicAccount[]>([])
   const [form, setForm] = useState<TaskTemplateInput>(empty([], []))
-  const [imap, setImap] = useState<ImapView>({ enabled: false, host: "", port: 993, user: "", mailbox: "INBOX", hasPassword: false })
-  const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
 
   async function load() {
-    const [nextTemplates, nextOrders, nextProfiles, nextAccounts, nextImap] = await Promise.all([
+    const [nextTemplates, nextOrders, nextProfiles, nextAccounts] = await Promise.all([
       unwrap(window.aio.autopilot.list()),
       unwrap(window.aio.autopilot.orders()),
       unwrap(window.aio.profiles.list()),
-      unwrap(window.aio.accounts.list()),
-      unwrap(window.aio.autopilot.imap())
+      unwrap(window.aio.accounts.list())
     ])
     setTemplates(nextTemplates)
     setOrders(nextOrders)
     setProfiles(nextProfiles)
     setAccounts(nextAccounts)
-    setImap(nextImap)
     setForm((current) => current.name ? current : empty(nextProfiles, nextAccounts))
   }
 
@@ -59,23 +55,6 @@ export function AutopilotPage() {
       setMessage("Template saved.")
       setForm(empty(profiles, accounts))
       await load()
-    } catch (err) {
-      setError(errorText(err))
-    }
-  }
-
-  async function saveMail(event: React.FormEvent) {
-    event.preventDefault()
-    setError("")
-    try {
-      const next = await unwrap(window.aio.autopilot.saveImap({
-        ...imap,
-        password,
-        passwordAction: password ? "replace" : "keep"
-      }))
-      setImap(next)
-      setPassword("")
-      setMessage("Mail tracking saved. The password stays on this PC.")
     } catch (err) {
       setError(errorText(err))
     }
@@ -138,26 +117,8 @@ export function AutopilotPage() {
         <h2>Orders</h2>
         {orders.length ? orders.map((order) => (
           <p key={order.id}>{order.store} · {order.sku} · {order.orderId} · {order.status}{order.tracking ? ` · ${order.tracking}` : ""}</p>
-        )) : <p>Order numbers show up here after a win. Status checks use your saved session, and mail only if you connect a mailbox below.</p>}
+        )) : <p>Order numbers show up here after a win. Status checks use your saved session. Order mail is read from the mailboxes in Settings.</p>}
       </div>
-      <form className="card form-grid" onSubmit={saveMail}>
-        <div className="span-2">
-          <h2>Order mail</h2>
-          <p className="hint">Optional. TCGAIO signs in to your mailbox over TLS and reads recent messages for order and tracking text. The password is encrypted on this PC.</p>
-        </div>
-        <label className="check span-2">
-          <input type="checkbox" checked={imap.enabled} onChange={(event) => setImap({ ...imap, enabled: event.target.checked })} />
-          <span>Check this mailbox for cancellations and tracking numbers.</span>
-        </label>
-        <Field label="Host"><TextInput value={imap.host} onChange={(event) => setImap({ ...imap, host: event.target.value })} placeholder="imap.example.com" /></Field>
-        <Field label="Port"><TextInput type="number" value={imap.port} onChange={(event) => setImap({ ...imap, port: Number(event.target.value) })} /></Field>
-        <Field label="Username"><TextInput value={imap.user} onChange={(event) => setImap({ ...imap, user: event.target.value })} /></Field>
-        <Field label="Mailbox"><TextInput value={imap.mailbox} onChange={(event) => setImap({ ...imap, mailbox: event.target.value })} /></Field>
-        <Field className="span-2" label="Password" hint={imap.hasPassword ? "A password is saved. Paste a new one to replace it." : "No password saved yet."}>
-          <TextInput type="password" autoComplete="off" value={password} onChange={(event) => setPassword(event.target.value)} />
-        </Field>
-        <div className="actions span-2"><button className="primary" type="submit">Save mail</button></div>
-      </form>
     </section>
   )
 }

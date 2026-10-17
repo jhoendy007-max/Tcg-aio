@@ -20,6 +20,7 @@ import {
   pickupOnly,
   productUrl,
   readOrderId,
+  readOtpForm,
   readPlaceOrder,
   readStock,
   type StockReading
@@ -256,8 +257,15 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar): Promise<Step<st
 }
 
 async function amazon(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest, follow = false): Promise<Step<HttpResponse>> {
-  const response = await send(ctx, request)
+  let response = await send(ctx, request)
   jar.absorb(response)
+  if (isTwoFactor(response.body, header(response, "location"))) {
+    const posted = await submitOwnCode(ctx, jar, response.body)
+    if (posted) {
+      response = posted
+      jar.absorb(response)
+    }
+  }
   const stopped = classify(response)
   if (stopped) return stopped
   if (!follow || response.status < 300 || response.status >= 400) return { kind: "ok", value: response }
@@ -267,9 +275,42 @@ async function amazon(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest
   if (next.hostname !== HOST) return { kind: "failed", reason: `Amazon redirected to ${next.hostname}.` }
   const again = await send(ctx, { method: "GET", url: next.toString(), headers: pageHeaders(jar, request.url) })
   jar.absorb(again)
+  if (isTwoFactor(again.body, header(again, "location"))) {
+    const posted = await submitOwnCode(ctx, jar, again.body)
+    if (posted) {
+      jar.absorb(posted)
+      const postedStop = classify(posted)
+      if (postedStop) return postedStop
+      return { kind: "ok", value: posted }
+    }
+  }
   const againStopped = classify(again)
   if (againStopped) return againStopped
   return { kind: "ok", value: again }
+}
+
+async function submitOwnCode(ctx: StoreRunContext, jar: CookieJar, body: string): Promise<HttpResponse | null> {
+  const form = readOtpForm(body)
+  if (!form || !ctx.mailCode) return null
+  const code = await ctx.mailCode()
+  if (!code || !/^\d{4,8}$/.test(code)) return null
+  let action: URL
+  try {
+    action = new URL(form.action, "https://www.amazon.com/")
+  } catch {
+    return null
+  }
+  if (action.hostname !== HOST) return null
+  const fields = { ...form.fields, [form.field]: code }
+  const headers = pageHeaders(jar, "https://www.amazon.com/")
+  headers["content-type"] = "application/x-www-form-urlencoded"
+  ctx.log("info", "Filled the verification code from your mailbox.")
+  return send(ctx, {
+    method: "POST",
+    url: action.toString(),
+    headers,
+    body: new URLSearchParams(fields).toString()
+  })
 }
 
 function classify(response: HttpResponse): StepStop | undefined {
