@@ -1,4 +1,6 @@
 import { parseSku as parseBandaiSku } from "../stores/bandai/parse"
+import { BARNES_NOBLE, COSTCO, GAMESTOP, SAMS, parsePageSku } from "../stores/page/parse"
+import { parseProductId } from "../stores/tcgplayer/parse"
 import { parseAsin } from "../stores/amazon/parse"
 import { parseSku as parseBestBuySku } from "../stores/bestbuy/parse"
 import { parseSku as parseCrunchyrollSku } from "../stores/crunchyroll/parse"
@@ -37,7 +39,21 @@ const STORE_ALIASES: Record<string, StoreId> = {
   bandai: "bandai",
   "premium bandai": "bandai",
   "p-bandai": "bandai",
-  premiumbandai: "bandai"
+  premiumbandai: "bandai",
+  gamestop: "gamestop",
+  "game stop": "gamestop",
+  "barnes-noble": "barnes-noble",
+  "barnes & noble": "barnes-noble",
+  "barnes and noble": "barnes-noble",
+  barnesandnoble: "barnes-noble",
+  costco: "costco",
+  sams: "sams",
+  "sam's club": "sams",
+  "sams club": "sams",
+  samsclub: "sams",
+  tcgplayer: "tcgplayer",
+  "tcgplayer direct": "tcgplayer",
+  "tcg player": "tcgplayer"
 }
 
 export function storeFromName(value: string): StoreId | null {
@@ -75,7 +91,7 @@ export function parseDiscordContent(content: string): RestockSignal[] {
     if (signal) found.push(signal)
   }
   for (const line of text.split(/\n+/)) {
-    const labeled = line.match(/^(target|walmart|best\s*buy|pok[eé]mon\s*cent(?:er|re)|amazon|crunchyroll(?:\s+store)?|premium\s*bandai|p-bandai|bandai)\b[:|\s-]+(\S+)/i)
+    const labeled = line.match(/^(target|walmart|best\s*buy|pok[eé]mon\s*cent(?:er|re)|amazon|crunchyroll(?:\s+store)?|premium\s*bandai|p-bandai|bandai|game\s*stop|barnes\s*(?:&|and)\s*noble|costco|sam'?s\s*club|tcg\s*player(?:\s+direct)?)\b[:|\s-]+(\S+)/i)
     if (!labeled) continue
     const store = storeFromName(labeled[1])
     if (!store) continue
@@ -104,7 +120,7 @@ function oneSignal(value: unknown): RestockSignal | { error: string } {
   const named = storeFromName(stringField(record, ["store", "retailer", "shop"]))
   const fromUrl = url ? signalFromUrl(url) : null
   const store = named ?? fromUrl?.store ?? null
-  if (!store) return { error: "store is required. Use target, walmart, bestbuy, pokemon-center, amazon, crunchyroll, or bandai." }
+  if (!store) return { error: "store is required. Use target, walmart, bestbuy, pokemon-center, amazon, crunchyroll, bandai, gamestop, barnes-noble, costco, sams, or tcgplayer." }
   const sku = skuForStore(store, stringField(record, ["sku", "tcin", "itemId", "usItemId", "asin", "productId", "pid"])) ?? fromUrl?.sku ?? ""
   if (!sku) return { error: "sku is required, or put a product URL in url." }
   const inStock = readStockFlag(record.inStock ?? record.in_stock ?? record.stock)
@@ -143,6 +159,11 @@ function storeFromHost(host: string): StoreId | null {
   if (host.endsWith("amazon.com")) return "amazon"
   if (host.endsWith("crunchyroll.com")) return "crunchyroll"
   if (host.endsWith("p-bandai.com") || host.endsWith("premiumbandai.com")) return "bandai"
+  if (host.endsWith("gamestop.com")) return "gamestop"
+  if (host.endsWith("barnesandnoble.com")) return "barnes-noble"
+  if (host === "costco.com" || host.endsWith(".costco.com")) return "costco"
+  if (host.endsWith("samsclub.com")) return "sams"
+  if (host.endsWith("tcgplayer.com")) return "tcgplayer"
   return null
 }
 
@@ -154,7 +175,14 @@ function skuForStore(store: StoreId, value: string): string | null {
   if (store === "pokemon-center") return parsePokemonSku(value)
   if (store === "amazon") return parseAsin(value)
   if (store === "bandai") return parseBandaiSku(value)
-  return parseCrunchyrollSku(value)
+  if (store === "crunchyroll") return parseCrunchyrollSku(value)
+  if (store === "gamestop") return parsePageSku(GAMESTOP, value)
+  if (store === "barnes-noble") return parsePageSku(BARNES_NOBLE, value)
+  if (store === "costco") return parsePageSku(COSTCO, value)
+  if (store === "sams") return parsePageSku(SAMS, value)
+  if (store === "tcgplayer") return parseProductId(value)
+  const _exhaustive: never = store
+  return _exhaustive
 }
 
 function stringField(record: Record<string, unknown>, keys: string[]): string {

@@ -12,7 +12,13 @@ export function orderStatusUrl(store: StoreId, orderId: string): string | null {
   if (store === "pokemon-center") return `https://www.pokemoncenter.com/account/orders/${id}`
   if (store === "crunchyroll") return `https://store.crunchyroll.com/account/orders/${id}`
   if (store === "bandai") return `https://p-bandai.com/us/account/order-history`
-  return null
+  if (store === "gamestop") return "https://www.gamestop.com/"
+  if (store === "barnes-noble") return "https://www.barnesandnoble.com/"
+  if (store === "costco") return "https://www.costco.com/"
+  if (store === "sams") return "https://www.samsclub.com/"
+  if (store === "tcgplayer") return "https://www.tcgplayer.com/"
+  const _exhaustive: never = store
+  return _exhaustive
 }
 
 /** Read a status from an order page or a mailbox the user connected. */

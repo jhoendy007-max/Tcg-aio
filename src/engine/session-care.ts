@@ -8,7 +8,12 @@ const HOMES: Record<StoreId, string> = {
   "pokemon-center": "https://www.pokemoncenter.com/",
   amazon: "https://www.amazon.com/",
   crunchyroll: "https://www.crunchyroll.com/",
-  bandai: "https://p-bandai.com/us"
+  bandai: "https://p-bandai.com/us",
+  gamestop: "https://www.gamestop.com/",
+  "barnes-noble": "https://www.barnesandnoble.com/",
+  costco: "https://www.costco.com/",
+  sams: "https://www.samsclub.com/",
+  tcgplayer: "https://www.tcgplayer.com/"
 }
 
 const LOGIN_URL = /\/(?:login|signin|sign-in|ap\/signin|identity\/signin|account\/login)(?:[/?#]|$)/i

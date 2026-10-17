@@ -25,7 +25,7 @@ type Bag = { colors: typeof colors; styles: ReturnType<typeof createStyles> }
 const ThemeContext = createContext<Bag>({ colors, styles: createStyles(colors) })
 function useTheme() { return useContext(ThemeContext) }
 
-const LETTER: Record<string, string> = { target: "T", walmart: "W", bestbuy: "B", "pokemon-center": "P", amazon: "A", crunchyroll: "C", bandai: "N" }
+const LETTER: Record<string, string> = { target: "T", walmart: "W", bestbuy: "B", "pokemon-center": "P", amazon: "A", crunchyroll: "C", bandai: "N", gamestop: "G", "barnes-noble": "BN", costco: "Co", sams: "S", tcgplayer: "D" }
 
 const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
   store: snap?.stores[0]?.id ?? "target",

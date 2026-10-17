@@ -4,6 +4,8 @@ import type { HttpClient, HttpResponse } from "./http"
 import { defaultHttp, warmMonitorHosts } from "./http"
 import { offersUrl, parseAsin } from "../stores/amazon/parse"
 import { parseSku as parseBandai, productApiUrl as bandaiProduct } from "../stores/bandai/parse"
+import { BARNES_NOBLE, COSTCO, GAMESTOP, SAMS, parsePageTarget, type PageSpec } from "../stores/page/parse"
+import { detailsUrl, parseProductId } from "../stores/tcgplayer/parse"
 import { monitorUrl, parseSku as parseBestBuy } from "../stores/bestbuy/parse"
 import { parseSku as parseCrunchy, productApiUrl as crunchyProduct } from "../stores/crunchyroll/parse"
 import { parseSku as parsePokemon, searchUrl } from "../stores/pokemon-center/parse"
@@ -21,7 +23,12 @@ export const BENCH_SKUS: Record<StoreId, string> = {
   "pokemon-center": "699-85207",
   amazon: "B0BSHF7WHW",
   crunchyroll: "810158836396",
-  bandai: "N2716225001"
+  bandai: "N2716225001",
+  gamestop: "436435",
+  "barnes-noble": "9781465481234",
+  costco: "100000001",
+  sams: "980000001",
+  tcgplayer: "509980"
 }
 
 export interface BenchSample {
@@ -83,13 +90,29 @@ export function monitorReadUrl(store: StoreId, sku: string): string | null {
     const id = parseCrunchy(sku)
     return id ? crunchyProduct(id) : null
   }
-  const code = parseBandai(sku)
-  return code ? bandaiProduct(code) : null
+  if (store === "bandai") {
+    const code = parseBandai(sku)
+    return code ? bandaiProduct(code) : null
+  }
+  if (store === "gamestop") return benchPage(GAMESTOP, sku)
+  if (store === "barnes-noble") return benchPage(BARNES_NOBLE, sku)
+  if (store === "costco") return benchPage(COSTCO, sku)
+  if (store === "sams") return benchPage(SAMS, sku)
+  if (store === "tcgplayer") {
+    const id = parseProductId(sku)
+    return id ? detailsUrl(id) : null
+  }
+  const _exhaustive: never = store
+  return _exhaustive
+}
+
+function benchPage(spec: PageSpec, sku: string): string | null {
+  return parsePageTarget(spec, sku)?.url ?? null
 }
 
 function headersFor(store: StoreId, url: string): Record<string, string> {
   const headers: Record<string, string> = {
-    accept: store === "target" || store === "pokemon-center" || store === "crunchyroll" || store === "bandai" ? "application/json" : "text/html,application/json",
+    accept: store === "target" || store === "pokemon-center" || store === "crunchyroll" || store === "bandai" || store === "tcgplayer" ? "application/json" : "text/html,application/json",
     "accept-language": "en-US,en;q=0.9",
     "user-agent": USER_AGENT
   }
@@ -101,6 +124,10 @@ function headersFor(store: StoreId, url: string): Record<string, string> {
   if (store === "target") headers.referer = "https://www.target.com/"
   if (store === "amazon") headers.referer = "https://www.amazon.com/"
   if (store === "crunchyroll") headers.referer = url
+  if (store === "tcgplayer") {
+    headers.origin = "https://www.tcgplayer.com"
+    headers.referer = "https://www.tcgplayer.com/"
+  }
   return headers
 }
 

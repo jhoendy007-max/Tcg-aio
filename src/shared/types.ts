@@ -5,7 +5,12 @@ export const STORE_IDS = [
   "pokemon-center",
   "amazon",
   "crunchyroll",
-  "bandai"
+  "bandai",
+  "gamestop",
+  "barnes-noble",
+  "costco",
+  "sams",
+  "tcgplayer"
 ] as const
 
 export type StoreId = (typeof STORE_IDS)[number]

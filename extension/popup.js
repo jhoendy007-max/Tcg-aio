@@ -5,7 +5,12 @@ const STORE_NAMES = {
   "pokemon-center": "Pokémon Center",
   amazon: "Amazon",
   crunchyroll: "Crunchyroll",
-  bandai: "Premium Bandai"
+  bandai: "Premium Bandai",
+  gamestop: "GameStop",
+  "barnes-noble": "Barnes & Noble",
+  costco: "Costco",
+  sams: "Sam's Club",
+  tcgplayer: "TCGplayer Direct"
 }
 
 const pairSection = document.querySelector("#pair")

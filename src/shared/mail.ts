@@ -48,7 +48,12 @@ export const STORE_SENDERS: Record<StoreId, readonly string[]> = {
   "pokemon-center": ["pokemoncenter.com", "email.pokemon.com", "pokemon.com"],
   amazon: ["amazon.com"],
   crunchyroll: ["crunchyroll.com", "store.crunchyroll.com"],
-  bandai: ["p-bandai.com", "bandai.com"]
+  bandai: ["p-bandai.com", "bandai.com"],
+  gamestop: ["gamestop.com"],
+  "barnes-noble": ["barnesandnoble.com", "bn.com"],
+  costco: ["costco.com"],
+  sams: ["samsclub.com"],
+  tcgplayer: ["tcgplayer.com"]
 }
 
 export function isMailProvider(value: string): value is MailProvider {

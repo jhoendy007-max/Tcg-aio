@@ -7,7 +7,12 @@ const TONE: Record<StoreId, string> = {
   "pokemon-center": "#d4533c",
   amazon: "#e08a2c",
   crunchyroll: "#e07a2f",
-  bandai: "#3d6cb5"
+  bandai: "#3d6cb5",
+  gamestop: "#1b1b1b",
+  "barnes-noble": "#1f6b4a",
+  costco: "#005a9c",
+  sams: "#0b6b4a",
+  tcgplayer: "#3a2a78"
 }
 
 const LETTER: Record<StoreId, string> = {
@@ -17,14 +22,19 @@ const LETTER: Record<StoreId, string> = {
   "pokemon-center": "P",
   amazon: "A",
   crunchyroll: "C",
-  bandai: "N"
+  bandai: "N",
+  gamestop: "G",
+  "barnes-noble": "BN",
+  costco: "Co",
+  sams: "S",
+  tcgplayer: "D"
 }
 
 export function StoreMark({ store, name, size = 28 }: { store: StoreId; name: string; size?: number }) {
   return (
     <svg className="store-mark" width={size} height={size} viewBox="0 0 32 32" role="img" aria-label={name}>
       <rect width="32" height="32" rx="8" fill={TONE[store]} />
-      <text x="16" y="21" textAnchor="middle" fill="#fff" fontSize="14" fontFamily="Segoe UI, sans-serif" fontWeight="700">{LETTER[store]}</text>
+      <text x="16" y="21" textAnchor="middle" fill="#fff" fontSize={LETTER[store].length > 1 ? 11 : 14} fontFamily="Segoe UI, sans-serif" fontWeight="700">{LETTER[store]}</text>
     </svg>
   )
 }

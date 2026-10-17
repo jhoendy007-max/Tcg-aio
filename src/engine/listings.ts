@@ -50,7 +50,16 @@ export function listingSearchUrl(store: StoreId, query: string, settings: Pick<S
     const params = new URLSearchParams({ keyword: query, limit: "24", offset: "0", _f_productStatuses: "On,Waiting" })
     return `https://p-bandai.com/api/search?${params.toString()}`
   }
-  return `https://www.crunchyroll.com/mobify/proxy/api/search/shopper-search/v1/organizations/${CRUNCHYROLL_ORG}/product-search?siteId=CrunchyrollUS&q=${q}`
+  if (store === "crunchyroll") {
+    return `https://www.crunchyroll.com/mobify/proxy/api/search/shopper-search/v1/organizations/${CRUNCHYROLL_ORG}/product-search?siteId=CrunchyrollUS&q=${q}`
+  }
+  if (store === "gamestop") return `https://www.gamestop.com/search/?q=${q}`
+  if (store === "barnes-noble") return `https://www.barnesandnoble.com/s/${q}`
+  if (store === "costco") return `https://www.costco.com/CatalogSearch?keyword=${q}`
+  if (store === "sams") return `https://www.samsclub.com/s/${q}`
+  if (store === "tcgplayer") return `https://mp-search-api.tcgplayer.com/v1/search/request?q=${q}`
+  const _exhaustive: never = store
+  return _exhaustive
 }
 
 /** Headers the storefront's own client sends. Other stores keep the caller's headers. */
@@ -81,6 +90,11 @@ export function parseListings(store: StoreId, body: string): Listing[] {
       if (!found.has(listing.sku)) found.set(listing.sku, listing)
     }
   }
+  if (store === "gamestop" || store === "barnes-noble" || store === "costco" || store === "sams") {
+    for (const listing of pageHtml(store, body)) {
+      if (!found.has(listing.sku)) found.set(listing.sku, listing)
+    }
+  }
   return [...found.values()]
 }
 
@@ -91,7 +105,14 @@ function take(store: StoreId, record: Record<string, unknown>): Listing | null {
   if (store === "pokemon-center") return takePokemon(record)
   if (store === "amazon") return takeAmazon(record)
   if (store === "bandai") return takeBandai(record)
-  return takeCrunchyroll(record)
+  if (store === "crunchyroll") return takeCrunchyroll(record)
+  if (store === "gamestop") return takeGameStop(record)
+  if (store === "barnes-noble") return takeBarnes(record)
+  if (store === "costco") return takeCostco(record)
+  if (store === "sams") return takeSams(record)
+  if (store === "tcgplayer") return takeTcgplayer(record)
+  const _exhaustive: never = store
+  return _exhaustive
 }
 
 function takeTarget(record: Record<string, unknown>): Listing | null {
@@ -170,6 +191,91 @@ function takeBandai(record: Record<string, unknown>): Listing | null {
   const amount = asRecord(record.fixedListPrice)?.amount
   const price = typeof amount === "number" && Number.isFinite(amount) ? Math.round(amount * 100) / 100 : priceOf(record)
   return { store: "bandai", sku, title, price, url: `https://p-bandai.com/us/item/${sku}`, retailer: true, sellerKnown: true }
+}
+
+function takeGameStop(record: Record<string, unknown>): Listing | null {
+  const sku = text(record.productId ?? record.sku ?? record.id)
+  if (!/^\d{5,9}$/.test(sku)) return null
+  const title = titleOf(record)
+  if (!title) return null
+  return { store: "gamestop", sku, title, price: priceOf(record), url: `https://www.gamestop.com/products/${sku}.html`, retailer: true, sellerKnown: true }
+}
+
+function takeBarnes(record: Record<string, unknown>): Listing | null {
+  const sku = text(record.isbn ?? record.ean ?? record.sku ?? record.productId)
+  if (!/^(?:\d{9}[\dX]|\d{10,13})$/.test(sku)) return null
+  const title = titleOf(record)
+  if (!title) return null
+  return { store: "barnes-noble", sku, title, price: priceOf(record), url: `https://www.barnesandnoble.com/w/${sku}`, retailer: true, sellerKnown: true }
+}
+
+function takeCostco(record: Record<string, unknown>): Listing | null {
+  const sku = text(record.itemNumber ?? record.productId ?? record.sku)
+  if (!/^\d{5,12}$/.test(sku)) return null
+  const title = titleOf(record)
+  if (!title) return null
+  return { store: "costco", sku, title, price: priceOf(record), url: `https://www.costco.com/.product.${sku}.html`, retailer: true, sellerKnown: true }
+}
+
+function takeSams(record: Record<string, unknown>): Listing | null {
+  const sku = text(record.itemId ?? record.usItemId ?? record.productId ?? record.sku)
+  if (!/^\d{5,14}$/.test(sku)) return null
+  const title = titleOf(record)
+  if (!title) return null
+  return { store: "sams", sku, title, price: priceOf(record), url: `https://www.samsclub.com/ip/${sku}`, retailer: true, sellerKnown: true }
+}
+
+function takeTcgplayer(record: Record<string, unknown>): Listing | null {
+  const sku = text(record.productId)
+  if (!/^\d{3,12}$/.test(sku)) return null
+  const title = titleOf(record)
+  if (!title) return null
+  const direct = record.directListing === true || (typeof record.directInventory === "number" && record.directInventory > 0)
+  const known = record.directListing !== undefined || record.directInventory !== undefined
+  return {
+    store: "tcgplayer",
+    sku,
+    title,
+    price: priceOf(record) ?? moneyField(record.marketPrice),
+    url: `https://www.tcgplayer.com/product/${sku}`,
+    retailer: direct,
+    sellerKnown: known
+  }
+}
+
+function moneyField(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null
+  return Math.round(value * 100) / 100
+}
+
+function pageHtml(store: "gamestop" | "barnes-noble" | "costco" | "sams", body: string): Listing[] {
+  const out: Listing[] = []
+  const patterns: Record<typeof store, RegExp> = {
+    gamestop: /href=["']([^"']*\/products\/([^"'/]+)\/(\d{5,9})\.html)/gi,
+    "barnes-noble": /href=["']([^"']*\/w\/([^"'/]+)\/(\d{9}[\dXx]|\d{10,13}))/gi,
+    costco: /href=["']([^"']*?([^"'/]*?)\.product\.(\d{5,12})\.html)/gi,
+    sams: /href=["']([^"']*\/ip\/([^"'/]+)\/(\d{5,14}))/gi
+  }
+  const homes = {
+    gamestop: "https://www.gamestop.com",
+    "barnes-noble": "https://www.barnesandnoble.com",
+    costco: "https://www.costco.com",
+    sams: "https://www.samsclub.com"
+  }
+  const re = patterns[store]
+  let match: RegExpExecArray | null
+  while ((match = re.exec(body))) {
+    const sku = (match[3] ?? "").replace(/x$/i, "X")
+    const title = slugTitle(match[2] ?? "")
+    if (!sku || title.length < 3) continue
+    const path = match[1].startsWith("http") ? match[1] : `${homes[store]}${match[1].startsWith("/") ? "" : "/"}${match[1]}`
+    out.push({ store, sku, title, price: null, url: path.split("?")[0], retailer: true, sellerKnown: true })
+  }
+  return out
+}
+
+function slugTitle(slug: string): string {
+  return decodeURIComponent(slug).replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 180)
 }
 
 function takeCrunchyroll(record: Record<string, unknown>): Listing | null {

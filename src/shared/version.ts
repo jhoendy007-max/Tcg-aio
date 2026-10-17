@@ -1,3 +1,3 @@
-export const APP_VERSION = "0.2.13"
+export const APP_VERSION = "0.2.14"
 export const RELEASE_OWNER = "jhoendy007-max"
 export const RELEASE_REPO = "Tcg-aio"
