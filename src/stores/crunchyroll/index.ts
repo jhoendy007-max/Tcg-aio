@@ -1,3 +1,5 @@
+import { attachSession } from "../../engine/block-recovery"
+import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
@@ -91,6 +93,7 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => jar.load(cookies))
   ctx.log("info", "Using the saved Crunchyroll session. store.crunchyroll.com now redirects to www.crunchyroll.com.")
   note(ctx, "session", "pass", "Saved Crunchyroll session loaded.")
   ctx.phase("monitoring")
@@ -161,13 +164,16 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
 }
 
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string): Promise<Step<StockReading>> {
-  const response = await store(ctx, { method: "GET", url: productApiUrl(sku), headers: apiHeaders(jar, productPageUrl(sku)) })
+  const response = await sharedValue(ctx, monitorKey("crunchyroll", sku, "product", ctx.proxy), () => store(ctx, { method: "GET", url: productApiUrl(sku), headers: apiHeaders(jar, productPageUrl(sku)) }))
   if (response.kind !== "ok") return response
   if (response.value.status === 429 || response.value.status >= 500) {
     return { kind: "retry", reason: `Monitor request returned HTTP ${response.value.status}. Retrying.` }
   }
   const reading = readStock(response.value.body, sku)
-  if (reading) return { kind: "ok", value: reading }
+  if (reading) {
+    noteWatch(ctx, reading)
+    return { kind: "ok", value: reading }
+  }
   if (response.value.status === 404) {
     return { kind: "ok", value: { inStock: false, status: "NOT_FOUND", sku, reason: "Product was not found." } }
   }

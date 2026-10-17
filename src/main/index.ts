@@ -4,6 +4,7 @@ import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/ciphe
 import { Database } from "../engine/database"
 import { AlertService, relayRestockUrl as relayUrl } from "../engine/alerts"
 import { defaultHttp } from "../engine/http"
+import { refreshStoreSession } from "../engine/store-browser"
 import { postDiscord } from "../engine/discord"
 import { ChallengeGate } from "../engine/challenge-gate"
 import { TaskService } from "../engine/task-runner"
@@ -122,7 +123,8 @@ if (gotLock) void app.whenReady().then(async () => {
     },
     publish,
     defaultHttp,
-    gate
+    gate,
+    refreshStoreSession
   )
   alerts = new AlertService(db, () => runner, publish, defaultHttp)
   desktop.setRestock((authorization, alternate, body) => alerts!.ingestHttp(authorization, alternate, body))

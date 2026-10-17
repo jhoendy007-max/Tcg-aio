@@ -202,6 +202,8 @@ export interface PublicTask {
   profileId: string
   accountId: string
   proxyGroupId: string | null
+  /** Stock checks use this pool. Checkout keeps proxyGroupId. Blank uses the checkout pool. */
+  monitorProxyGroupId: string | null
   confirmPurchase: boolean
   testMode: boolean
   /** Optional label so a drop can start every task in the group. */
@@ -222,6 +224,7 @@ export interface TaskInput {
   profileId: string
   accountId: string
   proxyGroupId: string | null
+  monitorProxyGroupId?: string | null
   confirmPurchase: boolean
   testMode?: boolean
   group?: string
@@ -248,6 +251,20 @@ export interface Settings {
   sessionWarmupMin: number
   /** Percent of jitter added to monitor sleeps. */
   monitorJitterPct: number
+  /** How many times to back off, rotate proxy, and reload the store session after a block. */
+  blockRetries: number
+  /** Poll interval inside a drop window. The per-store gap is still the floor. */
+  monitorFastDelayMs: number
+  /** Atlantic Time windows, one HH:MM-HH:MM per line. Scheduled drops count too. */
+  dropWindows: string
+  /** Extra ZIPs for stores whose ship-to-home stock changes by location. */
+  monitorZips: string
+  /** Extra store ids paired with those ZIPs. */
+  monitorStoreIds: string
+  alertPrice: boolean
+  alertNewOffer: boolean
+  alertAvailable: boolean
+  alertRetailer: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -263,7 +280,16 @@ export const DEFAULT_SETTINGS: Settings = {
   challengeTimeoutSec: 180,
   sessionWarmup: false,
   sessionWarmupMin: 30,
-  monitorJitterPct: 20
+  monitorJitterPct: 20,
+  blockRetries: 3,
+  monitorFastDelayMs: 1000,
+  dropWindows: "",
+  monitorZips: "",
+  monitorStoreIds: "",
+  alertPrice: true,
+  alertNewOffer: true,
+  alertAvailable: true,
+  alertRetailer: true
 }
 
 export interface SecurityInfo {
@@ -510,6 +536,14 @@ export interface AnalyticsReport {
   byProduct: ProductAnalytics[]
   timeline: TimelinePoint[]
   recent: CheckoutRecord[]
+  monitor: {
+    samples: number
+    blocked: number
+    blockRate: number
+    avgMs: number
+    byStore: { store: StoreId; samples: number; blocked: number; blockRate: number; avgMs: number }[]
+  }
+  restockHints: { store: StoreId; sku: string; hourAst: number; samples: number; warmupMin: number; detail: string }[]
 }
 
 export interface BulkShared {

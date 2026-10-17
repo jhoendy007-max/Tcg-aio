@@ -1,3 +1,5 @@
+import { attachSession } from "../../engine/block-recovery"
+import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
@@ -87,6 +89,7 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => jar.load(cookies))
   ctx.log("info", "Using the saved Amazon session. Checkout uses the address and payment already saved on the account.")
   note(ctx, "session", "pass", "Saved Amazon session loaded.")
   ctx.phase("monitoring")
@@ -150,21 +153,28 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
 }
 
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Promise<Step<StockReading>> {
-  const page = await amazon(ctx, jar, { method: "GET", url: productUrl(asin), headers: pageHeaders(jar, "https://www.amazon.com/") })
-  if (page.kind !== "ok") return page
-  if (page.value.status === 429 || page.value.status >= 500) {
-    return { kind: "retry", reason: `Monitor request returned HTTP ${page.value.status}. Retrying.` }
-  }
-  const offers = await amazon(ctx, jar, {
+  const offers = await sharedValue(ctx, monitorKey("amazon", asin, "offers", ctx.proxy), () => amazon(ctx, jar, {
     method: "GET",
     url: offersUrl(asin),
     headers: pageHeaders(jar, productUrl(asin), true)
-  })
+  }))
   if (offers.kind !== "ok") return offers
   if (offers.value.status === 429 || offers.value.status >= 500) {
     return { kind: "retry", reason: `Offer request returned HTTP ${offers.value.status}. Retrying.` }
   }
-  const reading = readStock(page.value.body, offers.value.status === 200 ? offers.value.body : "", asin)
+  const offerHtml = offers.value.status === 200 ? offers.value.body : ""
+  const offersUseful = /aod-offer|aod-pinned|aod-offer-soldBy/i.test(offerHtml)
+  let productHtml = ""
+  if (!offersUseful) {
+    const page = await sharedValue(ctx, monitorKey("amazon", asin, "page", ctx.proxy), () => amazon(ctx, jar, { method: "GET", url: productUrl(asin), headers: pageHeaders(jar, "https://www.amazon.com/") }))
+    if (page.kind !== "ok") return page
+    if (page.value.status === 429 || page.value.status >= 500) {
+      return { kind: "retry", reason: `Monitor request returned HTTP ${page.value.status}. Retrying.` }
+    }
+    productHtml = page.value.body
+  }
+  const reading = readStock(productHtml, offerHtml, asin)
+  noteWatch(ctx, reading)
   return { kind: "ok", value: reading }
 }
 

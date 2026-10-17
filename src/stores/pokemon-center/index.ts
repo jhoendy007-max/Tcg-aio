@@ -1,3 +1,5 @@
+import { attachSession } from "../../engine/block-recovery"
+import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
@@ -111,6 +113,7 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => jar.load(cookies))
   ctx.log("info", "Using the saved Pokémon Center session.")
   note(ctx, "session", "pass", "Saved Pokémon Center session loaded.")
   const probe = await probeCart(ctx, jar)
@@ -187,7 +190,7 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
 
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page: string): Promise<Step<StockReading>> {
   const primary = isProductUrl(ctx.task.sku, sku) ? page : searchUrl(sku)
-  const response = await store(ctx, jar, { method: "GET", url: primary, headers: pageHeaders(jar, page) })
+  const response = await sharedValue(ctx, monitorKey("pokemon-center", sku, isProductUrl(ctx.task.sku, sku) ? "page" : "search", ctx.proxy), () => store(ctx, jar, { method: "GET", url: primary, headers: pageHeaders(jar, page) }))
   if (response.kind === "retry") return response
   if (response.kind !== "ok") return response
   if (response.value.status === 429 || response.value.status >= 500) {
@@ -207,7 +210,10 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
       return { kind: "ok", value: { inStock: false, status: "NOT_FOUND", sku, productUri: page, availability: "NOT_FOUND", reason: "SKU was not found." } }
     }
   }
-  if (reading) return { kind: "ok", value: reading }
+  if (reading) {
+    noteWatch(ctx, reading)
+    return { kind: "ok", value: reading }
+  }
   if (response.value.status === 404) {
     return { kind: "ok", value: { inStock: false, status: "NOT_FOUND", sku, productUri: page, availability: "NOT_FOUND", reason: "SKU was not found." } }
   }

@@ -10,7 +10,7 @@ const PROBES: Record<StoreId, string> = {
   walmart: "https://www.walmart.com/ip/13816151308",
   bestbuy: "https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&st=6606082",
   "pokemon-center": "https://www.pokemoncenter.com/",
-  amazon: "https://www.amazon.com/",
+  amazon: "https://www.amazon.com/gp/product/ajax/aodAjaxMain/ref=dp_aod_NEW_mbc?asin=B0BSHF7WHW&pc=dp",
   crunchyroll: "https://www.crunchyroll.com/store",
   bandai: "https://p-bandai.com/api/products/N2716225001"
 }

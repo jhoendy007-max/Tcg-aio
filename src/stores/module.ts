@@ -1,3 +1,5 @@
+import type { SessionRefreshResult } from "../engine/block-recovery"
+import type { WatchSnapshot } from "../engine/monitor"
 import type { CheckResult, TestStage } from "../engine/test-mode"
 import type { HttpClient } from "../engine/http"
 import type {
@@ -19,9 +21,15 @@ export interface StoreRunContext {
   account: FullAccount
   settings: Settings
   proxy?: ProxyEndpoint
-  /** Every proxy in the task's group. Walmart rotates through these after an HTTP 412 block. */
+  /** Proxies for the current phase. Monitoring and checkout can use different groups. */
   proxies?: ProxyEndpoint[]
   signal: AbortSignal
+  /** Reloads the store in the account browser and returns cookies the site set. Tests omit it. */
+  refreshSession?: (input: { homeUrl: string; proxy?: ProxyEndpoint; signal: AbortSignal }) => Promise<SessionRefreshResult>
+  /** Join an in-flight stock read for this key instead of sending another request. */
+  share?: <T>(key: string, load: () => Promise<T>) => Promise<T>
+  /** Report a stock reading so price, offer, and availability changes can notify. */
+  observe?: (snapshot: WatchSnapshot) => void
   http: HttpClient
   log: (level: LogLevel, message: string) => void
   detail: (message: string) => void

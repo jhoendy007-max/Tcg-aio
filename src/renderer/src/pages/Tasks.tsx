@@ -11,6 +11,7 @@ const emptyForm = (): TaskInput => ({
   profileId: "",
   accountId: "",
   proxyGroupId: null,
+  monitorProxyGroupId: null,
   confirmPurchase: false,
   testMode: false,
   group: ""
@@ -214,7 +215,13 @@ export function TasksPage() {
           <Field label="Group" hint="Optional. A drop can start every task with this label.">
             <TextInput value={form.group ?? ""} onChange={(event) => setForm({ ...form, group: event.target.value })} placeholder="ETB" />
           </Field>
-          <Field label="Proxy group">
+          <Field label="Monitor proxy group" hint="Stock checks use this pool. Leave it blank to use the checkout proxy group.">
+            <Select value={form.monitorProxyGroupId ?? ""} onChange={(event) => setForm({ ...form, monitorProxyGroupId: event.target.value || null })}>
+              <option value="">Same as checkout</option>
+              {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </Select>
+          </Field>
+          <Field label="Checkout proxy group">
             <Select value={form.proxyGroupId ?? ""} onChange={(event) => setForm({ ...form, proxyGroupId: event.target.value || null })}>
               <option value="">Direct connection</option>
               {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies.length})</option>)}
@@ -345,6 +352,7 @@ function toInput(task: PublicTask): TaskInput {
     profileId: task.profileId,
     accountId: task.accountId,
     proxyGroupId: task.proxyGroupId,
+    monitorProxyGroupId: task.monitorProxyGroupId,
     confirmPurchase: task.confirmPurchase,
     testMode: task.testMode,
     group: task.group ?? ""

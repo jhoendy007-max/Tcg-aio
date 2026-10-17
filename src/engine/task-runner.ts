@@ -1,7 +1,10 @@
 import { applySolvedCookies, challengePageUrl, classifyChallenge, cookieHeader } from "./challenge"
 import type { ChallengeGate } from "./challenge-gate"
+import { isBlockStatus as blockStatus, sendWithRecovery, type SessionRefresher } from "./block-recovery"
+import { adaptiveDelay, detectChanges, MonitorHub, type WatchSnapshot } from "./monitor"
 import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
-import { guardTestMode, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
+import { storeHome } from "./session-care"
+import { guardTestMode, isFinalSubmit, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
 import { proxyLabel } from "../shared/proxy"
 import { redact } from "../shared/redact"
 import { isAbortError, sleep } from "./sleep"
@@ -14,6 +17,8 @@ export class TaskService {
   private readonly inflight = new Map<string, Promise<void>>()
   private readonly controllers = new Map<string, AbortController>()
   private readonly polite = new PoliteLimiter()
+  private readonly hub = new MonitorHub()
+  private readonly watches = new Map<string, WatchSnapshot>()
 
   constructor(
     private readonly db: Database,
@@ -21,7 +26,8 @@ export class TaskService {
     private readonly emit: (event: TaskEvent) => void,
     private readonly notify: (notice: Notice) => Promise<boolean>,
     private readonly http: HttpClient = defaultHttp,
-    private readonly challenges?: ChallengeGate
+    private readonly challenges?: ChallengeGate,
+    private readonly sessionRefresh?: SessionRefresher
   ) {}
 
   isRunning(id: string): boolean {
@@ -107,61 +113,148 @@ export class TaskService {
     try {
       const profile = this.db.readProfile(task.profileId)
       let account = this.db.readAccount(task.accountId)
+      const separateMonitor = Boolean(task.monitorProxyGroupId && task.monitorProxyGroupId !== task.proxyGroupId)
+      let monitorProxy: ProxyEndpoint | undefined
+      let monitorProxies: ProxyEndpoint[] | undefined
+      if (separateMonitor && task.monitorProxyGroupId) {
+        const group = this.db.getProxyGroup(task.monitorProxyGroupId)
+        monitorProxies = group.proxies
+        const choice = this.db.assignProxy(`${account.id}:monitor`, group.id, group.proxies)
+        monitorProxy = choice.proxy
+        const network = group.network === "residential" ? "residential" : "datacenter"
+        const detail = !monitorProxy
+          ? `Monitor pool ${group.name} is empty. Using a direct connection for stock checks.`
+          : `Monitoring through ${network} proxy ${proxyLabel(monitorProxy)} from ${group.name}.`
+        update({ log: line("info", detail) })
+      }
       if (task.proxyGroupId) {
         const group = this.db.getProxyGroup(task.proxyGroupId)
         proxies = group.proxies
         const choice = this.db.assignProxy(account.id, group.id, group.proxies)
         proxy = choice.proxy
         const network = group.network === "residential" ? "residential" : "datacenter"
+        const samePool = !task.monitorProxyGroupId || task.monitorProxyGroupId === task.proxyGroupId
         const detail = !proxy
-          ? `Proxy group ${group.name} is empty. Using a direct connection.`
-          : choice.allBenched
-            ? `Every proxy in ${group.name} is benched after repeated blocks. Still using ${proxyLabel(proxy)} (${network}).`
-            : `Using ${network} proxy ${proxyLabel(proxy)} from ${group.name}${choice.rotated ? " after the previous one was benched" : ""}.`
+          ? `Checkout pool ${group.name} is empty. Using a direct connection.`
+          : samePool
+            ? `Checkout uses the same ${network} pool, ${group.name}.`
+            : `Checkout uses ${network} proxy ${proxyLabel(proxy)} from ${group.name}.`
         update({ log: line(choice.allBenched ? "warn" : "info", detail) })
-      } else {
+      } else if (!monitorProxy) {
         update({ log: line("info", "Direct connection. No proxy group selected.") })
       }
+      if (!monitorProxy) {
+        monitorProxy = proxy
+        monitorProxies = proxies
+      }
       const settings = this.db.getSettings()
-      const http = this.polite.wrap(task.store, proxy?.id, this.http, (proxyId, status) => {
+      const http = this.polite.wrap(task.store, monitorProxy?.id, this.http, (proxyId, status) => {
         this.db.noteTraffic(task.store, proxyId, status)
       }, controller.signal)
       const checks: string[] = []
       if (testMode) update({ log: line("warn", "TEST MODE. The real flow runs through payment, then stops. The place-order request is not sent.") })
       let handoffs = 0
-      while (true) {
-        const result = await module.run({
-          task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store },
-          profile,
-          account,
-          settings,
-          proxy,
-          proxies,
-          signal: controller.signal,
-          http: testMode ? guardTestMode(task.store, http) : http,
-          testMode,
-          clearCartAfterTest: testMode && settings.clearCartAfterTest,
-          mark: (stage: TestStage, result: CheckResult, detail: string) => {
-            const label = result === "pass" ? "PASS" : result === "fail" ? "FAIL" : "SKIP"
-            const message = `${label} ${STAGE_LABEL[stage]} — ${detail}`
-            checks.push(message)
-            update({ log: line(result === "fail" ? "error" : result === "skip" ? "warn" : "success", message) })
-          },
-          checklistText: () => checks.join("\n"),
-          log: (level, message) => update({ log: line(level, message) }),
-          detail: (message) => update({ detail: redact(message).slice(0, 240) }),
-          phase: (status) => update({ status }),
-          sleep: (ms) => {
-            const score = proxy ? this.db.proxyScores().find((item) => item.proxyId === proxy?.id) : undefined
-            const wait = jitterDelay(ms, settings.monitorJitterPct, Math.random()) + backoffDelay(score?.streak ?? 0, settings.monitorDelayMs)
-            return sleep(wait, controller.signal)
-          },
-          onSession: async (session) => {
-            this.db.updateSession(account.id, session)
-            account = this.db.readAccount(account.id)
-            update({ log: line("info", `Saved the refreshed ${module.displayName} session locally.`) })
+      const guarded = testMode ? guardTestMode(task.store, http) : http
+      const ctx = {
+        task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store },
+        profile,
+        account,
+        settings,
+        proxy: monitorProxy,
+        proxies: monitorProxies,
+        signal: controller.signal,
+        http: guarded,
+        testMode,
+        clearCartAfterTest: testMode && settings.clearCartAfterTest,
+        mark: (stage: TestStage, result: CheckResult, detail: string) => {
+          const label = result === "pass" ? "PASS" : result === "fail" ? "FAIL" : "SKIP"
+          const message = `${label} ${STAGE_LABEL[stage]} — ${detail}`
+          checks.push(message)
+          update({ log: line(result === "fail" ? "error" : result === "skip" ? "warn" : "success", message) })
+        },
+        checklistText: () => checks.join("\n"),
+        log: (level: LogLevel, message: string) => update({ log: line(level, message) }),
+        detail: (message: string) => update({ detail: redact(message).slice(0, 240) }),
+        phase: (status: "monitoring" | "in_stock" | "adding_to_cart" | "checking_out") => {
+          update({ status })
+          if (status === "monitoring") {
+            ctx.proxy = monitorProxy
+            ctx.proxies = monitorProxies
+          } else {
+            ctx.proxy = proxy
+            ctx.proxies = proxies
           }
-        })
+        },
+        sleep: (ms: number) => {
+          const current = ctx.proxy
+          const score = current ? this.db.proxyScores().find((item) => item.proxyId === current.id) : undefined
+          const base = ms === settings.monitorDelayMs
+            ? adaptiveDelay(task.store, Date.now(), settings, this.db.listSchedules(), Math.random())
+            : jitterDelay(ms, settings.monitorJitterPct, Math.random())
+          return sleep(base + backoffDelay(score?.streak ?? 0, settings.monitorDelayMs), controller.signal)
+        },
+        onSession: async (session: FullAccount["session"]) => {
+          if (!session) return
+          this.db.updateSession(account.id, session)
+          account = this.db.readAccount(account.id)
+          ctx.account = account
+          update({ log: line("info", `Saved the refreshed ${module.displayName} session locally.`) })
+        },
+        share: <T>(key: string, load: () => Promise<T>) => this.hub.share(key, async () => {
+          const started = Date.now()
+          const value = await load()
+          const status = readStatus(value)
+          if (status !== null) this.db.recordMonitor({ store: task.store, ms: Date.now() - started, blocked: blockStatus(status), at: Date.now() })
+          return value
+        }),
+        observe: (snapshot: WatchSnapshot) => {
+          const key = `${task.store}:${task.sku}`
+          const prev = this.watches.get(key) ?? null
+          this.watches.set(key, snapshot)
+          if (prev && !prev.purchasable && snapshot.purchasable) {
+            this.db.recordRestock({ store: task.store, sku: task.sku, at: Date.now(), price: snapshot.price, title: snapshot.title })
+          }
+          const messages = detectChanges(prev, snapshot, {
+            price: settings.alertPrice,
+            offer: settings.alertNewOffer,
+            available: settings.alertAvailable,
+            retailer: settings.alertRetailer
+          })
+          for (const message of messages) {
+            update({ log: line("info", message) })
+            void this.safeNotify(update, {
+              kind: "alert",
+              storeName: module.displayName,
+              sku: task.sku,
+              profileName: profile.name,
+              detail: message
+            })
+          }
+        },
+        refreshSession: this.sessionRefresh
+          ? (input: { homeUrl: string; proxy?: ProxyEndpoint; signal: AbortSignal }) => this.sessionRefresh!({
+            accountId: account.id,
+            store: task.store,
+            homeUrl: input.homeUrl,
+            proxy: input.proxy,
+            existing: account.session,
+            signal: input.signal,
+            onChallenge: (message) => update({ log: line("warn", message) })
+          })
+          : undefined
+      }
+      ctx.http = {
+        request: (input) => {
+          if (isFinalSubmit(task.store, input)) return guarded.request(input)
+          return sendWithRecovery(ctx, input, {
+            homeUrl: storeHome(task.store),
+            inner: guarded,
+            blocked: (response) => blockStatus(response.status, response)
+          })
+        }
+      }
+      while (true) {
+        const result = await module.run(ctx)
         if (controller.signal.aborted || result.outcome === "stopped") {
           finish(update, "stopped", "Stopped", "info")
           return
@@ -171,6 +264,7 @@ export class TaskService {
           const resumed = await this.handoff(id, controller, update, account, proxy, module.displayName, profile.name, result.reason)
           if (resumed) {
             account = resumed
+            ctx.account = resumed
             continue
           }
           return
@@ -351,6 +445,15 @@ function finish(
     finishedAt: Date.now(),
     log: level ? line(level, detail) : undefined
   })
+}
+
+function readStatus(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null
+  if ("status" in value && typeof value.status === "number") return value.status
+  if ("value" in value && value.value && typeof value.value === "object" && "status" in value.value && typeof value.value.status === "number") {
+    return value.value.status
+  }
+  return null
 }
 
 function line(level: LogLevel, message: string) {

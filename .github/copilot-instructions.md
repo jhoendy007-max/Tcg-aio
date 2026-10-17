@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.6 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.7 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -33,6 +33,22 @@ To add a store:
 5. Add fixtures and tests. A missing session must not call the store. A guest session must not add to cart. Test mode must end as `tested` and must not call the place-order URL.
 
 Shipping state is a two-letter US code from `src/engine/validate.ts`. Puerto Rico is not in that set. ZIP is `^\d{5}(?:-\d{4})?$`.
+
+## Monitor
+
+Stock checks go through `MonitorHub` in `src/engine/monitor.ts`. Tasks watching the same store, SKU, location, and proxy share one in-flight request. The lightest endpoint already used by each module stays the monitor read: Target Redsky JSON, Walmart seller-offers GraphQL (the product page is only a fallback), Pokémon Center search JSON, Crunchyroll and Premium Bandai product JSON, Amazon’s offer fragment before the full product page, and Best Buy’s product or search page. Do not add a second request that this network cannot confirm.
+
+Outside a drop window the wait is `monitorDelayMs`. Inside a user window (`HH:MM-HH:MM` Atlantic Time) or a scheduled drop, it is `monitorFastDelayMs`, then jitter, and never under the store gap in `src/engine/polite.ts`.
+
+Target repeats the Redsky read for each configured ZIP and store id (at most four). Walmart, Amazon, Best Buy, Pokémon Center, Crunchyroll, and Premium Bandai keep the signed-in or national location. Do not invent a location cookie.
+
+A stock reading can notify on price, new offer id, unavailable-to-purchasable, and retailer-offer changes. The first reading is a baseline. Two restocks in the same Atlantic hour suggest a 15-minute Session Keeper warm-up.
+
+`monitorProxyGroupId` is the stock-check pool. `proxyGroupId` is checkout. Blank monitor pool uses the checkout pool for both.
+
+A block (HTTP 403, 412, 429, or 435, except a real product queue) backs off, rotates within the current pool, and reloads the account browser to copy cookies the site set. After `blockRetries` the task pauses. Place-order requests are not retried. A person still solves a challenge in the existing handoff. Do not open a second solver.
+
+Monitor sample counts, average time, and block rate are on the analytics report.
 
 ## Commands
 

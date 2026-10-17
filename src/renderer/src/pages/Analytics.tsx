@@ -5,7 +5,9 @@ import { Banner } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
 const empty: AnalyticsReport = {
-  attempts: 0, success: 0, failure: 0, paused: 0, tested: 0, winRate: 0, spend: 0, byStore: [], byProduct: [], timeline: [], recent: []
+  attempts: 0, success: 0, failure: 0, paused: 0, tested: 0, winRate: 0, spend: 0, byStore: [], byProduct: [], timeline: [], recent: [],
+  monitor: { samples: 0, blocked: 0, blockRate: 0, avgMs: 0, byStore: [] },
+  restockHints: []
 }
 
 export function AnalyticsPage() {
@@ -46,6 +48,18 @@ export function AnalyticsPage() {
         <div className="stat"><strong>{report.failure}</strong><span>failed</span></div>
         <div className="stat"><strong>{report.paused}</strong><span>paused</span></div>
         <div className="stat"><strong>{report.tested}</strong><span>tested</span></div>
+        <div className="stat"><strong>{report.monitor.avgMs} ms</strong><span>avg monitor</span></div>
+        <div className="stat"><strong>{Math.round(report.monitor.blockRate * 100)}%</strong><span>monitor block rate</span></div>
+      </div>
+      <div className="card">
+        <h2>Monitor</h2>
+        <p className="hint">{report.monitor.samples} stock reads · {report.monitor.blocked} blocked · average {report.monitor.avgMs} ms.</p>
+        {report.monitor.byStore.length === 0 ? null : report.monitor.byStore.map((row) => (
+          <p key={row.store} className="hint">{row.store} · {row.samples} reads · {Math.round(row.blockRate * 100)}% blocked · {row.avgMs} ms</p>
+        ))}
+        {report.restockHints.length === 0 ? <p className="hint">Restock times show up here after the same SKU comes back at least twice in the same hour.</p> : report.restockHints.map((hint) => (
+          <p key={`${hint.store}:${hint.sku}:${hint.hourAst}`} className="hint">{hint.detail}</p>
+        ))}
       </div>
       <div className="card">
         <h2>Timeline</h2>
