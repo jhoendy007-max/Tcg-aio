@@ -49,7 +49,11 @@ A stock reading can notify on price, new offer id, unavailable-to-purchasable, a
 
 A block (HTTP 403, 412, 429, or 435, except a real product queue) backs off, rotates within the current pool, and reloads the account browser to copy cookies the site set. After `blockRetries` the task pauses. Place-order requests are not retried. A person still solves a challenge in the existing handoff. Do not open a second solver.
 
-Monitor sample counts, average time, and block rate are on the analytics report.
+Each stock read records DNS, connect, time to first byte, and total milliseconds for that store and proxy. Analytics shows the average, p50, and p95. The task row shows the last read in milliseconds and, when a cart request follows an in-stock reading, the milliseconds from detection to add-to-cart. `npm run bench:monitors -- --n 5` repeats those read-only GETs and prints p50, p95, and success rate. `--proxy host:port` sends them through one proxy. The HTTP client keeps a connection pool per proxy and allows HTTP/2. A drop warm-up opens those monitor URLs before the window. Do not add a custom TLS fingerprint or a trace header.
+
+A monitor-only task never adds to cart. It can start without purchase confirmation. Alerts can create one from a rule or a match. Product images come from the product JSON or og:image already in that response, then from an optional https URL on the task. Discord embeds include price, stock, link, and that image. The phone notice can show the same image. Stock changes (restock, sell-out, price) are on the analytics report.
+
+Monitor sample counts, average time, p50, p95, and block rate are on the analytics report.
 
 ## Hands-free
 

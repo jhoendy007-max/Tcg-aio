@@ -4,12 +4,12 @@ Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.
 
 Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If a store shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
 
-Test mode, from Settings or a task, runs the real monitor, cart, address, shipping, and payment-token steps and stops before place order. The place-order request is refused by the task HTTP client, so it cannot be sent. A TEST badge shows on the desktop and the phone. Run test starts that path for one task. Store health check sends one read-only GET per store through the selected proxy group.
+Test mode, from Settings or a task, runs the real monitor, cart, address, shipping, and payment-token steps and stops before place order. The place-order request is refused by the task HTTP client, so it cannot be sent. A TEST badge shows on the desktop and the phone. Run test starts that path for one task. Store health check sends one read-only GET per store through the selected proxy group. `npm run bench:monitors -- --n 5` repeats those checks and prints p50, p95, and the success rate. Add `--proxy host:port` to send them through one proxy.
 
 ## What you get
 
 - **Home** — active tasks, today's checkouts, spend, success rate, and proxy and session health.
-- **Tasks** — store mark, optional product photo, search, filters, drop groups, drag reorder, and a live status log. Compact or detailed. Dark, light, and accent colors, plus a name and logo, are in Settings.
+- **Tasks** — store mark, product photo from the monitor payload, live monitor time in milliseconds, search, filters, drop groups, drag reorder, and a live status log. A monitor-only task never carts. Compact or detailed. Dark, light, and accent colors, plus a name and logo, are in Settings.
 - **Setup** — a first-run wizard for a profile, an account, optional proxies, and one test-mode task. It stays hidden once you have a profile or an account, or after you skip it.
 - **Profiles** — shipping and billing. Card number and CVV are encrypted locally.
 - **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.

@@ -2,6 +2,9 @@ import { applySolvedCookies, challengePageUrl, classifyChallenge, cookieHeader }
 import type { ChallengeGate } from "./challenge-gate"
 import { isBlockStatus as blockStatus, sendWithRecovery, type SessionRefresher } from "./block-recovery"
 import { adaptiveDelay, detectChanges, MonitorHub, type WatchSnapshot } from "./monitor"
+import type { RequestTiming } from "./http"
+import { productImage } from "../shared/image"
+import { cleanImageUrl } from "./validate"
 import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
 import { storeHome } from "./session-care"
 import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
@@ -39,7 +42,7 @@ export class TaskService {
     if (this.inflight.has(id)) return
     const task = this.db.getTask(id)
     const testMode = options?.test === true || task.testMode === true || this.db.getSettings().testMode === true
-    if (!testMode && !task.confirmPurchase) {
+    if (!testMode && !task.confirmPurchase && task.monitorOnly !== true) {
       throw new Error("Confirm that this task may place a real shipping order before starting it.")
     }
     const controller = new AbortController()
@@ -170,6 +173,7 @@ export class TaskService {
       const checks: string[] = []
       if (testMode) update({ log: line("warn", "TEST MODE. The real flow runs through payment, then stops. The place-order request is not sent.") })
       let handoffs = 0
+      let detectedAt = 0
       const guarded = testMode ? guardTestMode(task.store, http) : http
       const ctx = {
         task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store },
@@ -191,7 +195,10 @@ export class TaskService {
         checklistText: () => checks.join("\n"),
         log: (level: LogLevel, message: string) => update({ log: line(level, message) }),
         detail: (message: string) => update({ detail: redact(message).slice(0, 240) }),
+        monitorOnly: task.monitorOnly === true,
         phase: (status: "monitoring" | "in_stock" | "adding_to_cart" | "checking_out") => {
+          if (status === "in_stock") detectedAt = Date.now()
+          if (status === "adding_to_cart" && detectedAt) update({ detectToCartMs: Date.now() - detectedAt })
           update({ status })
           if (status === "monitoring") {
             ctx.proxy = monitorProxy
@@ -220,7 +227,32 @@ export class TaskService {
           const started = Date.now()
           const value = await load()
           const status = readStatus(value)
-          if (status !== null) this.db.recordMonitor({ store: task.store, ms: Date.now() - started, blocked: blockStatus(status), at: Date.now() })
+          const timing = readTiming(value)
+          const total = timing?.totalMs ?? Date.now() - started
+          if (status !== null) {
+            this.db.recordMonitor({
+              store: task.store,
+              ms: total,
+              dnsMs: timing?.dnsMs,
+              connectMs: timing?.connectMs,
+              ttfbMs: timing?.ttfbMs,
+              blocked: blockStatus(status),
+              at: Date.now(),
+              proxy: monitorProxy ? `${monitorProxy.host}:${monitorProxy.port}` : "direct"
+            })
+            update({ monitorMs: total })
+          }
+          const image = readBody(value)
+          if (image) {
+            const url = productImage(image)
+            if (url && !task.imageUrl) {
+              try {
+                update({ imageUrl: cleanImageUrl(url) })
+              } catch {
+                // A store image that is not https is ignored.
+              }
+            }
+          }
           return value
         }),
         observe: (snapshot: WatchSnapshot) => {
@@ -228,7 +260,18 @@ export class TaskService {
           const prev = this.watches.get(key) ?? null
           this.watches.set(key, snapshot)
           if (prev && !prev.purchasable && snapshot.purchasable) {
-            this.db.recordRestock({ store: task.store, sku: task.sku, at: Date.now(), price: snapshot.price, title: snapshot.title })
+            this.db.recordRestock({ store: task.store, sku: task.sku, at: Date.now(), price: snapshot.price, title: snapshot.title, kind: "restock", imageUrl: snapshot.imageUrl, url: snapshot.url })
+          } else if (prev && prev.purchasable && !snapshot.purchasable) {
+            this.db.recordRestock({ store: task.store, sku: task.sku, at: Date.now(), price: snapshot.price, title: snapshot.title, kind: "oos", imageUrl: snapshot.imageUrl, url: snapshot.url })
+          } else if (prev && prev.price !== null && snapshot.price !== null && prev.price !== snapshot.price) {
+            this.db.recordRestock({ store: task.store, sku: task.sku, at: Date.now(), price: snapshot.price, title: snapshot.title, kind: "price", imageUrl: snapshot.imageUrl, url: snapshot.url })
+          }
+          if (snapshot.imageUrl && !task.imageUrl) {
+            try {
+              update({ imageUrl: cleanImageUrl(snapshot.imageUrl) })
+            } catch {
+              // Ignore a non-https image.
+            }
           }
           const messages = detectChanges(prev, snapshot, {
             price: settings.alertPrice,
@@ -243,7 +286,11 @@ export class TaskService {
               storeName: module.displayName,
               sku: task.sku,
               profileName: profile.name,
-              detail: message
+              detail: message,
+              price: snapshot.price,
+              url: snapshot.url,
+              imageUrl: snapshot.imageUrl,
+              inStock: snapshot.purchasable
             })
           }
         },
@@ -510,6 +557,18 @@ function finish(
     finishedAt: Date.now(),
     log: level ? line(level, detail) : undefined
   })
+}
+
+function readTiming(value: unknown): RequestTiming | undefined {
+  if (!value || typeof value !== "object" || !("timing" in value)) return undefined
+  const timing = value.timing
+  if (!timing || typeof timing !== "object" || !("totalMs" in timing) || typeof timing.totalMs !== "number") return undefined
+  return timing as RequestTiming
+}
+
+function readBody(value: unknown): string {
+  if (!value || typeof value !== "object" || !("body" in value) || typeof value.body !== "string") return ""
+  return value.body
 }
 
 function readStatus(value: unknown): number | null {

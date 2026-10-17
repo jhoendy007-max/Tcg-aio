@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto"
 import { attachSession } from "../../engine/block-recovery"
-import { monitorKey, monitorPlaces, noteWatch, sharedCall } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, monitorPlaces, noteWatch, sharedCall } from "../../engine/monitor"
+import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
@@ -132,6 +133,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.phase("in_stock")
     ctx.log("success", `Shipping in stock (${reading.status})${reading.title ? ` · ${reading.title}` : ""}.`)
     note(ctx, "monitor", "pass", `In stock (${reading.status}).`)
+    if (await holdMonitorOnly(ctx)) continue
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, key, tcin)
     if (cart.kind === "oos") {
@@ -254,7 +256,7 @@ async function readStockPlaces(ctx: StoreRunContext, key: string, tcin: string):
     last = stock
     if (stock.value.inStock) break
   }
-  if (last?.kind === "ok") noteWatch(ctx, last.value)
+  if (last?.kind === "ok") noteWatch(ctx, { ...last.value, url: `https://www.target.com/p/-/A-${tcin}` })
   return last ?? { kind: "retry", reason: "No monitor location is configured." }
 }
 
@@ -300,6 +302,7 @@ function interpretMonitor(response: HttpResponse): Step<StockReading> {
     return { kind: "retry", reason: `Monitor request returned HTTP ${response.status}. Retrying.` }
   }
   const reading = parseStock(response.body)
+  if (reading) reading.imageUrl = productImage(response.body) || undefined
   const problem = stockProblem(response.body)
   if (problem && (!reading || reading.status === "UNKNOWN" || reading.status === "NOT_FOUND")) {
     return { kind: "retry", reason: problem }

@@ -36,6 +36,8 @@ export interface StoreRunContext {
   phase: (status: TaskPhase) => void
   sleep: (ms: number) => Promise<void>
   onSession: (session: SessionCookies) => Promise<void>
+  /** Watch stock only. The module must not add to cart. */
+  monitorOnly?: boolean
   /** Set for a test run. The HTTP client also refuses place-order requests. */
   testMode?: boolean
   clearCartAfterTest?: boolean

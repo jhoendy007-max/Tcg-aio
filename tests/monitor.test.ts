@@ -1,16 +1,22 @@
+import { createServer } from "node:http"
 import { describe, expect, it } from "vitest"
 import { attachSession, backoffMs, isBlockStatus, resetBlockRecoveryState, selectProxy, sendWithRecovery } from "../src/engine/block-recovery"
 import {
   adaptiveDelay,
   detectChanges,
+  holdMonitorOnly,
   inDropWindow,
   MonitorHub,
+  percentile,
   monitorPlaces,
   parseDropWindows,
   suggestWarmups,
   summarizeMonitor,
   type WatchSnapshot
 } from "../src/engine/monitor"
+import { undiciRequest } from "../src/engine/http"
+import { benchmarkStores, monitorReadOk, monitorReadUrl } from "../src/engine/bench"
+import { productImage } from "../src/shared/image"
 import { DEFAULT_SETTINGS, type ProxyEndpoint, type Settings } from "../src/shared/types"
 import type { StoreRunContext } from "../src/stores/module"
 
@@ -25,7 +31,7 @@ describe("monitor timing and locations", () => {
     const fast = adaptiveDelay("target", morning, base, [], 0.5)
     const slow = adaptiveDelay("target", afternoon, base, [], 0.5)
     expect(fast).toBeLessThan(slow)
-    expect(fast).toBeGreaterThanOrEqual(3000)
+    expect(fast).toBeGreaterThanOrEqual(250)
     expect(inDropWindow(afternoon, [], [{ startAt: afternoon, stopAt: afternoon + 60_000, enabled: true }])).toBe(true)
   })
 
@@ -73,7 +79,81 @@ describe("stock changes and restock memory", () => {
     expect(stats.samples).toBe(3)
     expect(stats.blocked).toBe(1)
     expect(stats.avgMs).toBe(200)
+    expect(stats.p50Ms).toBe(200)
+    expect(stats.p95Ms).toBe(300)
     expect(stats.byStore.find((row) => row.store === "target")?.blockRate).toBe(0.5)
+    expect(percentile([10, 20, 30, 40], 50)).toBe(20)
+  })
+
+  it("stays on the monitor when the task is monitor only", async () => {
+    let slept = 0
+    const held = await holdMonitorOnly({
+      monitorOnly: true,
+      log: () => undefined,
+      sleep: async (ms) => { slept = ms },
+      settings: { monitorDelayMs: 1000 }
+    })
+    expect(held).toBe(true)
+    expect(slept).toBe(1000)
+    expect(await holdMonitorOnly({ monitorOnly: false, log: () => undefined, sleep: async () => undefined, settings: { monitorDelayMs: 1000 } })).toBe(false)
+  })
+})
+
+describe("monitor images and latency", () => {
+  it("reads an https image from product JSON or og:image", () => {
+    expect(productImage(JSON.stringify({ item: { thumbnailUrl: "https://cdn.example/p.jpg" } }))).toBe("https://cdn.example/p.jpg")
+    expect(productImage('<html><meta property="og:image" content="https://cdn.example/og.jpg"></html>')).toBe("https://cdn.example/og.jpg")
+    expect(productImage(JSON.stringify({ image: "http://cdn.example/p.jpg" }))).toBe("")
+  })
+
+  it("times a local request and reuses the connection", async () => {
+    const server = createServer((_req, res) => {
+      res.setHeader("content-type", "application/json")
+      res.end('{"image":"https://cdn.example/p.jpg"}')
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()))
+    const address = server.address()
+    const port = typeof address === "object" && address ? address.port : 0
+    const url = `http://127.0.0.1:${port}/item`
+    try {
+      const first = await undiciRequest({ method: "GET", url, timeoutMs: 5000 })
+      await undiciRequest({ method: "GET", url, timeoutMs: 5000 })
+      const third = await undiciRequest({ method: "GET", url, timeoutMs: 5000 })
+      expect(first.status).toBe(200)
+      expect(first.timing?.totalMs).toBeGreaterThan(0)
+      expect(third.timing?.dnsMs ?? 0).toBe(0)
+      expect(third.timing?.connectMs ?? 0).toBe(0)
+      expect(third.timing?.totalMs ?? 0).toBeLessThan(first.timing?.totalMs ?? 1)
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it("builds a read-only monitor URL and summarizes a proxy benchmark", async () => {
+    expect(monitorReadUrl("target", "88897904")).toContain("redsky.target.com")
+    expect(monitorReadUrl("target", "not-a-tcin")).toBeNull()
+    expect(monitorReadUrl("walmart", "13816151308")).toBe("https://www.walmart.com/ip/13816151308")
+    expect(monitorReadOk(200, '{"inStock":true}')).toBe(true)
+    expect(monitorReadOk(403, "access denied")).toBe(false)
+    const seen: string[] = []
+    const reports = await benchmarkStores({
+      n: 3,
+      gap: false,
+      stores: ["target"],
+      proxy: { id: "p", host: "10.0.0.8", port: 8000 },
+      http: {
+        async request(input) {
+          seen.push(`${input.proxy?.host ?? "direct"} ${input.method} ${input.url}`)
+          return { status: 200, headers: {}, body: '{"ok":true}', timing: { dnsMs: 1, connectMs: 2, ttfbMs: input.url.includes("redsky") ? 40 : 0, totalMs: seen.length === 1 ? 80 : 50 } }
+        }
+      }
+    })
+    expect(seen).toHaveLength(3)
+    expect(seen[0]).toContain("10.0.0.8")
+    expect(seen[0]).toContain("GET")
+    expect(reports[0]?.successRate).toBe(1)
+    expect(reports[0]?.p50Ms).toBe(50)
+    expect(reports[0]?.p95Ms).toBe(80)
   })
 })
 

@@ -1,5 +1,6 @@
 import { attachSession } from "../../engine/block-recovery"
-import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
@@ -146,6 +147,7 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
+    if (await holdMonitorOnly(ctx)) continue
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, reading, page)
     if (cart.kind === "oos") {
@@ -197,6 +199,7 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
     return { kind: "retry", reason: `Monitor request returned HTTP ${response.value.status}. Retrying.` }
   }
   let reading = readStock(response.value.body, sku)
+  let imageBody = response.value.body
   const searchMiss = reading?.status === "NOT_FOUND" && !isProductUrl(ctx.task.sku, sku)
   if ((!reading || searchMiss) && !isProductUrl(ctx.task.sku, sku)) {
     const fallback = await store(ctx, jar, { method: "GET", url: page, headers: pageHeaders(jar, page) })
@@ -205,13 +208,17 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
       return { kind: "retry", reason: `Monitor request returned HTTP ${fallback.value.status}. Retrying.` }
     }
     const pageReading = readStock(fallback.value.body, sku)
-    if (pageReading) reading = pageReading
+    if (pageReading) {
+      reading = pageReading
+      imageBody = fallback.value.body
+    }
     if (!reading && fallback.value.status === 404) {
       return { kind: "ok", value: { inStock: false, status: "NOT_FOUND", sku, productUri: page, availability: "NOT_FOUND", reason: "SKU was not found." } }
     }
   }
   if (reading) {
-    noteWatch(ctx, reading)
+    reading.imageUrl = productImage(imageBody) || undefined
+    noteWatch(ctx, { ...reading, url: reading.productUri.startsWith("http") ? reading.productUri : `https://www.pokemoncenter.com${reading.productUri.startsWith("/") ? "" : "/"}${reading.productUri}` })
     return { kind: "ok", value: reading }
   }
   if (response.value.status === 404) {

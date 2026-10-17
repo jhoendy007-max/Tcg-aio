@@ -85,6 +85,9 @@ export interface PhoneTask {
   testMode: boolean
   group: string
   imageUrl?: string
+  monitorOnly?: boolean
+  monitorMs?: number
+  detectToCartMs?: number
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -117,6 +120,8 @@ export interface PhoneAnalytics {
   monitorBlocked?: number
   monitorBlockRate?: number
   monitorAvgMs?: number
+  monitorP50Ms?: number
+  monitorP95Ms?: number
 }
 
 export interface PhoneUpdates {
@@ -162,6 +167,10 @@ export interface PhoneNotice {
   profileName: string
   detail: string
   orderId?: string
+  price?: number | null
+  url?: string
+  imageUrl?: string
+  inStock?: boolean
   ts: number
 }
 
@@ -420,6 +429,9 @@ export function projectTask(task: PublicTask, profiles: PublicProfile[], account
     testMode: task.testMode === true,
     group: task.group ?? "",
     imageUrl: task.imageUrl || undefined,
+    monitorOnly: task.monitorOnly === true,
+    monitorMs: task.monitorMs,
+    detectToCartMs: task.detectToCartMs,
     status: task.status,
     detail: redact(task.detail).slice(0, 240),
     logs: task.logs.slice(-LOG_LIMIT).map((line) => ({ ...line, message: redact(line.message).slice(0, 500) })),

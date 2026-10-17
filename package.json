@@ -13,6 +13,7 @@
     "test": "vitest run",
     "dist:win": "electron-vite build && electron-builder --win nsis --publish never",
     "phone:relay": "tsx src/phone/relay-cli.ts",
+    "bench:monitors": "tsx src/engine/bench-cli.ts",
     "pack:extension": "node scripts/pack-extension.mjs"
   },
   "dependencies": {

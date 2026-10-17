@@ -49,6 +49,7 @@ export default function App() {
   const [paste, setPaste] = useState("")
   const [scanning, setScanning] = useState(false)
   const [banner, setBanner] = useState("")
+  const [noticeImage, setNoticeImage] = useState("")
   const seen = useRef(new Map<string, string>())
   const [permission, requestPermission] = useCameraPermissions()
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -78,6 +79,9 @@ export default function App() {
     })
     next.onNotice((notice) => {
       void notify(notice)
+      const price = typeof notice.price === "number" ? ` · $${notice.price.toFixed(2)}` : ""
+      setBanner(`${notice.storeName} · ${notice.sku}${price}\n${notice.detail}`)
+      setNoticeImage(notice.imageUrl?.startsWith("https://") ? notice.imageUrl : "")
     })
     next.onAlerts((alerts) => {
       setSnap((current) => current ? { ...current, alerts } : current)
@@ -228,7 +232,12 @@ export default function App() {
           </View>
           <Text style={styles.p}>Tasks run on the PC. This phone starts, stops, and watches them.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
-          {banner ? <Text accessibilityLiveRegion="polite" style={styles.banner}>{banner}</Text> : null}
+          {banner ? (
+            <View style={styles.banner}>
+              {noticeImage ? <Image source={{ uri: noticeImage }} style={styles.photo} accessibilityIgnoresInvertColors /> : null}
+              <Text accessibilityLiveRegion="polite" style={styles.p}>{banner}</Text>
+            </View>
+          ) : null}
           {challenge && screen !== "alerts" ? (
             <ChallengeCard challenge={challenge} now={now} session={session.current} onRun={run} />
           ) : null}
@@ -341,11 +350,13 @@ export default function App() {
                     <View style={[styles.mark, { backgroundColor: theme.accent }]}><Text style={styles.markText}>{LETTER[item.store] ?? "S"}</Text></View>
                     {item.imageUrl?.startsWith("https://") ? <Image source={{ uri: item.imageUrl }} style={styles.photo} accessibilityIgnoresInvertColors /> : null}
                     <Text style={styles.h2}>{item.storeName}</Text>
+                    {item.monitorOnly ? <Text style={styles.pill}>MONITOR</Text> : null}
                     {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
                     <Text style={styles.pill}>{STATUS_LABEL[item.status] ?? item.status}</Text>
                   </View>
                   <Text style={styles.sku}>{item.sku}</Text>
                   <Text style={styles.p}>Qty {item.quantity} · {item.profileName} · {item.accountLabel} · {item.proxyGroupName ?? "Direct"}</Text>
+                  {typeof item.monitorMs === "number" ? <Text style={styles.p}>{item.monitorMs} ms{typeof item.detectToCartMs === "number" ? ` · ${item.detectToCartMs} ms to cart` : ""}</Text> : null}
                   {item.detail ? <Text style={styles.p}>{item.detail}</Text> : null}
                   {selected === item.id ? <TaskDetail task={item} onRun={run} session={session.current} onEdit={() => {
                     setDraft({
@@ -442,7 +453,7 @@ function StatsPanel({ snap, session, onRun, onBack }: {
     <View style={styles.card}>
       <Text style={styles.h2}>Analytics</Text>
       <Text style={styles.p}>Win rate {Math.round((stats?.winRate ?? 0) * 100)}% · spend ${ (stats?.spend ?? 0).toFixed(2) } · {stats?.success ?? 0} success · {stats?.failure ?? 0} failed · {stats?.paused ?? 0} paused · {stats?.tested ?? 0} tested</Text>
-      <Text style={styles.p}>Monitor {stats?.monitorSamples ?? 0} reads · avg {stats?.monitorAvgMs ?? 0} ms · block rate {Math.round((stats?.monitorBlockRate ?? 0) * 100)}%</Text>
+      <Text style={styles.p}>Monitor {stats?.monitorSamples ?? 0} reads · avg {stats?.monitorAvgMs ?? 0} ms · p50 {stats?.monitorP50Ms ?? 0} ms · p95 {stats?.monitorP95Ms ?? 0} ms · block rate {Math.round((stats?.monitorBlockRate ?? 0) * 100)}%</Text>
       {(stats?.byStore ?? []).map((row) => (
         <Text key={row.store} style={styles.p}>{row.storeName} · {row.success} won · {row.failure} failed · ${row.spend.toFixed(2)}</Text>
       ))}

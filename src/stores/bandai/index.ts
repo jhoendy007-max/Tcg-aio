@@ -1,5 +1,6 @@
 import { attachSession } from "../../engine/block-recovery"
-import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -137,6 +138,7 @@ async function runBandai(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
+    if (await holdMonitorOnly(ctx)) continue
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, reading, page)
     if (cart.kind === "oos" || cart.kind === "retry") {
@@ -185,7 +187,8 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
   }
   const reading = readStock(response.value.body, sku)
   if (reading) {
-    noteWatch(ctx, reading)
+    reading.imageUrl = productImage(response.value.body) || undefined
+    noteWatch(ctx, { ...reading, url: page })
     return { kind: "ok", value: reading }
   }
   if (response.value.status === 404) {

@@ -210,8 +210,14 @@ export interface PublicTask {
   group: string
   /** Lower numbers appear first. Missing values sort with the newest tasks. */
   rank?: number
-  /** Optional https image the user attached. Empty shows the store mark. */
+  /** Optional https image. A monitor can fill this from the store's product payload. */
   imageUrl?: string
+  /** Watch stock and notify. Never add to cart. */
+  monitorOnly?: boolean
+  /** Last shared stock-read time, in milliseconds. */
+  monitorMs?: number
+  /** Milliseconds from an in-stock reading to the add-to-cart call. */
+  detectToCartMs?: number
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -233,6 +239,7 @@ export interface TaskInput {
   testMode?: boolean
   group?: string
   imageUrl?: string
+  monitorOnly?: boolean
 }
 
 export interface Settings {
@@ -400,6 +407,10 @@ export interface Notice {
   profileName: string
   detail: string
   orderId?: string
+  price?: number | null
+  url?: string
+  imageUrl?: string
+  inStock?: boolean
 }
 
 export interface TaskTemplate {
@@ -701,8 +712,11 @@ export interface AnalyticsReport {
     blocked: number
     blockRate: number
     avgMs: number
-    byStore: { store: StoreId; samples: number; blocked: number; blockRate: number; avgMs: number }[]
+    p50Ms: number
+    p95Ms: number
+    byStore: { store: StoreId; samples: number; blocked: number; blockRate: number; avgMs: number; p50Ms: number; p95Ms: number }[]
   }
+  stockLog: { store: StoreId; sku: string; at: number; price: number | null; title: string; kind?: string; imageUrl?: string; url?: string }[]
   restockHints: { store: StoreId; sku: string; hourAst: number; samples: number; warmupMin: number; detail: string }[]
 }
 

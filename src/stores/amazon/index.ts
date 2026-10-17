@@ -1,5 +1,6 @@
 import { attachSession } from "../../engine/block-recovery"
-import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
@@ -118,6 +119,7 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
+    if (await holdMonitorOnly(ctx)) continue
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, asin, reading)
     if (cart.kind === "oos") {
@@ -174,7 +176,8 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Pr
     productHtml = page.value.body
   }
   const reading = readStock(productHtml, offerHtml, asin)
-  noteWatch(ctx, reading)
+  reading.imageUrl = productImage(productHtml) || productImage(offerHtml) || undefined
+  noteWatch(ctx, { ...reading, url: productUrl(asin) })
   return { kind: "ok", value: reading }
 }
 

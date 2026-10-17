@@ -17,6 +17,7 @@ export interface StockReading {
   msrp?: number
   seller?: string
   reason: string
+  imageUrl?: string
 }
 
 const SHIP_BUTTONS = new Set(["ADD_TO_CART", "PRE_ORDER", "PRE_ORDER_MOBILE"])

@@ -52,6 +52,9 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
     `Profile: ${notice.profileName}`,
     redact(notice.detail)
   ]
+  if (notice.price !== null && notice.price !== undefined) lines.push(`Price: $${notice.price.toFixed(2)}`)
+  if (notice.inStock !== undefined) lines.push(`Stock: ${notice.inStock ? "in stock" : "out of stock"}`)
+  if (notice.url) lines.push(notice.url)
   if (notice.orderId) lines.push(`Order: ${notice.orderId}`)
   if (notice.kind === "paused" && notice.profileName !== "Alerts") {
     lines.push("Update the account session in TCGAIO, then resume the task.")
@@ -73,7 +76,9 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
       {
         title,
         description: lines.join("\n").slice(0, 1800),
-        color
+        color,
+        url: notice.url || undefined,
+        thumbnail: notice.imageUrl ? { url: notice.imageUrl } : undefined
       }
     ]
   }
