@@ -14,6 +14,7 @@ import { MailPanel } from "./src/MailPanel"
 import { ModulePanel } from "./src/ModulePanel"
 import { mailText } from "../src/shared/mail-text"
 import { moduleText } from "../src/shared/module-settings"
+import { taskText } from "../src/shared/task-role"
 import { updateWidget } from "./src/widget"
 import { colors, isActive, palette, STATUS_LABEL } from "./src/theme"
 import { countdown } from "../src/shared/clock"
@@ -34,8 +35,46 @@ const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
   accountId: "",
   proxyGroupId: null,
   confirmPurchase: false,
-  testMode: false
+  testMode: false,
+  kind: "checkout",
+  keywords: "",
+  priceCap: null,
+  webhook: "",
+  activeHours: "",
+  linkedCheckoutIds: [],
+  checkoutDelayMs: null,
+  maxPrice: null,
+  startMode: "builtin",
+  jitterPct: null
 })
+
+function draftFrom(item: PhoneTask): PhoneTaskDraft {
+  return {
+    id: item.id,
+    store: item.store,
+    sku: item.sku,
+    quantity: item.quantity,
+    profileId: item.profileId,
+    accountId: item.accountId,
+    proxyGroupId: item.proxyGroupId,
+    confirmPurchase: item.confirmPurchase,
+    testMode: item.testMode,
+    group: item.group,
+    kind: item.kind === "monitor" || item.monitorOnly ? "monitor" : "checkout",
+    keywords: item.keywords ?? "",
+    priceCap: item.priceCap ?? null,
+    webhook: item.webhook ?? "",
+    activeHours: item.activeHours ?? "",
+    linkedCheckoutIds: item.linkedCheckoutIds ?? [],
+    checkoutDelayMs: item.checkoutDelayMs ?? null,
+    maxPrice: item.maxPrice ?? null,
+    startMode: item.startMode ?? (item.kind === "monitor" ? "manual" : "builtin"),
+    linkedMonitorId: item.linkedMonitorId ?? null,
+    jitterPct: item.jitterPct ?? null,
+    monitorProxyGroupId: item.monitorProxyGroupId ?? null,
+    overrides: item.overrides
+  }
+}
 
 export default function App() {
   const session = useRef<PhoneSession | null>(null)
@@ -184,7 +223,6 @@ export default function App() {
     }
   }
 
-  const storeAccounts = snap?.accounts.filter((account) => account.store === draft?.store) ?? []
   const theme = useMemo(() => palette(snap?.brand), [snap?.brand?.theme, snap?.brand?.accent])
   const styles = useMemo(() => createStyles(theme), [theme])
   const activeCount = (snap?.tasks ?? []).filter((task) => isActive(task.status)).length
@@ -256,68 +294,7 @@ export default function App() {
           ) : screen === "stats" ? (
             <StatsPanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
           ) : screen === "edit" && draft ? (
-            <View style={styles.card}>
-              <Text style={styles.h2}>{draft.id ? "Edit task" : "New task"}</Text>
-              <Text style={styles.label}>Store</Text>
-              <View style={styles.choices}>
-                {(snap?.stores ?? []).map((store) => (
-                  <Pressable key={store.id} style={[styles.choice, draft.store === store.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, store: store.id, accountId: "" })}>
-                    <Text style={styles.choiceText}>{store.name}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.label}>SKU or URL</Text>
-              <TextInput style={styles.input} value={draft.sku} onChangeText={(sku) => setDraft({ ...draft, sku })} autoCapitalize="none" placeholderTextColor={theme.muted} />
-              <Text style={styles.label}>Quantity</Text>
-              <TextInput style={styles.input} value={String(draft.quantity)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, quantity: Number(value) || 1 })} />
-              <Text style={styles.label}>Profile</Text>
-              <View style={styles.choices}>
-                {(snap?.profiles ?? []).map((profile) => (
-                  <Pressable key={profile.id} style={[styles.choice, draft.profileId === profile.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, profileId: profile.id })}>
-                    <Text style={styles.choiceText}>{profile.name} · {profile.last4}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.label}>Account</Text>
-              <View style={styles.choices}>
-                {storeAccounts.map((account) => (
-                  <Pressable key={account.id} style={[styles.choice, draft.accountId === account.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, accountId: account.id })}>
-                    <Text style={styles.choiceText}>{account.label} · {account.usernameMasked}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.label}>Proxy group</Text>
-              <View style={styles.choices}>
-                <Pressable style={[styles.choice, draft.proxyGroupId === null && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: null })}>
-                  <Text style={styles.choiceText}>Direct</Text>
-                </Pressable>
-                {(snap?.proxyGroups ?? []).map((group) => (
-                  <Pressable key={group.id} style={[styles.choice, draft.proxyGroupId === group.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: group.id })}>
-                    <Text style={styles.choiceText}>{group.name} ({group.count})</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <View style={styles.switchRow}>
-                <Text style={styles.p}>Test mode. Runs the real flow and stops before place order.</Text>
-                <Switch value={draft.testMode === true} onValueChange={(testMode) => setDraft({ ...draft, testMode })} trackColor={{ true: theme.accent, false: theme.line }} />
-              </View>
-              <View style={styles.switchRow}>
-                <Text style={styles.p}>This task may place a real shipping order. Ignored while test mode is on.</Text>
-                <Switch value={draft.confirmPurchase} onValueChange={(confirmPurchase) => setDraft({ ...draft, confirmPurchase })} trackColor={{ true: theme.accent, false: theme.line }} />
-              </View>
-              <View style={styles.row}>
-                <Pressable style={styles.primary} onPress={() => void run(async () => {
-                  const result = await session.current!.saveTask(draft)
-                  if (result.ok) {
-                    setScreen("dash")
-                    setDraft(null)
-                    if (result.task) setSelected(result.task.id)
-                  }
-                  return result
-                })}><Text style={styles.primaryText}>Save</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={() => { setScreen("dash"); setDraft(null) }}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
-              </View>
-            </View>
+            <TaskEditor draft={draft} snap={snap} setDraft={setDraft} session={session.current} run={run} onSaved={(id) => { setScreen("dash"); setDraft(null); if (id) setSelected(id) }} onCancel={() => { setScreen("dash"); setDraft(null) }} />
           ) : (
             <>
               {snap?.testMode ? <Text style={styles.p}>Global test mode is on. Every task stops before place order.</Text> : null}
@@ -361,7 +338,7 @@ export default function App() {
                     <View style={[styles.mark, { backgroundColor: theme.accent }]}><Text style={styles.markText}>{LETTER[item.store] ?? "S"}</Text></View>
                     {item.imageUrl?.startsWith("https://") ? <Image source={{ uri: item.imageUrl }} style={styles.photo} accessibilityIgnoresInvertColors /> : null}
                     <Text style={styles.h2}>{item.storeName}</Text>
-                    {item.monitorOnly ? <Text style={styles.pill}>MONITOR</Text> : null}
+                    {item.kind === "monitor" || item.monitorOnly ? <Text style={styles.pill}>MONITOR</Text> : null}
                     {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
                     <Text style={styles.pill}>{STATUS_LABEL[item.status] ?? item.status}</Text>
                   </View>
@@ -369,20 +346,7 @@ export default function App() {
                   <Text style={styles.p}>Qty {item.quantity} · {item.profileName} · {item.accountLabel} · {item.proxyGroupName ?? "Direct"}</Text>
                   {typeof item.monitorMs === "number" ? <Text style={styles.p}>{item.monitorMs} ms{typeof item.detectToCartMs === "number" ? ` · ${item.detectToCartMs} ms to cart` : ""}</Text> : null}
                   {item.detail ? <Text style={styles.p}>{item.detail}</Text> : null}
-                  {selected === item.id ? <TaskDetail task={item} onRun={run} session={session.current} onEdit={() => {
-                    setDraft({
-                      id: item.id,
-                      store: item.store,
-                      sku: item.sku,
-                      quantity: item.quantity,
-                      profileId: item.profileId,
-                      accountId: item.accountId,
-                      proxyGroupId: item.proxyGroupId,
-                      confirmPurchase: item.confirmPurchase,
-                      testMode: item.testMode
-                    })
-                    setScreen("edit")
-                  }} /> : null}
+                  {selected === item.id ? <TaskDetail task={item} onRun={run} session={session.current} onEdit={() => { setDraft(draftFrom(item)); setScreen("edit") }} /> : null}
                 </Pressable>
                 </SwipeTask>
               ))}
@@ -394,6 +358,164 @@ export default function App() {
       ) : null}
     </View>
     </ThemeContext.Provider>
+  )
+}
+
+function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: {
+  draft: PhoneTaskDraft
+  snap: PhoneSnapshot | null
+  setDraft: (next: PhoneTaskDraft) => void
+  session: PhoneSession | null
+  run: (action: () => Promise<{ ok: boolean; error?: string; task?: PhoneTask }>) => Promise<{ ok: boolean; task?: PhoneTask } | undefined>
+  onSaved: (id?: string) => void
+  onCancel: () => void
+}) {
+  const { styles, colors: theme } = useTheme()
+  const lang = snap?.language === "es" ? "es" : "en"
+  const monitor = draft.kind === "monitor"
+  const live = Boolean(draft.id && isActive(snap?.tasks.find((task) => task.id === draft.id)?.status ?? "idle"))
+  const accounts = (snap?.accounts ?? []).filter((account) => account.store === draft.store)
+  const checkouts = (snap?.tasks ?? []).filter((task) => task.kind !== "monitor" && task.id !== draft.id)
+  const modes = ["manual", "scheduled", "monitor", "restock", "builtin"] as const
+  return (
+    <View style={styles.card}>
+      <Text style={styles.h2}>{draft.id ? (lang === "es" ? "Editar tarea" : "Edit task") : (lang === "es" ? "Nueva tarea" : "New task")}</Text>
+      <Text style={styles.p}>{monitor ? taskText(lang, "hintMonitor") : taskText(lang, "hintCheckout")}</Text>
+      {live ? <Text style={styles.p}>{taskText(lang, "live")}</Text> : null}
+      <Text style={styles.label}>{taskText(lang, "kind")}</Text>
+      <View style={styles.choices}>
+        {(["monitor", "checkout"] as const).map((kind) => (
+          <Pressable key={kind} disabled={live} style={[styles.choice, draft.kind === kind && styles.choiceOn]} onPress={() => setDraft({ ...draft, kind, confirmPurchase: kind === "monitor" ? false : draft.confirmPurchase, startMode: kind === "monitor" ? "manual" : draft.startMode ?? "builtin" })}>
+            <Text style={styles.choiceText}>{taskText(lang, kind)}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.label}>{taskText(lang, "store")}</Text>
+      <View style={styles.choices}>
+        {(snap?.stores ?? []).map((store) => (
+          <Pressable key={store.id} disabled={live} style={[styles.choice, draft.store === store.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, store: store.id, accountId: "" })}>
+            <Text style={styles.choiceText}>{store.name}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.label}>{taskText(lang, "sku")}</Text>
+      <TextInput style={styles.input} editable={!live} value={draft.sku} onChangeText={(sku) => setDraft({ ...draft, sku })} autoCapitalize="none" placeholderTextColor={theme.muted} />
+      <Text style={styles.label}>{taskText(lang, "keywords")}</Text>
+      <TextInput style={styles.input} value={draft.keywords ?? ""} onChangeText={(keywords) => setDraft({ ...draft, keywords })} autoCapitalize="none" placeholderTextColor={theme.muted} />
+      {monitor ? (
+        <>
+          <Text style={styles.label}>{taskText(lang, "proxy")}</Text>
+          <View style={styles.choices}>
+            <Pressable disabled={live} style={[styles.choice, !draft.monitorProxyGroupId && styles.choiceOn]} onPress={() => setDraft({ ...draft, monitorProxyGroupId: null, proxyGroupId: null })}>
+              <Text style={styles.choiceText}>{taskText(lang, "direct")}</Text>
+            </Pressable>
+            {(snap?.proxyGroups ?? []).map((group) => (
+              <Pressable key={group.id} disabled={live} style={[styles.choice, draft.monitorProxyGroupId === group.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, monitorProxyGroupId: group.id, proxyGroupId: null })}>
+                <Text style={styles.choiceText}>{group.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>{taskText(lang, "priceCap")}</Text>
+          <TextInput style={styles.input} value={draft.priceCap == null ? "" : String(draft.priceCap)} keyboardType="decimal-pad" onChangeText={(value) => setDraft({ ...draft, priceCap: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "webhook")}</Text>
+          <TextInput style={styles.input} value={draft.webhook ?? ""} onChangeText={(webhook) => setDraft({ ...draft, webhook })} autoCapitalize="none" placeholder="https://discord.com/api/webhooks/" placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "hours")}</Text>
+          <TextInput style={styles.input} value={draft.activeHours ?? ""} onChangeText={(activeHours) => setDraft({ ...draft, activeHours })} autoCapitalize="none" placeholder="09:00-09:30" placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "links")}</Text>
+          <View style={styles.choices}>
+            {checkouts.map((task) => {
+              const on = (draft.linkedCheckoutIds ?? []).includes(task.id)
+              return (
+                <Pressable key={task.id} style={[styles.choice, on && styles.choiceOn]} onPress={() => {
+                  const ids = new Set(draft.linkedCheckoutIds ?? [])
+                  if (on) ids.delete(task.id)
+                  else ids.add(task.id)
+                  setDraft({ ...draft, linkedCheckoutIds: [...ids] })
+                }}>
+                  <Text style={styles.choiceText}>{task.sku}</Text>
+                </Pressable>
+              )
+            })}
+          </View>
+        </>
+      ) : (
+        <>
+          <Text style={styles.label}>{taskText(lang, "quantity")}</Text>
+          <TextInput style={styles.input} editable={!live} value={String(draft.quantity)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, quantity: Number(value) || 1 })} placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "profile")}</Text>
+          <View style={styles.choices}>
+            {(snap?.profiles ?? []).map((profile) => (
+              <Pressable key={profile.id} disabled={live} style={[styles.choice, draft.profileId === profile.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, profileId: profile.id })}>
+                <Text style={styles.choiceText}>{profile.name} · {profile.last4}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>{taskText(lang, "account")}</Text>
+          <View style={styles.choices}>
+            {accounts.map((account) => (
+              <Pressable key={account.id} disabled={live} style={[styles.choice, draft.accountId === account.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, accountId: account.id })}>
+                <Text style={styles.choiceText}>{account.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>{taskText(lang, "checkoutProxy")}</Text>
+          <View style={styles.choices}>
+            <Pressable disabled={live} style={[styles.choice, draft.proxyGroupId === null && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: null })}>
+              <Text style={styles.choiceText}>{taskText(lang, "direct")}</Text>
+            </Pressable>
+            {(snap?.proxyGroups ?? []).map((group) => (
+              <Pressable key={group.id} disabled={live} style={[styles.choice, draft.proxyGroupId === group.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: group.id })}>
+                <Text style={styles.choiceText}>{group.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>{taskText(lang, "checkoutDelay")}</Text>
+          <TextInput style={styles.input} value={draft.checkoutDelayMs == null ? "" : String(draft.checkoutDelayMs)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, checkoutDelayMs: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "maxPrice")}</Text>
+          <TextInput style={styles.input} value={draft.maxPrice == null ? "" : String(draft.maxPrice)} keyboardType="decimal-pad" onChangeText={(value) => setDraft({ ...draft, maxPrice: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "startMode")}</Text>
+          <View style={styles.choices}>
+            {modes.map((mode) => (
+              <Pressable key={mode} disabled={live} style={[styles.choice, (draft.startMode ?? "builtin") === mode && styles.choiceOn]} onPress={() => setDraft({ ...draft, startMode: mode })}>
+                <Text style={styles.choiceText}>{taskText(lang, mode === "monitor" ? "monitorStart" : mode)}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.switchRow}>
+            <Text style={styles.p}>{taskText(lang, "testMode")}</Text>
+            <Switch value={draft.testMode === true} disabled={live && draft.testMode === true} onValueChange={(testMode) => setDraft({ ...draft, testMode })} trackColor={{ true: theme.accent, false: theme.line }} />
+          </View>
+          <View style={styles.switchRow}>
+            <Text style={styles.p}>{taskText(lang, "confirm")}</Text>
+            <Switch value={draft.confirmPurchase} disabled={live && !draft.confirmPurchase} onValueChange={(confirmPurchase) => setDraft({ ...draft, confirmPurchase })} trackColor={{ true: theme.accent, false: theme.line }} />
+          </View>
+        </>
+      )}
+      <Text style={styles.label}>{taskText(lang, "monitorDelay")}</Text>
+      <TextInput style={styles.input} value={draft.overrides?.monitorDelayMs == null ? "" : String(draft.overrides.monitorDelayMs)} keyboardType="number-pad" onChangeText={(value) => {
+        const overrides = { ...draft.overrides }
+        if (!value.trim()) delete overrides.monitorDelayMs
+        else overrides.monitorDelayMs = Math.round(Number(value))
+        setDraft({ ...draft, overrides })
+      }} placeholder={taskText(lang, "inherit")} placeholderTextColor={theme.muted} />
+      <Text style={styles.label}>{taskText(lang, "retryDelay")}</Text>
+      <TextInput style={styles.input} value={draft.overrides?.retryDelayMs == null ? "" : String(draft.overrides.retryDelayMs)} keyboardType="number-pad" onChangeText={(value) => {
+        const overrides = { ...draft.overrides }
+        if (!value.trim()) delete overrides.retryDelayMs
+        else overrides.retryDelayMs = Math.round(Number(value))
+        setDraft({ ...draft, overrides })
+      }} placeholder={taskText(lang, "inherit")} placeholderTextColor={theme.muted} />
+      <Text style={styles.label}>{taskText(lang, "jitter")}</Text>
+      <TextInput style={styles.input} value={draft.jitterPct == null ? "" : String(draft.jitterPct)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, jitterPct: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
+      <View style={styles.row}>
+        <Pressable style={styles.primary} onPress={() => void run(async () => {
+          const result = await session!.saveTask(draft)
+          if (result.ok) onSaved(result.task?.id)
+          return result
+        })}><Text style={styles.primaryText}>{lang === "es" ? "Guardar" : "Save"}</Text></Pressable>
+        <Pressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{lang === "es" ? "Cancelar" : "Cancel"}</Text></Pressable>
+      </View>
+    </View>
   )
 }
 

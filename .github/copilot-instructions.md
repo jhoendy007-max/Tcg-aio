@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.12 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.13 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -66,6 +66,18 @@ Self-healing runs only while autopilot is on. A task with no log for `stuckMinut
 Windows launch at boot is opt-in (`launchOnBoot`). A clean quit marks running tasks stopped. A crash leaves them active, and the next launch resumes them when `resumeOnLaunch` is on. An uncaught error can relaunch the process at most once a minute.
 
 Order rows are stored after a win. A later GET of that account's order page, plus mail from Settings, can mark the order cancelled or record a tracking number.
+
+## Tasks
+
+A task is either a monitor or a checkout. `src/shared/task-role.ts` is the source of that split. An older task with `monitorOnly` set loads as a monitor. Every other older task loads as a checkout with start mode `builtin`, which is the previous watch-then-cart loop.
+
+A monitor stores the SKU or URL, keywords, monitor and retry delays, jitter, proxy group, ZIP, price cap, sold-by filter, webhook, active hours, and the checkout tasks it may start. It never adds to cart: `monitorOnly` stays true, confirm purchase stays off, and the profile and account are cleared. Active hours are Atlantic time (`America/Puerto_Rico`), one `09:00-09:30` window per line. A blank list means always. One monitor can start many checkouts whose start mode is `monitor` and whose id is linked.
+
+A checkout stores the SKU or URL, quantity, profile, account, checkout proxy group, checkout delay, retry delay, max retries, add-to-cart mode, test mode, and max price. Start mode is `manual`, `scheduled`, `monitor`, `restock`, or `builtin`. `builtin` runs the checkout's own monitor when the user starts it. `scheduled` waits for a drop. `monitor` waits for the linked monitor. `restock` starts when an in-stock alert matches the SKU, or the keywords when the SKU differs. Max price is checked again before a place-order request. Test mode still refuses that request.
+
+Delays, jitter, ZIP, sold-by, add-to-cart mode, and max retries stay in `overrides`, so the task wins over the store page, which wins over global Settings. Global test mode still forces every checkout to stay a test. While a task is running, store, SKU, type, profile, account, proxy, quantity, start mode, turning confirm purchase on, and turning test mode off are rejected. Keywords, caps, hours, links, webhook, checkout delay, jitter, and overrides can change and the running loop reads them on the next sleep. Bulk edit follows the same split. Duplicate copies the role onto a new idle task.
+
+The desktop Tasks page and the phone editor both follow `Settings.language` (`en` or `es`). `PHONE_PROTOCOL` stays 1. A monitor draft may omit the profile and account.
 
 ## Store settings
 

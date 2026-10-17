@@ -16,6 +16,7 @@ import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent
 import { vaultFlag } from "./vault"
 import { parseAstLocal } from "./time"
 import { cleanModuleRecord, cleanTaskOverrides, parseModulePreset } from "../shared/module-settings"
+import { cleanRole, normalizeRole, structuralChange } from "../shared/task-role"
 import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
 import { redact } from "../shared/redact"
 import type {
@@ -555,9 +556,27 @@ export class Database {
 
   saveTask(input: TaskInput): PublicTask {
     const existing = input.id ? this.requireTask(input.id) : undefined
+    if (existing && isActiveStatus(existing.status)) {
+      const blocked = structuralChange(existing, input)
+      if (blocked) throw new AppError(blocked)
+      const role = cleanRole({ ...existing, ...input, store: existing.store, sku: existing.sku, quantity: existing.quantity, profileId: existing.profileId, accountId: existing.accountId }, existing)
+      const next: PublicTask = {
+        ...existing,
+        ...role,
+        monitorOnly: role.kind === "monitor",
+        group: input.group === undefined ? existing.group : input.group.trim().slice(0, 40),
+        overrides: cleanTaskOverrides(existing.store, input.overrides === undefined ? existing.overrides : input.overrides),
+        testMode: input.testMode === undefined ? existing.testMode : input.testMode === true || existing.testMode
+      }
+      this.data.tasks = this.data.tasks.map((item) => (item.id === next.id ? next : item))
+      this.syncLinks(next)
+      this.flush()
+      return cloneTask(next)
+    }
     const task = this.taskFrom(input, existing)
     if (existing) this.data.tasks = this.data.tasks.map((item) => (item.id === task.id ? task : item))
     else this.data.tasks.unshift(task)
+    this.syncLinks(task)
     this.flush()
     return cloneTask(task)
   }
@@ -624,37 +643,98 @@ export class Database {
         errors.push({ id, error: "Task not found." })
         continue
       }
-      if (isActiveStatus(task.status)) {
-        errors.push({ id, error: "Stop the task before editing it." })
-        continue
+      try {
+        const roleNow = normalizeRole(task)
+        const active = isActiveStatus(task.status)
+        let nextQuantity = task.quantity
+        let profileId = task.profileId
+        let accountId = task.accountId
+        let proxyGroupId = task.proxyGroupId
+        let confirmPurchase = task.confirmPurchase
+        let testMode = task.testMode
+        let structuralError = ""
+        const monitorFields = Boolean(input.profileId) || Boolean(input.accountId) || input.confirmPurchase !== undefined || input.proxyGroupId !== undefined
+        if (roleNow.kind === "monitor" && monitorFields) structuralError = "A monitor task does not use a profile, account, or checkout proxy."
+        const wantsStructure = input.quantity !== undefined || monitorFields || input.testMode === false
+        if (!structuralError && active && wantsStructure) structuralError = "Stop the task before changing the quantity, profile, account, or proxy."
+        if (!structuralError && roleNow.kind === "checkout") {
+          if (account && account.store !== task.store) throw new AppError("Choose an account for the same store as the task.")
+          if (quantity !== undefined) nextQuantity = quantity
+          if (input.profileId) profileId = input.profileId
+          if (account) accountId = account.id
+          if (input.proxyGroupId !== undefined) proxyGroupId = input.proxyGroupId || null
+          if (input.confirmPurchase !== undefined) confirmPurchase = input.confirmPurchase
+          if (input.testMode === false) testMode = false
+        } else if (!structuralError && quantity !== undefined) {
+          nextQuantity = quantity
+        }
+        if (input.testMode === true) testMode = true
+        const role = cleanRole({
+          ...task,
+          quantity: nextQuantity,
+          profileId,
+          accountId,
+          proxyGroupId,
+          confirmPurchase,
+          testMode,
+          keywords: input.keywords === undefined ? task.keywords : input.keywords,
+          priceCap: input.priceCap === undefined ? task.priceCap : input.priceCap,
+          webhook: input.webhook === undefined ? task.webhook : input.webhook,
+          activeHours: input.activeHours === undefined ? task.activeHours : input.activeHours,
+          checkoutDelayMs: input.checkoutDelayMs === undefined ? task.checkoutDelayMs : input.checkoutDelayMs,
+          maxPrice: input.maxPrice === undefined ? task.maxPrice : input.maxPrice,
+          jitterPct: input.jitterPct === undefined ? task.jitterPct : input.jitterPct
+        }, task)
+        let overrides = task.overrides
+        if (input.monitorDelayMs !== undefined || input.retryDelayMs !== undefined) {
+          const next = { ...task.overrides }
+          if (input.monitorDelayMs !== undefined) {
+            if (!input.monitorDelayMs) delete next.monitorDelayMs
+            else next.monitorDelayMs = Math.round(input.monitorDelayMs)
+          }
+          if (input.retryDelayMs !== undefined) {
+            if (!input.retryDelayMs) delete next.retryDelayMs
+            else next.retryDelayMs = Math.round(input.retryDelayMs)
+          }
+          overrides = cleanTaskOverrides(task.store, next)
+        }
+        task.quantity = nextQuantity
+        task.profileId = profileId
+        task.accountId = accountId
+        task.proxyGroupId = proxyGroupId
+        task.confirmPurchase = confirmPurchase
+        task.testMode = testMode
+        task.group = input.group === undefined ? task.group : input.group.trim().slice(0, 40)
+        task.monitorOnly = role.kind === "monitor"
+        task.overrides = overrides
+        Object.assign(task, role)
+        if (structuralError) errors.push({ id, error: structuralError })
+        updated.push(id)
+      } catch (err) {
+        errors.push({ id, error: err instanceof Error ? err.message : "Could not edit the task." })
       }
-      if (account && account.store !== task.store) {
-        errors.push({ id, error: "Choose an account for the same store as the task." })
-        continue
-      }
-      if (quantity !== undefined) task.quantity = quantity
-      if (input.profileId) task.profileId = input.profileId
-      if (account) task.accountId = account.id
-      if (input.proxyGroupId !== undefined) task.proxyGroupId = input.proxyGroupId || null
-      if (input.confirmPurchase !== undefined) task.confirmPurchase = input.confirmPurchase
-      if (input.testMode !== undefined) task.testMode = input.testMode
-      if (input.group !== undefined) task.group = input.group.trim().slice(0, 40)
-      updated.push(id)
     }
     if (updated.length) this.flush()
     return { updated, errors }
   }
 
   private taskFrom(input: TaskInput, existing: PublicTask | undefined): PublicTask {
-    if (existing && isActiveStatus(existing.status)) throw new AppError("Stop the task before editing it.")
+    const role = cleanRole(input, existing)
     const store = assertStore(input.store)
     const sku = input.sku.trim()
-    if (!sku) throw new AppError("Product SKU or URL is required.")
-    const quantity = Math.round(Number(input.quantity))
+    if (!sku && !role.keywords) throw new AppError("Product SKU, URL, or keywords are required.")
+    const quantity = role.kind === "monitor" ? Math.max(1, Math.min(12, Math.round(Number(input.quantity) || 1))) : Math.round(Number(input.quantity))
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
-    this.requireProfile(input.profileId)
-    const account = this.requireAccount(input.accountId)
-    if (account.store !== store) throw new AppError("Choose an account for the same store as the task.")
+    let profileId = input.profileId || ""
+    let accountId = input.accountId || ""
+    if (role.kind === "checkout") {
+      this.requireProfile(profileId)
+      const account = this.requireAccount(accountId)
+      if (account.store !== store) throw new AppError("Choose an account for the same store as the task.")
+    } else {
+      profileId = ""
+      accountId = ""
+    }
     if (input.proxyGroupId) this.getProxyGroup(input.proxyGroupId)
     if (input.monitorProxyGroupId) this.getProxyGroup(input.monitorProxyGroupId)
     const ranks = this.data.tasks.map((task) => task.rank ?? 0)
@@ -663,23 +743,40 @@ export class Database {
       store,
       sku,
       quantity,
-      profileId: input.profileId,
-      accountId: input.accountId,
-      proxyGroupId: input.proxyGroupId || null,
-      monitorProxyGroupId: input.monitorProxyGroupId === undefined ? existing?.monitorProxyGroupId ?? null : input.monitorProxyGroupId || null,
-      confirmPurchase: Boolean(input.confirmPurchase),
+      profileId,
+      accountId,
+      proxyGroupId: role.kind === "monitor" ? null : input.proxyGroupId || null,
+      monitorProxyGroupId: role.kind === "monitor"
+        ? input.monitorProxyGroupId || input.proxyGroupId || null
+        : input.monitorProxyGroupId === undefined ? existing?.monitorProxyGroupId ?? null : input.monitorProxyGroupId || null,
+      confirmPurchase: role.kind === "monitor" ? false : Boolean(input.confirmPurchase),
       testMode: input.testMode === true,
       group: (input.group ?? existing?.group ?? "").trim().slice(0, 40),
       rank: existing?.rank ?? (ranks.length ? Math.min(...ranks) - 1 : 0),
       imageUrl: input.imageUrl === undefined ? existing?.imageUrl ?? "" : cleanImageUrl(input.imageUrl),
-      monitorOnly: input.monitorOnly === undefined ? existing?.monitorOnly === true : input.monitorOnly === true,
+      monitorOnly: role.kind === "monitor",
       overrides: cleanTaskOverrides(store, input.overrides === undefined ? existing?.overrides : input.overrides),
+      ...role,
       status: existing?.status === "paused" ? "paused" : "idle",
       detail: existing?.detail ?? "",
       logs: existing?.logs ?? [],
       createdAt: existing?.createdAt ?? Date.now(),
       startedAt: existing?.startedAt,
       finishedAt: existing?.finishedAt
+    }
+  }
+
+  private syncLinks(task: PublicTask): void {
+    if (task.kind !== "monitor") return
+    const linked = new Set(task.linkedCheckoutIds ?? [])
+    for (const other of this.data.tasks) {
+      if (other.id === task.id || other.kind === "monitor") continue
+      if (linked.has(other.id)) {
+        other.linkedMonitorId = task.id
+        if (!other.startMode || other.startMode === "builtin" || other.startMode === "manual") other.startMode = "monitor"
+      } else if (other.linkedMonitorId === task.id) {
+        other.linkedMonitorId = null
+      }
     }
   }
 
@@ -1747,7 +1844,8 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 }
 
 function cloneTask(task: PublicTask): PublicTask {
-  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, overrides: task.overrides ? { ...task.overrides } : undefined, logs: task.logs.map((line) => ({ ...line })) }
+  const role = normalizeRole(task)
+  return { ...task, ...role, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: role.kind === "monitor" || task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, overrides: task.overrides ? { ...task.overrides } : undefined, logs: task.logs.map((line) => ({ ...line })) }
 }
 
 function emptyUpdates(): UpdateFile {

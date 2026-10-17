@@ -9,7 +9,7 @@ Test mode, from Settings or a task, runs the real monitor, cart, address, shippi
 ## What you get
 
 - **Home** — active tasks, today's checkouts, spend, success rate, and proxy and session health.
-- **Tasks** — store mark, product photo from the monitor payload, live monitor time in milliseconds, search, filters, drop groups, drag reorder, and a live status log. A monitor-only task never carts. Compact or detailed. Dark, light, and accent colors, plus a name and logo, are in Settings.
+- **Tasks** — separate monitor and checkout tasks. A monitor watches a SKU, URL, or keywords and can start several linked checkouts. A checkout can start by hand, on a schedule, from a monitor, from a restock alert, or with its own monitor. Delays, caps, hours, and the webhook can change while a task is running. The same editor is on the phone, in English or Spanish. Compact or detailed. Dark, light, and accent colors, plus a name and logo, are in Settings.
 - **Setup** — a first-run wizard for a profile, an account, optional proxies, and one test-mode task. It stays hidden once you have a profile or an account, or after you skip it.
 - **Profiles** — shipping and billing. Card number and CVV are encrypted locally.
 - **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.
@@ -69,7 +69,7 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai. It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.12.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.13.zip` next to the Windows installer and the phone APK.
 
 The Android home screen can show a TCGAIO widget with wins and active tasks. iOS widgets are not in this beta. The phone still follows the desktop theme, and each task can be swiped or tapped.
 

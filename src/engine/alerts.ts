@@ -1,6 +1,7 @@
 import { storeName } from "../shared/stores"
+import { restockCheckouts } from "../shared/task-role"
 import { APP_VERSION } from "../shared/version"
-import type { AlertsView, AlertLog, KeywordWatch, Notice, ProxyEndpoint, RestockRule, StoreId } from "../shared/types"
+import { isActiveStatus, type AlertsView, type AlertLog, type KeywordWatch, type Notice, type ProxyEndpoint, type RestockRule, type StoreId } from "../shared/types"
 import type { Database } from "./database"
 import type { HttpClient } from "./http"
 import { isListingBlock, listingHeaders, listingSearchUrl, parseListings, type Listing } from "./listings"
@@ -177,6 +178,7 @@ export class AlertService {
       const launched = await this.launchTemplate(signal, source)
       if (launched) hits.push(launched)
     }
+    if (signal.inStock) hits.push(...this.startRestockTasks(signal, source))
     if (!hits.length) this.log(source, signal, "No rule matched.")
     this.emitChange()
     return hits
@@ -379,6 +381,27 @@ export class AlertService {
       : `Watching ${storeName(watch.store)}. No new match.`
     this.db.patchWatch(watch.id, { status: "watching", detail, seenSkus: seen.slice(-300) })
     this.emitChange()
+  }
+
+  private startRestockTasks(signal: RestockSignal, source: AlertLog["source"]): IngestHit[] {
+    const runner = this.getRunner()
+    if (!runner) return []
+    const hits: IngestHit[] = []
+    const matches = restockCheckouts(this.db.listTasks(), signal, (status) => isActiveStatus(status))
+    for (const task of matches) {
+      if (runner.isRunning(task.id)) continue
+      try {
+        runner.start(task.id)
+        const reason = "Started because this checkout waits for a restock alert."
+        hits.push({ rule: "Restock", action: "start", reason, taskId: task.id })
+        this.log(source, signal, reason)
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : "The checkout did not start."
+        hits.push({ rule: "Restock", action: "skip", reason, taskId: task.id })
+        this.log(source, signal, reason)
+      }
+    }
+    return hits
   }
 
   private async launchTemplate(signal: RestockSignal, source: AlertLog["source"]): Promise<IngestHit | null> {
