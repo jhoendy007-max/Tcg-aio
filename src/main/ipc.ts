@@ -8,6 +8,7 @@ import type { SessionBrowser } from "./session-window"
 import type { UpdateController } from "./auto-update"
 import { parseBulkTasks } from "../engine/bulk"
 import { defaultHttp } from "../engine/http"
+import { lookupResale } from "../engine/resale"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
@@ -19,7 +20,7 @@ import { completeMailSignIn } from "../engine/mail-oauth"
 import { imapCredential } from "../engine/mail-read"
 import { explainMailFailure, isMailHelpUrl } from "../shared/mail"
 import { AppError } from "../shared/errors"
-import type { ImapInput, MailboxInput, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
+import type { ImapInput, MailboxInput, ResaleQuery, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
 import { isStoreId } from "../shared/stores"
 import { listStores } from "../stores/registry"
 import type { StoreId } from "../shared/types"
@@ -249,6 +250,16 @@ export function registerIpc(
     return { id }
   })
   handle(channels.ordersList, () => db.listOrders())
+  handle(channels.resaleQuote, (input: ResaleQuery) => {
+    if (!input || typeof input.title !== "string" || !input.title.trim()) throw new AppError("Enter the product name from the win.")
+    return lookupResale(defaultHttp, {
+      title: input.title,
+      cost: typeof input.cost === "number" ? input.cost : null,
+      quantity: typeof input.quantity === "number" ? input.quantity : 1,
+      feePct: typeof input.feePct === "number" ? input.feePct : 0,
+      tcgProductId: typeof input.tcgProductId === "string" ? input.tcgProductId : ""
+    })
+  })
   handle(channels.imapGet, () => db.imapView())
   handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
   handle(channels.mailboxesGet, () => db.listMailboxes())

@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.14 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.15 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -38,6 +38,10 @@ GameStop, Barnes & Noble, Costco, and Sam's Club read the product page with the 
 TCGplayer Direct uses the public catalog: GET `mp-search-api.tcgplayer.com/v1/product/{id}/details` and POST that host's `/listings` search. A missing session may still make those catalog requests. Direct stock means `directListing` or `directInventory` on a listing with quantity. A Direct-enrolled seller with neither is not Direct stock. Sold by any seller accepts any listing with quantity. The module does not POST a cart or an order. Keyword search stays a GET of the public search URL. Do not reverse the cart microfrontend.
 
 Official US Pokémon Center preorders stay on the Pokémon Center module (`PRE_ORDER` / `PREORDER` are buyable). Official Premium Bandai preorders, including One Piece card-shop drops, stay on the Premium Bandai module (`PRE_ORDER` and `preOrderStatus` InProgress). Do not add a second store for those. Japan Pokémon Center is out of scope.
+
+## Resale
+
+Analytics has a Resale card for a recorded win. It GETs the public TCGplayer catalog when the user supplies a product id, and GETs the public eBay sold search for the product name. Profit is unit price times quantity, minus the cost the user entered, minus a fee percent the user entered. Zero fee percent does not invent marketplace fees. The card drafts a listing and can copy it. It does not POST to eBay, TCGplayer, or any other marketplace. A challenge page returns no prices.
 
 Shipping state is a two-letter US code from `src/engine/validate.ts`. Puerto Rico is not in that set. ZIP is `^\d{5}(?:-\d{4})?$`.
 
