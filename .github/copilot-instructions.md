@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.15 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.16 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -42,6 +42,8 @@ Official US Pokémon Center preorders stay on the Pokémon Center module (`PRE_O
 ## Resale
 
 Analytics has a Resale card for a recorded win. It GETs the public TCGplayer catalog when the user supplies a product id, and GETs the public eBay sold search for the product name. Profit is unit price times quantity, minus the cost the user entered, minus a fee percent the user entered. Zero fee percent does not invent marketplace fees. The card drafts a listing and can copy it. It does not POST to eBay, TCGplayer, or any other marketplace. A challenge page returns no prices.
+
+Inventory lists successful checkouts. Cost is the recorded price. Current value is a number the user saves on that purchase. Profit is value minus cost, and the total profit counts only purchases that have a value. Test runs are not purchases. Export writes `tcgaio-inventory.csv`. It does not fetch a live price for every row.
 
 Shipping state is a two-letter US code from `src/engine/validate.ts`. Puerto Rico is not in that set. ZIP is `^\d{5}(?:-\d{4})?$`.
 

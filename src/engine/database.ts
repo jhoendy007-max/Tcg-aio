@@ -1238,6 +1238,18 @@ export class Database {
     return (this.data.checkouts ?? []).map((record) => ({ ...record }))
   }
 
+  setCheckoutValue(id: string, marketValue: number | null): CheckoutRecord {
+    const record = this.data.checkouts?.find((item) => item.id === id && item.outcome === "success")
+    if (!record) throw new AppError("That purchase was not found.")
+    if (marketValue === null) record.marketValue = null
+    else {
+      if (!Number.isFinite(marketValue) || marketValue < 0 || marketValue > 100_000) throw new AppError("Current value must be a dollar amount.")
+      record.marketValue = Math.round(marketValue * 100) / 100
+    }
+    this.flush()
+    return { ...record }
+  }
+
   listTemplates(): TaskTemplate[] {
     return (this.data.templates ?? []).map((template) => ({ ...template, profileIds: [...template.profileIds], accountIds: [...template.accountIds] }))
   }
@@ -1882,7 +1894,11 @@ function normalizeSchedules(value: DropSchedule[] | undefined): DropSchedule[] {
 function normalizeCheckouts(value: CheckoutRecord[] | undefined): CheckoutRecord[] {
   if (!Array.isArray(value)) return []
   const outcomes = new Set<CheckoutOutcome>(["success", "failure", "paused", "tested"])
-  return value.filter((record) => record && typeof record.id === "string" && outcomes.has(record.outcome)).slice(0, 400)
+  return value.filter((record) => record && typeof record.id === "string" && outcomes.has(record.outcome)).slice(0, 400).map((record) => {
+    const marketValue = record.marketValue
+    if (typeof marketValue === "number" && Number.isFinite(marketValue) && marketValue >= 0) return { ...record, marketValue: Math.round(marketValue * 100) / 100 }
+    return { ...record, marketValue: null }
+  })
 }
 
 function normalizeRestock(value: RestockFile | undefined): RestockFile {

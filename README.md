@@ -69,9 +69,9 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on the stores in the catalog (Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer). It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.15.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.16.zip` next to the Windows installer and the phone APK.
 
-Analytics can check a win against the public TCGplayer market price and the public eBay sold search, show profit, and copy a listing draft. It does not post the listing.
+Analytics can check a win against the public TCGplayer market price and the public eBay sold search, show profit, and copy a listing draft. It does not post the listing. Inventory lists those purchases, the current value you enter, total profit, and a CSV export.
 
 The Android home screen can show a TCGAIO widget with wins and active tasks. iOS widgets are not in this beta. The phone still follows the desktop theme, and each task can be swiped or tapped.
 

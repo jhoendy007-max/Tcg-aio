@@ -2,7 +2,7 @@
   "expo": {
     "name": "TCGAIO",
     "slug": "tcgaio",
-    "version": "0.2.15",
+    "version": "0.2.16",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "com.tcgaio.phone",
-      "versionCode": 16,
+      "versionCode": 17,
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.CAMERA",

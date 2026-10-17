@@ -9,6 +9,7 @@ import type { UpdateController } from "./auto-update"
 import { parseBulkTasks } from "../engine/bulk"
 import { defaultHttp } from "../engine/http"
 import { lookupResale } from "../engine/resale"
+import { inventoryCsv, inventoryReport } from "../engine/inventory"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
@@ -260,6 +261,13 @@ export function registerIpc(
       tcgProductId: typeof input.tcgProductId === "string" ? input.tcgProductId : ""
     })
   })
+  handle(channels.inventoryGet, () => inventoryReport(db.listCheckouts()))
+  handle(channels.inventoryValue, (id: string, value: number | null) => {
+    if (typeof id !== "string" || !id) throw new AppError("That purchase was not found.")
+    db.setCheckoutValue(id, typeof value === "number" ? value : null)
+    return inventoryReport(db.listCheckouts())
+  })
+  handle(channels.inventoryCsv, () => ({ csv: inventoryCsv(db.listCheckouts()) }))
   handle(channels.imapGet, () => db.imapView())
   handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
   handle(channels.mailboxesGet, () => db.listMailboxes())

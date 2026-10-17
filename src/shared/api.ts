@@ -33,6 +33,7 @@ import type {
   TaskTemplate,
   TaskTemplateInput,
   OrderRecord,
+  InventoryReport,
   ResaleQuery,
   ResaleQuote,
   ImapView,
@@ -155,6 +156,11 @@ export interface AioApi {
   }
   resale: {
     quote: (input: ResaleQuery) => Promise<Result<ResaleQuote>>
+  }
+  inventory: {
+    get: () => Promise<Result<InventoryReport>>
+    setValue: (id: string, value: number | null) => Promise<Result<InventoryReport>>
+    csv: () => Promise<Result<{ csv: string }>>
   }
   vault: {
     list: () => Promise<Result<PublicVault[]>>

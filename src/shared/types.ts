@@ -795,6 +795,8 @@ export interface CheckoutRecord {
   profileId?: string
   quantity?: number
   detail: string
+  /** Current value of this purchase. Empty until the user enters one. */
+  marketValue?: number | null
 }
 
 export interface StoreAnalytics {
@@ -847,6 +849,27 @@ export interface AnalyticsReport {
   }
   stockLog: { store: StoreId; sku: string; at: number; price: number | null; title: string; kind?: string; imageUrl?: string; url?: string }[]
   restockHints: { store: StoreId; sku: string; hourAst: number; samples: number; warmupMin: number; detail: string }[]
+}
+
+export interface InventoryRow {
+  id: string
+  at: number
+  store: StoreId
+  sku: string
+  product: string
+  quantity: number
+  cost: number | null
+  value: number | null
+  profit: number | null
+}
+
+export interface InventoryReport {
+  rows: InventoryRow[]
+  purchases: number
+  cost: number
+  value: number
+  profit: number
+  unvalued: number
 }
 
 export interface ResaleQuery {
