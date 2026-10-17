@@ -17,6 +17,7 @@ import { projectTask } from "../phone/protocol"
 import { PhoneServer } from "../phone/server"
 import { createRegistry } from "../stores/registry"
 import { warmupDue } from "../engine/session-care"
+import { moduleScope, resolveModule } from "../shared/module-settings"
 import { storeName } from "../shared/stores"
 import { createChallengeController } from "./challenge-window"
 import { createSessionBrowser, type SessionBrowser } from "./session-window"
@@ -338,7 +339,11 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
 async function warmNext(db: Database, publish: (notice: Notice) => Promise<boolean>): Promise<void> {
   const settings = db.getSettings()
   if (!settings.sessionWarmup || !sessions) return
-  const due = db.listAccounts().find((account) => account.hasSession && account.sessionState !== "expired" && warmupDue(account.lastWarmAt, settings.sessionWarmupMin, Date.now()))
+  const due = db.listAccounts().find((account) => {
+    if (!account.hasSession || account.sessionState === "expired") return false
+    const minutes = resolveModule(account.store, moduleScope(settings)).sessionRefreshMin.value
+    return warmupDue(account.lastWarmAt, minutes, Date.now())
+  })
   if (!due) return
   try {
     const result = await sessions.warm(due.id)

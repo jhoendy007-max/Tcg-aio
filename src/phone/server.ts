@@ -45,6 +45,9 @@ export interface PhoneHost {
   saveMailbox?(input: import("./protocol").PhoneMailDraft): void
   deleteMailbox?(id: string): void
   signInMail?(input: { provider: "gmail" | "outlook"; user: string }): Promise<void>
+  saveModule?(store: import("../shared/types").StoreId, record: import("../shared/types").ModuleRecord): void
+  resetModule?(store: import("../shared/types").StoreId): void
+  importModule?(text: string): void
   devices(): PhoneDevice[]
   deviceTokens(): { id: string; name: string; token: string }[]
   saveDevice(device: { id: string; name: string; token: string }): void
@@ -459,6 +462,21 @@ export class PhoneServer {
       if (message.type === "mail.oauth") {
         if (!this.host.signInMail) throw new Error("Mail sign-in is not available.")
         await this.host.signInMail({ provider: message.provider, user: message.user })
+        this.reply(conn, req, { ok: true })
+        this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
+        return
+      }
+      if (message.type === "module.save" || message.type === "module.reset" || message.type === "module.import") {
+        if (message.type === "module.save") {
+          if (!this.host.saveModule) throw new Error("Store settings are not available.")
+          this.host.saveModule(message.store, message.record)
+        } else if (message.type === "module.reset") {
+          if (!this.host.resetModule) throw new Error("Store settings are not available.")
+          this.host.resetModule(message.store)
+        } else {
+          if (!this.host.importModule) throw new Error("Store settings are not available.")
+          this.host.importModule(message.text)
+        }
         this.reply(conn, req, { ok: true })
         this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
         return

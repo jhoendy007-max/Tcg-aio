@@ -1,4 +1,5 @@
 import { digitsOnly, expiryInFuture, last4, luhnOk, normalizeExp } from "../shared/card"
+import { cleanModules } from "../shared/module-settings"
 import { AppError } from "../shared/errors"
 import { isStoreId } from "../shared/stores"
 import { assertDiscordWebhook } from "./discord"
@@ -139,7 +140,8 @@ export function cleanSettings(input: Settings): Settings {
     wizardDone: input.wizardDone === true,
     language: input.language === "es" ? "es" : "en",
     googleMailClientId: cleanClientId(input.googleMailClientId),
-    microsoftMailClientId: cleanClientId(input.microsoftMailClientId)
+    microsoftMailClientId: cleanClientId(input.microsoftMailClientId),
+    modules: cleanModules(input.modules)
   }
 }
 

@@ -14,6 +14,7 @@ Test mode, from Settings or a task, runs the real monitor, cart, address, shippi
 - **Profiles** — shipping and billing. Card number and CVV are encrypted locally.
 - **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
+- **Stores** — one settings page per store, with recommended defaults, reset, and JSON presets. A task override wins over the store, which wins over global Settings. The same page is on the phone, in English or Spanish.
 - **Settings** — Discord webhook, Target monitor delay, store ID, ZIP, and state, and read-only IMAP mailboxes. An email address fills the server settings. Google and Microsoft can sign in; iCloud and Yahoo use an app password. The same mail screen is on the phone, in English or Spanish.
 - **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. Card numbers and passwords stay on the PC.
 - **Session Sync** — a Chrome or Edge extension that sends your own store sign-in to this PC. You link each account. It does not read other sites.
@@ -68,7 +69,7 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai. It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.11.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.12.zip` next to the Windows installer and the phone APK.
 
 The Android home screen can show a TCGAIO widget with wins and active tasks. iOS widgets are not in this beta. The phone still follows the desktop theme, and each task can be swiped or tapped.
 

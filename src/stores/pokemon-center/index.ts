@@ -5,7 +5,7 @@ import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
+import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import { createCardJwe, readFlexContext, readPaymentToken } from "./card"
 import {
   isChallenge,
@@ -130,7 +130,7 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
       ctx.log("warn", stock.reason)
-      await ctx.sleep(ctx.settings.monitorDelayMs)
+      await ctx.sleep(retryWait(ctx))
       continue
     }
     if (stock.kind !== "ok") return asResult(stock)
@@ -148,6 +148,7 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
     if (await holdMonitorOnly(ctx)) continue
+    await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, reading, page)
     if (cart.kind === "oos") {
@@ -383,6 +384,8 @@ async function store(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest)
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: POKEMON_CENTER_PAUSE }
   const queue = readQueueTarget(response.status, response.body, location)
   if (queue) {
+    if (ctx.module?.queue === "skip") return { kind: "retry", reason: "Pokémon Center waiting room. This store is set to skip the queue." }
+    if (ctx.module?.queue === "pause") return { kind: "paused", reason: "Pokémon Center waiting room. This store is set to pause instead of waiting." }
     const waited = await waitInQueue(ctx, jar, queue)
     if (waited.kind !== "ok") return waited
     if (ctx.signal.aborted) return { kind: "failed", reason: "Stopped" }

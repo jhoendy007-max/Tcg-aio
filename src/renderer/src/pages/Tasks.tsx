@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type Settings, type StoreHealth, type StoreInfo, type TaskInput, type TaskStatus } from "../../../shared/types"
+import { moduleScope, moduleText, resolveModule, sourceLabel } from "../../../shared/module-settings"
 import { storeName } from "../../../shared/stores"
 import { ProductVisual } from "../components/marks"
 import { Banner, Field, Select, TextInput } from "../components/ui"
@@ -241,7 +242,7 @@ export function TasksPage() {
           <h1>Tasks</h1>
           <p>Monitor a drop, add it to cart, and place a ship-to-home order with your own account.</p>
         </div>
-        <button type="button" className="primary" onClick={() => { setForm(emptyForm()); setError("") }}>New task</button>
+        <button type="button" className="primary" onClick={() => { setForm(freshTask(settings)); setError("") }}>New task</button>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {globalTest ? <Banner tone="info">Global test mode is on. Every task stops before place order. Nothing is charged.</Banner> : null}
@@ -261,7 +262,11 @@ export function TasksPage() {
       {form ? (
         <form className="card form-grid" onSubmit={save}>
           <Field label="Store">
-            <Select value={form.store} onChange={(event) => setForm({ ...form, store: event.target.value as TaskInput["store"], accountId: "" })}>
+            <Select value={form.store} onChange={(event) => {
+              const store = event.target.value as TaskInput["store"]
+              const testMode = form.id ? form.testMode : settings ? resolveModule(store, moduleScope(settings)).testMode.value : false
+              setForm({ ...form, store, accountId: "", testMode })
+            }}>
               {stores.map((store) => (
                 <option key={store.id} value={store.id}>{store.name}{store.implemented ? "" : " (stub)"}</option>
               ))}
@@ -314,6 +319,7 @@ export function TasksPage() {
             <input type="checkbox" checked={form.testMode === true} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
             <span>Test mode for this task. Runs the real flow and stops before place order, even if the global test setting is off.</span>
           </label>
+          {settings ? <TaskOverrides form={form} settings={settings} onChange={setForm} /> : null}
           <label className="check span-2">
             <input type="checkbox" checked={form.confirmPurchase} onChange={(event) => setForm({ ...form, confirmPurchase: event.target.checked })} />
             <span>This task may place a real shipping order and charge the saved card when the item is in stock. Ignored while test mode is on.</span>
@@ -530,6 +536,44 @@ function toInput(task: PublicTask): TaskInput {
     testMode: task.testMode,
     group: task.group ?? "",
     imageUrl: task.imageUrl ?? "",
-    monitorOnly: task.monitorOnly === true
+    monitorOnly: task.monitorOnly === true,
+    overrides: task.overrides
   }
+}
+
+function freshTask(settings: Settings | null): TaskInput {
+  const form = emptyForm()
+  if (!settings) return form
+  return { ...form, testMode: resolveModule(form.store, moduleScope(settings)).testMode.value }
+}
+
+function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings: Settings; onChange: (next: TaskInput) => void }) {
+  const lang = settings.language === "es" ? "es" : "en"
+  const resolved = resolveModule(form.store, moduleScope(settings), form.overrides)
+  function setNumber(key: "monitorDelayMs" | "retryDelayMs" | "maxRetries" | "blockBackoffMs", raw: string) {
+    const overrides = { ...form.overrides }
+    if (!raw.trim()) delete overrides[key]
+    else overrides[key] = Math.round(Number(raw))
+    onChange({ ...form, overrides })
+  }
+  return (
+    <div className="span-2">
+      <h2>{moduleText(lang, "overrides")}</h2>
+      <p>{moduleText(lang, "overrideHint")} {moduleText(lang, "monitorDelayMs")}: {resolved.monitorDelayMs.value} ms · {sourceLabel(lang, resolved.monitorDelayMs.source)}. {moduleText(lang, "maxRetries")}: {resolved.maxRetries.value} · {sourceLabel(lang, resolved.maxRetries.source)}.</p>
+      <div className="form-grid">
+        <Field label={moduleText(lang, "monitorDelayMs")}>
+          <TextInput value={form.overrides?.monitorDelayMs ?? ""} placeholder={String(resolved.monitorDelayMs.value)} onChange={(event) => setNumber("monitorDelayMs", event.target.value)} />
+        </Field>
+        <Field label={moduleText(lang, "retryDelayMs")}>
+          <TextInput value={form.overrides?.retryDelayMs ?? ""} placeholder={String(resolved.retryDelayMs.value)} onChange={(event) => setNumber("retryDelayMs", event.target.value)} />
+        </Field>
+        <Field label={moduleText(lang, "maxRetries")}>
+          <TextInput value={form.overrides?.maxRetries ?? ""} placeholder={String(resolved.maxRetries.value)} onChange={(event) => setNumber("maxRetries", event.target.value)} />
+        </Field>
+        <Field label={moduleText(lang, "blockBackoffMs")}>
+          <TextInput value={form.overrides?.blockBackoffMs ?? ""} placeholder={String(resolved.blockBackoffMs.value)} onChange={(event) => setNumber("blockBackoffMs", event.target.value)} />
+        </Field>
+      </div>
+    </div>
+  )
 }

@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2"
 import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils"
 import { redact } from "../shared/redact"
 import { isStoreId, storeName } from "../shared/stores"
-import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
+import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, ModuleRecord, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
 
 export const PHONE_PROTOCOL = 1
 export const INVITE_TTL_MS = 3 * 60 * 1000
@@ -178,6 +178,17 @@ export interface PhoneImap {
   microsoftSignIn?: boolean
 }
 
+export interface PhoneModuleGlobals {
+  monitorDelayMs: number
+  sessionWarmupMin: number
+  blockRetries: number
+  testMode: boolean
+  monitorZips: string
+  monitorStoreIds: string
+  targetZip: string
+  targetStoreId: string
+}
+
 export interface PhoneSnapshot {
   pcName: string
   testMode: boolean
@@ -194,6 +205,8 @@ export interface PhoneSnapshot {
   keeper: PhoneKeeper
   imap?: PhoneImap
   language?: "en" | "es"
+  modules?: Partial<Record<StoreId, ModuleRecord>>
+  moduleGlobals?: PhoneModuleGlobals
   autopilot?: boolean
   brand?: { appName: string; theme: "dark" | "light"; accent: "gold" | "blue" | "green" | "rose"; successSound: boolean }
 }
@@ -284,6 +297,9 @@ export type ClientMessage =
   | { type: "mail.save"; req: string; conn: string; mailbox: PhoneMailDraft }
   | { type: "mail.delete"; req: string; conn: string; id: string }
   | { type: "mail.oauth"; req: string; conn: string; provider: "gmail" | "outlook"; user: string }
+  | { type: "module.save"; req: string; conn: string; store: StoreId; record: ModuleRecord }
+  | { type: "module.reset"; req: string; conn: string; store: StoreId }
+  | { type: "module.import"; req: string; conn: string; text: string }
   | { type: "task.save"; req: string; conn: string; task: PhoneTaskDraft }
   | { type: "task.delete"; req: string; conn: string; taskId: string }
   | { type: "rule.save"; req: string; conn: string; rule: RestockRuleInput }
@@ -534,6 +550,18 @@ export function asClientMessage(value: unknown): ClientMessage {
     return { type: "mail.oauth", req: message.req, conn: message.conn, provider: message.provider, user: typeof message.user === "string" ? message.user.slice(0, 180) : "" }
   }
   if (message.type === "mail.save") return { type: "mail.save", req: message.req, conn: message.conn, mailbox: parseMailDraft(message.mailbox) }
+  if (message.type === "module.save") {
+    if (typeof message.store !== "string" || !isStoreId(message.store)) throw new Error("Choose a store.")
+    return { type: "module.save", req: message.req, conn: message.conn, store: message.store, record: message.record && typeof message.record === "object" ? message.record : {} }
+  }
+  if (message.type === "module.reset") {
+    if (typeof message.store !== "string" || !isStoreId(message.store)) throw new Error("Choose a store.")
+    return { type: "module.reset", req: message.req, conn: message.conn, store: message.store }
+  }
+  if (message.type === "module.import") {
+    if (typeof message.text !== "string" || !message.text.trim()) throw new Error("Paste a store preset.")
+    return { type: "module.import", req: message.req, conn: message.conn, text: message.text.slice(0, 20_000) }
+  }
   if (message.type === "health.check") {
     const proxyGroupId = "proxyGroupId" in message && typeof message.proxyGroupId === "string" && message.proxyGroupId ? message.proxyGroupId : null
     return { type: "health.check", req: message.req, conn: message.conn, proxyGroupId }

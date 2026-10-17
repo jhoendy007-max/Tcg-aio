@@ -11,13 +11,15 @@ import { clearLink, loadLink, saveLink } from "./src/storage"
 import type { StoreHealth } from "../src/shared/types"
 import { SwipeTask } from "./src/SwipeTask"
 import { MailPanel } from "./src/MailPanel"
+import { ModulePanel } from "./src/ModulePanel"
 import { mailText } from "../src/shared/mail-text"
+import { moduleText } from "../src/shared/module-settings"
 import { updateWidget } from "./src/widget"
 import { colors, isActive, palette, STATUS_LABEL } from "./src/theme"
 import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
 
-type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats" | "mail"
+type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats" | "mail" | "stores"
 type Bag = { colors: typeof colors; styles: ReturnType<typeof createStyles> }
 const ThemeContext = createContext<Bag>({ colors, styles: createStyles(colors) })
 function useTheme() { return useContext(ThemeContext) }
@@ -223,7 +225,7 @@ export default function App() {
           ) : null}
         </ScrollView>
       ) : null}
-      {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" || screen === "mail" ? (
+      {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" || screen === "mail" || screen === "stores" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <View style={styles.row}>
             <View>
@@ -245,6 +247,8 @@ export default function App() {
           ) : null}
           {screen === "mail" ? (
             <MailPanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
+          ) : screen === "stores" ? (
+            <ModulePanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
           ) : screen === "alerts" ? (
             <AlertsPanel snap={snap} onRun={run} session={session.current} onBack={() => setScreen("dash")} />
           ) : screen === "drops" ? (
@@ -337,6 +341,7 @@ export default function App() {
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.pauseAll())}><Text style={styles.secondaryText}>Pause all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("mail")}><Text style={styles.secondaryText}>{mailText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => setScreen("stores")}><Text style={styles.secondaryText}>{moduleText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("alerts")}><Text style={styles.secondaryText}>Alerts</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("drops")}><Text style={styles.secondaryText}>Drops</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("stats")}><Text style={styles.secondaryText}>Stats</Text></Pressable>

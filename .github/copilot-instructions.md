@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.11 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.12 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -66,6 +66,10 @@ Self-healing runs only while autopilot is on. A task with no log for `stuckMinut
 Windows launch at boot is opt-in (`launchOnBoot`). A clean quit marks running tasks stopped. A crash leaves them active, and the next launch resumes them when `resumeOnLaunch` is on. An uncaught error can relaunch the process at most once a minute.
 
 Order rows are stored after a win. A later GET of that account's order page, plus mail from Settings, can mark the order cancelled or record a tracking number.
+
+## Store settings
+
+Each store in `STORE_CATALOG` has a settings page. Recommended defaults live in `src/shared/module-settings.ts` and match that store's request gap. A task `overrides` field wins, then the saved store page, then global Settings when the field is set to use the global value. An unsaved field shows as recommended. Global test mode stays on for every task. The rate limit cannot go under `MODULE_RATE_FLOOR`, which matches `STORE_GAP_MS`. Reset clears that store's saved page. Import and export are a version-1 JSON preset for one store. The same page is on the phone. The store page follows `Settings.language` (`en` or `es`). `PHONE_PROTOCOL` stays 1. A new store needs a recommended row and a rate floor before its page will compile.
 
 ## Mail
 

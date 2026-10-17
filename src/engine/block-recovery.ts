@@ -100,7 +100,7 @@ export async function sendWithRecovery(
       }
       return response
     }
-    const wait = backoffMs(attempt, ctx.settings.monitorDelayMs)
+    const wait = backoffMs(attempt, ctx.module?.blockBackoffMs ?? ctx.settings.monitorDelayMs)
     const next = advanceProxy(ctx, list, proxy)
     ctx.log("warn", `${blockLog(response.status, proxy, next)} Waiting ${formatWait(wait)} before reloading the store session.`)
     await ctx.sleep(wait)

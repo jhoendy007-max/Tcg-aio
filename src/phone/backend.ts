@@ -74,6 +74,17 @@ export function createPhoneHost(
         microsoftSignIn: Boolean(mailClientId("outlook", settings))
       },
       language: settings.language === "es" ? "es" : "en",
+      modules: settings.modules,
+      moduleGlobals: {
+        monitorDelayMs: settings.monitorDelayMs,
+        sessionWarmupMin: settings.sessionWarmupMin,
+        blockRetries: settings.blockRetries,
+        testMode: settings.testMode,
+        monitorZips: settings.monitorZips,
+        monitorStoreIds: settings.monitorStoreIds,
+        targetZip: settings.targetZip,
+        targetStoreId: settings.targetStoreId
+      },
       autopilot: settings.autopilot,
       brand: {
         appName: settings.appName,
@@ -197,10 +208,19 @@ export function createPhoneHost(
     deleteMailbox(id: string) {
       db.deleteMailbox(id)
     },
-    async signInMail(input: { provider: "gmail" | "outlook"; user: string }) {
+    async     signInMail(input: { provider: "gmail" | "outlook"; user: string }) {
       const open = openUrl
       if (!open) throw new Error("Sign-in can only start from the desktop app.")
       await completeMailSignIn(db, input, { open })
+    },
+    saveModule(store, record) {
+      db.saveModule(store, record)
+    },
+    resetModule(store) {
+      db.resetModule(store)
+    },
+    importModule(text) {
+      db.importModule(text)
     },
     devices: () => db.listDevices(),
     deviceTokens: () => db.deviceTokens(),
