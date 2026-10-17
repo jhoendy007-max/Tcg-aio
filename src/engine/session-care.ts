@@ -1,3 +1,4 @@
+import { accountPartition } from "../shared/consistency"
 import type { StoreId } from "../shared/types"
 import { challengeHost, splitCookieHeader } from "./challenge"
 
@@ -37,7 +38,7 @@ export function looksSignedOut(finalUrl: string, cookieHeader: string): boolean 
 }
 
 export function sessionPartition(accountId: string): string {
-  return `persist:account-${accountId}`
+  return accountPartition(accountId)
 }
 
 export function sessionOrigin(store: StoreId): string {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { consistencyText, healthScore } from "../../../shared/consistency"
 import { formatProxy } from "../../../shared/proxy"
 import type { ProxyGroup, ProxyNetwork, ProxyScore, ProxyTestResult } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
@@ -15,14 +16,17 @@ export function ProxiesPage() {
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<Record<string, ProxyTestResult[]>>({})
   const [testing, setTesting] = useState<string | null>(null)
+  const [lang, setLang] = useState<"en" | "es">("en")
 
   async function reload() {
-    const [nextGroups, nextScores] = await Promise.all([
+    const [nextGroups, nextScores, settings] = await Promise.all([
       unwrap(window.aio.proxies.list()),
-      unwrap(window.aio.proxies.health())
+      unwrap(window.aio.proxies.health()),
+      unwrap(window.aio.settings.get())
     ])
     setGroups(nextGroups)
     setScores(nextScores)
+    setLang(settings.settings.language === "es" ? "es" : "en")
   }
 
   useEffect(() => {
@@ -76,7 +80,8 @@ export function ProxiesPage() {
       <header className="page-head">
         <div>
           <h1>Proxies</h1>
-          <p>Each account keeps one proxy until that proxy is benched after three 403, 412, 429, or 435 responses. Label the group residential or datacenter. The password stays on this PC.</p>
+          <p>{consistencyText(lang, "proxyIntro")}</p>
+          <p>{consistencyText(lang, "residentialNote")}</p>
         </div>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
@@ -129,7 +134,7 @@ export function ProxiesPage() {
                 return (
                   <li key={proxy.id} className={benched ? "bad" : "ok"}>
                     <span>{proxy.host}:{proxy.port}</span>
-                    <span>{benched ? `Benched until ${new Date(score.benchedUntil).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}` : score ? `${score.ok} ok · ${score.blocks} blocks` : "No samples yet"}</span>
+                    <span>{benched ? `${consistencyText(lang, "quarantined")} ${new Date(score.benchedUntil).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}` : score ? `${consistencyText(lang, "health")} ${healthScore(score)} · ${score.ok} ok · ${score.blocks}` : consistencyText(lang, "noSamples")}</span>
                   </li>
                 )
               })}

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { consistencyText, effectiveBinding } from "../../../shared/consistency"
+import { dropOpsText } from "../../../shared/drop-ops"
 import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type Settings, type StartMode, type StoreHealth, type StoreInfo, type TaskInput, type TaskKind, type TaskStatus } from "../../../shared/types"
 import { moduleScope, moduleText, resolveModule, sourceLabel } from "../../../shared/module-settings"
 import { taskText } from "../../../shared/task-role"
@@ -45,6 +47,7 @@ export function TasksPage() {
   const [healthError, setHealthError] = useState("")
   const [globalTest, setGlobalTest] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [cloneIds, setCloneIds] = useState<string[]>([])
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [challenge, setChallenge] = useState<PublicChallenge | null>(null)
@@ -384,6 +387,9 @@ export function TasksPage() {
                 globalTest={globalTest}
                 dragId={dragId}
                 names={names}
+                accounts={accounts}
+                groups={groups}
+                lang={lang}
                 onSelect={setSelectedId}
                 onDrag={setDragId}
                 onDrop={(target) => { if (dragId) place(dragId, target, false); setDragId(null) }}
@@ -398,6 +404,28 @@ export function TasksPage() {
           </tbody>
         </table>
       </div>
+      {selected ? (
+        <div className="card stack">
+          <h2>{dropOpsText(lang, "cloneTitle")}</h2>
+          <p className="hint">{dropOpsText(lang, "cloneHint")}</p>
+          <div className="choices">
+            {accounts.filter((account) => account.store === selected.store).map((account) => (
+              <label key={account.id} className="check">
+                <input type="checkbox" checked={cloneIds.includes(account.id)} onChange={() => setCloneIds((current) => current.includes(account.id) ? current.filter((id) => id !== account.id) : [...current, account.id])} />
+                <span>{account.label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="actions">
+            <button type="button" className="primary" disabled={!cloneIds.length} onClick={() => {
+              void unwrap(window.aio.bulk.clone(selected.id, cloneIds)).then(async () => {
+                setCloneIds([])
+                await reload()
+              }).catch((err) => setError(errorText(err)))
+            }}>{dropOpsText(lang, "cloneButton")}</button>
+          </div>
+        </div>
+      ) : null}
       <div className="card log-card">
         <div className="log-head">
           <h2>Status log</h2>
@@ -416,7 +444,7 @@ export function TasksPage() {
   )
 }
 
-function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
+function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, accounts, groups, lang, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
   section: { label: string; rows: PublicTask[] }
   grouped: boolean
   taskView: "compact" | "detailed"
@@ -424,6 +452,9 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
   globalTest: boolean
   dragId: string | null
   names: { profile: Map<string, string>; account: Map<string, string>; group: Map<string, string> }
+  accounts: PublicAccount[]
+  groups: ProxyGroup[]
+  lang: "en" | "es"
   onSelect: (id: string) => void
   onDrag: (id: string | null) => void
   onDrop: (id: string) => void
@@ -457,14 +488,15 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
               <div>
                 <div>{storeName(task.store)}{task.kind === "monitor" ? <span className="pill">MONITOR</span> : null}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
                 <div className="sku">{task.sku}</div>
+                {taskView === "compact" ? bindingCell(task, accounts, groups, lang).summary : null}
                 {typeof task.monitorMs === "number" ? <div className="detail">{task.monitorMs} ms last read{typeof task.detectToCartMs === "number" ? ` · ${task.detectToCartMs} ms to cart` : ""}</div> : null}
               </div>
             </div>
           </td>
           {taskView === "detailed" ? <td>{task.quantity}</td> : null}
           {taskView === "detailed" ? <td>{names.profile.get(task.profileId) ?? "Missing"}</td> : null}
-          {taskView === "detailed" ? <td>{names.account.get(task.accountId) ?? "Missing"}</td> : null}
-          {taskView === "detailed" ? <td>{task.proxyGroupId ? names.group.get(task.proxyGroupId) ?? "Missing" : "Direct"}</td> : null}
+          {taskView === "detailed" ? <td>{bindingCell(task, accounts, groups, lang).account}</td> : null}
+          {taskView === "detailed" ? <td>{bindingCell(task, accounts, groups, lang).proxy}</td> : null}
           <td>
             <span className={`pill ${task.status}`}>{STATUS_LABEL[task.status]}</span>
             {task.detail ? <div className="detail">{task.detail}</div> : null}
@@ -487,6 +519,48 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
       ))}
     </>
   )
+}
+
+function bindingCell(task: PublicTask, accounts: PublicAccount[], groups: ProxyGroup[], lang: "en" | "es") {
+  const account = accounts.find((item) => item.id === task.accountId) ?? null
+  const binding = effectiveBinding({
+    accountId: task.accountId,
+    proxyGroupId: task.proxyGroupId,
+    monitorProxyGroupId: task.monitorProxyGroupId,
+    account,
+    groups
+  })
+  const accountLabel = binding.accountSource === "none"
+    ? consistencyText(lang, "fromNone")
+    : binding.accountLabel || "Missing"
+  const proxyLabel = binding.proxyLabel || consistencyText(lang, "fromDirect")
+  const proxySource = binding.proxySource === "account" ? "fromAccount" : binding.proxySource === "task" ? "fromTask" : "fromDirect"
+  const accountSource = binding.accountSource === "task" ? "fromAccount" : "fromNone"
+  const profileSource = binding.profileSource === "account" ? "fromAccount" : "fromNone"
+  const profileLabel = binding.profileLabel || consistencyText(lang, "fromNone")
+  return {
+    summary: (
+      <>
+        <div className="detail">{taskText(lang, "account")}: {accountLabel} · {consistencyText(lang, accountSource)}</div>
+        <div className="detail">{consistencyText(lang, "profile")}: {profileLabel} · {consistencyText(lang, profileSource)}</div>
+        <div className="detail">{consistencyText(lang, "stickyProxy")}: {proxyLabel} · {consistencyText(lang, proxySource)}</div>
+      </>
+    ),
+    account: (
+      <>
+        <div>{accountLabel}</div>
+        <div className="detail">{consistencyText(lang, "profile")}: {profileLabel}</div>
+        <div className="detail">{consistencyText(lang, accountSource)} · {consistencyText(lang, profileSource)}</div>
+      </>
+    ),
+    proxy: (
+      <>
+        <div>{proxyLabel}</div>
+        <div className="detail">{consistencyText(lang, proxySource)}</div>
+        {binding.warnings.map((warning) => <div key={warning} className="detail">{consistencyText(lang, warning === "sticky" ? "stickyWarning" : "monitorWarning")}</div>)}
+      </>
+    )
+  }
 }
 
 function toInput(task: PublicTask): TaskInput {
@@ -647,11 +721,31 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, groups,
         <Banner tone="info">{selectedStore.name} is registered, and starting a task records that checkout is not implemented yet.</Banner>
       ) : null}
       {settings ? <TaskOverrides form={form} settings={settings} onChange={onChange} /> : null}
+      <BindingNote form={form} accounts={accounts} groups={groups} lang={lang} />
       <div className="actions span-2">
         <button className="primary" type="submit" disabled={busy}>{form.id ? "Save task" : "Create task"}</button>
         <button type="button" onClick={onCancel}>Cancel</button>
       </div>
     </form>
+  )
+}
+
+function BindingNote({ form, accounts, groups, lang }: { form: TaskInput; accounts: PublicAccount[]; groups: ProxyGroup[]; lang: "en" | "es" }) {
+  const account = accounts.find((item) => item.id === form.accountId) ?? null
+  const binding = effectiveBinding({
+    accountId: form.accountId,
+    proxyGroupId: form.proxyGroupId ?? null,
+    monitorProxyGroupId: form.monitorProxyGroupId ?? null,
+    account,
+    groups
+  })
+  return (
+    <div className="span-2">
+      <p className="hint">{taskText(lang, "account")}: {binding.accountSource === "none" ? consistencyText(lang, "fromNone") : binding.accountLabel} · {consistencyText(lang, binding.accountSource === "task" ? "fromAccount" : "fromNone")}</p>
+      <p className="hint">{consistencyText(lang, "profile")}: {binding.profileLabel || consistencyText(lang, "fromNone")} · {consistencyText(lang, binding.profileSource === "account" ? "fromAccount" : "fromNone")}</p>
+      <p className="hint">{consistencyText(lang, "stickyProxy")}: {binding.proxyLabel || consistencyText(lang, "fromDirect")} · {consistencyText(lang, binding.proxySource === "account" ? "fromAccount" : binding.proxySource === "task" ? "fromTask" : "fromDirect")}</p>
+      {binding.warnings.map((warning) => <Banner key={warning} tone="info">{consistencyText(lang, warning === "sticky" ? "stickyWarning" : "monitorWarning")}</Banner>)}
+    </div>
   )
 }
 
@@ -664,7 +758,7 @@ function freshTask(settings: Settings | null): TaskInput {
 function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings: Settings; onChange: (next: TaskInput) => void }) {
   const lang = settings.language === "es" ? "es" : "en"
   const resolved = resolveModule(form.store, moduleScope(settings), form.overrides)
-  function setNumber(key: "monitorDelayMs" | "retryDelayMs" | "maxRetries" | "blockBackoffMs", raw: string) {
+  function setNumber(key: "monitorDelayMs" | "retryDelayMs" | "rateLimitMs" | "maxRetries" | "blockBackoffMs", raw: string) {
     const overrides = { ...form.overrides }
     if (!raw.trim()) delete overrides[key]
     else overrides[key] = Math.round(Number(raw))
@@ -673,7 +767,7 @@ function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings
   return (
     <div className="span-2">
       <h2>{moduleText(lang, "overrides")}</h2>
-      <p>{moduleText(lang, "overrideHint")} {moduleText(lang, "monitorDelayMs")}: {resolved.monitorDelayMs.value} ms · {sourceLabel(lang, resolved.monitorDelayMs.source)}. {moduleText(lang, "maxRetries")}: {resolved.maxRetries.value} · {sourceLabel(lang, resolved.maxRetries.source)}.</p>
+      <p>{moduleText(lang, "overrideHint")} {moduleText(lang, "rateLimitMs")}: {resolved.rateLimitMs.value} ms · {sourceLabel(lang, resolved.rateLimitMs.source)}. {moduleText(lang, "maxRetries")}: {resolved.maxRetries.value} · {sourceLabel(lang, resolved.maxRetries.source)}. {taskText(lang, "jitter")}: {form.jitterPct ?? settings.monitorJitterPct}% · {sourceLabel(lang, form.jitterPct === null || form.jitterPct === undefined ? "global" : "task")}.</p>
       <div className="form-grid">
         <Field label={moduleText(lang, "monitorDelayMs")}>
           <TextInput value={form.overrides?.monitorDelayMs ?? ""} placeholder={String(resolved.monitorDelayMs.value)} onChange={(event) => setNumber("monitorDelayMs", event.target.value)} />
@@ -681,13 +775,16 @@ function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings
         <Field label={moduleText(lang, "retryDelayMs")}>
           <TextInput value={form.overrides?.retryDelayMs ?? ""} placeholder={String(resolved.retryDelayMs.value)} onChange={(event) => setNumber("retryDelayMs", event.target.value)} />
         </Field>
+        <Field label={moduleText(lang, "rateLimitMs")} hint={taskText(lang, "inherit")}>
+          <TextInput value={form.overrides?.rateLimitMs ?? ""} placeholder={String(resolved.rateLimitMs.value)} onChange={(event) => setNumber("rateLimitMs", event.target.value)} />
+        </Field>
         <Field label={moduleText(lang, "maxRetries")}>
           <TextInput value={form.overrides?.maxRetries ?? ""} placeholder={String(resolved.maxRetries.value)} onChange={(event) => setNumber("maxRetries", event.target.value)} />
         </Field>
         <Field label={moduleText(lang, "blockBackoffMs")}>
           <TextInput value={form.overrides?.blockBackoffMs ?? ""} placeholder={String(resolved.blockBackoffMs.value)} onChange={(event) => setNumber("blockBackoffMs", event.target.value)} />
         </Field>
-        <Field label={taskText(lang, "jitter")}>
+        <Field label={taskText(lang, "jitter")} hint={taskText(lang, "jitterHint")}>
           <TextInput type="number" min={0} max={40} value={form.jitterPct ?? ""} placeholder={String(settings.monitorJitterPct)} onChange={(event) => onChange({ ...form, jitterPct: event.target.value === "" ? null : Number(event.target.value) })} />
         </Field>
         <Field label={taskText(lang, "zip")}>

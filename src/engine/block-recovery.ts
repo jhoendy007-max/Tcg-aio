@@ -101,8 +101,9 @@ export async function sendWithRecovery(
       return response
     }
     const wait = backoffMs(attempt, ctx.module?.blockBackoffMs ?? ctx.settings.monitorDelayMs)
-    const next = advanceProxy(ctx, list, proxy)
-    ctx.log("warn", `${blockLog(response.status, proxy, next)} Waiting ${formatWait(wait)} before reloading the store session.`)
+    const locked = Boolean(ctx.account.id)
+    const next = locked ? proxy : advanceProxy(ctx, list, proxy)
+    ctx.log("warn", `${blockLog(response.status, proxy, next, locked)} Waiting ${formatWait(wait)} before reloading the store session.`)
     await ctx.sleep(wait)
     await reloadSession(ctx, request, options.homeUrl, next ?? proxy)
   }
@@ -171,8 +172,9 @@ function ensure(accountKey: string): StickyState {
   return state
 }
 
-function blockLog(status: number, current: ProxyEndpoint | undefined, next: ProxyEndpoint | undefined): string {
+function blockLog(status: number, current: ProxyEndpoint | undefined, next: ProxyEndpoint | undefined, locked = false): string {
   const where = current ? `proxy ${proxyLabel(current)}` : "a direct connection"
+  if (locked) return `HTTP ${status} through ${where}. Keeping this account's sticky proxy and reloading its browser profile.`
   const moved = Boolean(next && (!current || proxyKey(next) !== proxyKey(current)))
   const action = moved && next ? `Rotating to proxy ${proxyLabel(next)}.` : "No other proxy is in the group."
   return `HTTP ${status} through ${where}. ${action}`

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { consistencyText } from "../../../shared/consistency"
 import { DEFAULT_SETTINGS, type PublicAccount, type Settings, type StoreInfo } from "../../../shared/types"
 import { Banner, Field, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
@@ -47,7 +48,7 @@ export function KeeperPage() {
       <header className="page-head">
         <div>
           <h1>Session Keeper</h1>
-          <p>Opens each account in its own Chromium window, through that account's proxy, and saves the cookies the browser already stored. It does not create a session for you.</p>
+          <p>{consistencyText(form.language === "es" ? "es" : "en", "warmupNote")}</p>
         </div>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
@@ -72,7 +73,7 @@ export function KeeperPage() {
               <tr key={account.id}>
                 <td>{names.get(account.store) ?? account.store}</td>
                 <td>{account.label}</td>
-                <td>{account.sessionState === "expired" ? "Sign in again" : account.hasSession ? "Saved" : "None"}{account.lastWarmAt ? <div className="detail">Warmed {new Date(account.lastWarmAt).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}</div> : null}</td>
+                <td>{consistencyText(form.language === "es" ? "es" : "en", account.freshness ?? "missing")}{account.lastWarmAt ? <div className="detail">{new Date(account.lastWarmAt).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}</div> : null}</td>
                 <td className="row-actions">
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.openBrowser(account.id)).catch((err) => setError(errorText(err)))}>Sign in</button>
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.captureBrowser(account.id)).then(() => reload()).catch((err) => setError(errorText(err)))}>Save cookies</button>

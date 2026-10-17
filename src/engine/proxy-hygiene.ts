@@ -7,6 +7,8 @@ export interface StickyPin {
   accountId: string
   groupId: string
   proxyId: string
+  /** Account pins are exclusive. A task without an account sets this false and may share with other tasks. */
+  exclusive?: boolean
 }
 
 export interface BlockTally {
@@ -19,7 +21,12 @@ export interface ProxyChoice {
   proxy?: ProxyEndpoint
   rotated: boolean
   allBenched: boolean
+  /** The account already has a sticky proxy that is not in this group. */
+  stickyOutside?: boolean
+  heldProxyId?: string
 }
+
+const QUARANTINE = new Set([403, 412, 435])
 
 export function noteScore(
   scores: ProxyScore[],
@@ -37,7 +44,7 @@ export function noteScore(
     next.push(score)
   }
   score.lastStatus = status
-  if (status === 403 || status === 412 || status === 429 || status === 435) {
+  if (QUARANTINE.has(status)) {
     score.streak += 1
     score.blocks += 1
     if (score.streak >= benchAfter) score.benchedUntil = now + benchMs
@@ -77,31 +84,54 @@ export function isBenched(score: ProxyScore | undefined, now: number): boolean {
   return Boolean(score && score.benchedUntil > now)
 }
 
-/** Keep one proxy for an account. Move to another only after that proxy is benched. */
+/**
+ * One proxy per owner. Account owners never share a proxy. A move happens only
+ * after the current proxy is quarantined, and only when the caller asks again.
+ */
 export function chooseSticky(
   proxies: ProxyEndpoint[],
   pins: StickyPin[],
   scores: ProxyScore[],
   accountId: string,
   groupId: string,
-  now: number
+  now: number,
+  exclusive = true
 ): { choice: ProxyChoice; pins: StickyPin[] } {
-  if (!proxies.length) return { choice: { rotated: false, allBenched: false }, pins }
-  const nextPins = pins.map((pin) => ({ ...pin }))
-  const pin = nextPins.find((item) => item.accountId === accountId && item.groupId === groupId)
-  const scoreFor = (id: string) => scores.find((score) => score.proxyId === id)
-  const healthy = proxies.filter((proxy) => !isBenched(scoreFor(proxy.id), now))
-  const pinned = pin ? proxies.find((proxy) => proxy.id === pin.proxyId) : undefined
-  if (pinned && !isBenched(scoreFor(pinned.id), now)) {
-    return { choice: { proxy: pinned, rotated: false, allBenched: false }, pins: nextPins }
+  const { pin, rest } = splitOwner(pins, accountId)
+  if (!proxies.length) {
+    return { choice: { rotated: false, allBenched: false, stickyOutside: Boolean(pin), heldProxyId: pin?.proxyId }, pins: pin ? [pin, ...rest] : rest }
   }
-  const pool = healthy.length ? healthy : proxies
+  const scoreFor = (id: string) => scores.find((score) => score.proxyId === id)
+  const reserved = new Set(rest.filter((item) => exclusive || item.exclusive !== false).map((item) => item.proxyId))
+  if (pin && !isBenched(scoreFor(pin.proxyId), now)) {
+    const pinned = proxies.find((proxy) => proxy.id === pin.proxyId)
+    if (pinned) return { choice: { proxy: pinned, rotated: false, allBenched: false }, pins: [pin, ...rest] }
+    if (pin.exclusive !== false) {
+      return { choice: { rotated: false, allBenched: false, stickyOutside: true, heldProxyId: pin.proxyId }, pins: [pin, ...rest] }
+    }
+  }
+  const free = proxies.filter((proxy) => !reserved.has(proxy.id))
+  const healthy = free.filter((proxy) => !isBenched(scoreFor(proxy.id), now))
+  const pool = healthy.length ? healthy : free
+  if (!pool.length) {
+    return { choice: { rotated: false, allBenched: true, stickyOutside: Boolean(pin), heldProxyId: pin?.proxyId }, pins: pin ? [pin, ...rest] : rest }
+  }
   const ranked = [...pool].sort((a, b) => (scoreFor(a.id)?.streak ?? 0) - (scoreFor(b.id)?.streak ?? 0))
   const proxy = ranked[0]
-  if (pin) pin.proxyId = proxy.id
-  else nextPins.push({ accountId, groupId, proxyId: proxy.id })
+  const nextPin: StickyPin = { accountId, groupId, proxyId: proxy.id, exclusive }
   return {
-    choice: { proxy, rotated: Boolean(pinned && pinned.id !== proxy.id), allBenched: healthy.length === 0 },
-    pins: nextPins
+    choice: { proxy, rotated: Boolean(pin && pin.proxyId !== proxy.id), allBenched: healthy.length === 0 },
+    pins: [nextPin, ...rest]
   }
+}
+
+function splitOwner(pins: StickyPin[], accountId: string): { pin?: StickyPin; rest: StickyPin[] } {
+  const rest: StickyPin[] = []
+  let pin: StickyPin | undefined
+  for (const item of pins) {
+    if (item.accountId === accountId) {
+      if (!pin) pin = { ...item }
+    } else rest.push({ ...item })
+  }
+  return { pin, rest }
 }

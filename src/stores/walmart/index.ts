@@ -601,10 +601,11 @@ class ProxyLane {
         ctx.log("warn", `Walmart returned HTTP ${response.status} (PerimeterX) through ${where} again. Pausing after ${this.strikes} blocks.`)
         return response
       }
-      const next = this.rotate()
+      const locked = Boolean(ctx.account.id)
+      const next = locked ? proxy : this.rotate()
       const moved = Boolean(next && proxy && (next.host !== proxy.host || next.port !== proxy.port))
       const wait = Math.min(ctx.settings.monitorDelayMs * 2 ** Math.min(this.strikes - 1, 3), 30000)
-      const action = moved && next ? `Rotating to proxy ${proxyLabel(next)}` : "No other proxy is in the group"
+      const action = locked ? "Keeping this account's sticky proxy" : moved && next ? `Rotating to proxy ${proxyLabel(next)}` : "No other proxy is in the group"
       ctx.log("warn", `Walmart returned HTTP ${response.status} (PerimeterX) through ${where}. ${action}. Waiting ${formatWait(wait)} before retrying.`)
       await ctx.sleep(wait)
     }

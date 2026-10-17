@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { consistencyText } from "../../../shared/consistency"
 import type { AccountInput, ProxyGroup, PublicAccount, StoreId, StoreInfo } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
@@ -31,16 +32,19 @@ export function AccountsPage() {
   const [form, setForm] = useState<FormState | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const [lang, setLang] = useState<"en" | "es">("en")
 
   async function reload() {
-    const [nextAccounts, nextStores, nextGroups] = await Promise.all([
+    const [nextAccounts, nextStores, nextGroups, settings] = await Promise.all([
       unwrap(window.aio.accounts.list()),
       unwrap(window.aio.stores.list()),
-      unwrap(window.aio.proxies.list())
+      unwrap(window.aio.proxies.list()),
+      unwrap(window.aio.settings.get())
     ])
     setAccounts(nextAccounts)
     setStores(nextStores)
     setGroups(nextGroups)
+    setLang(settings.settings.language === "es" ? "es" : "en")
   }
 
   useEffect(() => {
@@ -92,7 +96,7 @@ export function AccountsPage() {
       <header className="page-head">
         <div>
           <h1>Accounts</h1>
-          <p>Session Keeper signs in inside the app browser, or you can paste a session. The browser uses the account proxy and saves the cookies it already has.</p>
+          <p>{consistencyText(lang, "accountsIntro")}</p>
         </div>
         <button type="button" className="primary" onClick={() => { setForm(blank()); setError("") }}>New account</button>
       </header>
@@ -107,7 +111,7 @@ export function AccountsPage() {
             </Field>
             <Field label="Label"><TextInput value={form.label} onChange={(event) => setForm({ ...form, label: event.target.value })} required /></Field>
             <Field label="Username"><TextInput type="email" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} required /></Field>
-            <Field label="Proxy group" hint="Sticky IP for this account. A benched proxy rotates to the next one in the group.">
+            <Field label="Proxy group" hint={consistencyText(lang, "stickyHint")}>
               <Select value={form.proxyGroupId} onChange={(event) => setForm({ ...form, proxyGroupId: event.target.value })}>
                 <option value="">No assigned proxy</option>
                 {groups.map((group) => <option key={group.id} value={group.id}>{group.name} · {group.network}</option>)}
@@ -134,15 +138,17 @@ export function AccountsPage() {
       ) : null}
       <div className="table-wrap card">
         <table>
-          <thead><tr><th>Store</th><th>Label</th><th>Username</th><th>Password</th><th>Session</th><th></th></tr></thead>
+          <thead><tr><th>Store</th><th>Label</th><th>Username</th><th>Password</th><th>{consistencyText(lang, "freshness")}</th><th>{consistencyText(lang, "profile")}</th><th>{consistencyText(lang, "stickyProxy")}</th><th></th></tr></thead>
           <tbody>
-            {accounts.length === 0 ? <tr><td colSpan={6} className="empty">No accounts yet.</td></tr> : accounts.map((account) => (
+            {accounts.length === 0 ? <tr><td colSpan={8} className="empty">No accounts yet.</td></tr> : accounts.map((account) => (
               <tr key={account.id}>
                 <td>{storeName.get(account.store) ?? account.store}</td>
                 <td>{account.label}</td>
                 <td>{account.username}</td>
                 <td>{account.hasPassword ? "Saved" : "None"}</td>
-                <td>{account.sessionState === "expired" ? "Sign in again" : account.hasSession ? "Saved" : "None"}{account.lastWarmAt ? <div className="detail">Warmed {new Date(account.lastWarmAt).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}</div> : null}</td>
+                <td>{consistencyText(lang, account.freshness ?? "missing")}{account.lastWarmAt ? <div className="detail">{new Date(account.lastWarmAt).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}</div> : null}</td>
+                <td>{account.profilePartition ?? ""}</td>
+                <td>{account.stickyProxyLabel || "—"}</td>
                 <td className="row-actions">
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.openBrowser(account.id)).catch((err) => setError(errorText(err)))}>Sign in</button>
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.captureBrowser(account.id)).then(() => reload()).catch((err) => setError(errorText(err)))}>Save cookies</button>

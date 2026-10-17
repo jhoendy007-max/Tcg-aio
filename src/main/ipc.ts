@@ -20,6 +20,7 @@ import type { PhoneServer } from "../phone/server"
 import { encodePairingPayload } from "../phone/protocol"
 import { channels } from "../shared/ipc"
 import { openMailbox, testMailbox } from "../engine/imap"
+import { refreshShipments } from "../engine/shipments"
 import { completeMailSignIn } from "../engine/mail-oauth"
 import { imapCredential } from "../engine/mail-read"
 import { explainMailFailure, isMailHelpUrl } from "../shared/mail"
@@ -226,6 +227,17 @@ export function registerIpc(
     db.deleteSchedule(id)
     return { id }
   })
+  handle(channels.calendarList, () => db.listCalendar())
+  handle(channels.calendarSave, (input) => db.saveCalendarEvent(input))
+  handle(channels.calendarDelete, (id: string) => {
+    db.deleteCalendarEvent(id)
+    return { id }
+  })
+  handle(channels.calendarImport, (text: string) => db.importCalendar(text))
+  handle(channels.calendarCreate, (input) => db.createCalendarDrop(input))
+  handle(channels.tasksClone, (taskId: string, accountIds: string[]) => db.cloneAcrossAccounts(taskId, Array.isArray(accountIds) ? accountIds : []))
+  handle(channels.shipmentsList, () => db.listOrders())
+  handle(channels.shipmentsScan, () => refreshShipments(db, (input) => openMailbox(input)))
   handle(channels.analyticsGet, () => db.analytics())
   handle(channels.analyticsCsv, () => ({ csv: db.checkoutCsv() }))
   handle(channels.tasksBulk, (input) => {
