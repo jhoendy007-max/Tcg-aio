@@ -2,6 +2,7 @@ import { app, BrowserWindow, session, type Session, type WebContents } from "ele
 import type { Database } from "../engine/database"
 import { applySolvedCookies, challengePageUrl, cookieHeader, splitCookieHeader } from "../engine/challenge"
 import { looksSignedOut, sessionOrigin, sessionPartition, storeHome } from "../engine/session-care"
+import type { SessionWindowQueue } from "../shared/consistency"
 import { challengeHost } from "../engine/challenge"
 import type { FullAccount, ProxyEndpoint } from "../shared/types"
 
@@ -16,7 +17,7 @@ export interface SessionBrowser {
  * A normal Chromium window per account. The person signs in. TCGAIO reads the
  * cookies that browser stored. It does not generate sensor data or a fingerprint.
  */
-export function createSessionBrowser(db: Database, getParent: () => BrowserWindow | null): SessionBrowser {
+export function createSessionBrowser(db: Database, getParent: () => BrowserWindow | null, queue?: SessionWindowQueue): SessionBrowser {
   const windows = new Map<string, BrowserWindow>()
   const unlistens = new Map<string, () => void>()
 
@@ -88,6 +89,17 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
       db.markSession(account.id, "saved", false)
     },
     async warm(accountId) {
+      const run = () => warmAccount(accountId)
+      if (!queue) return run()
+      queue.setCap(db.getSettings().sessionWindowCap)
+      return queue.run(run)
+    },
+    async close() {
+      for (const id of [...windows.keys()]) await closeOne(id)
+    }
+  }
+
+  async function warmAccount(accountId: string): Promise<{ expired: boolean; detail: string }> {
       if (windows.has(accountId)) return { expired: false, detail: "The sign-in window is already open." }
       const account = db.readAccount(accountId)
       const { win } = await prepare(account, `Session warm-up · ${account.label}`, true)
@@ -112,10 +124,6 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
       } finally {
         await closeOne(account.id)
       }
-    },
-    async close() {
-      for (const id of [...windows.keys()]) await closeOne(id)
-    }
   }
 }
 

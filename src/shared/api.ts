@@ -29,6 +29,9 @@ import type {
   BulkShared,
   DropSchedule,
   DropScheduleInput,
+  CalendarEvent,
+  CalendarEventInput,
+  CalendarDropInput,
   UpdateStatus,
   TaskTemplate,
   TaskTemplateInput,
@@ -121,6 +124,13 @@ export interface AioApi {
     save: (input: DropScheduleInput) => Promise<Result<DropSchedule>>
     delete: (id: string) => Promise<Result<{ id: string }>>
   }
+  calendar: {
+    list: () => Promise<Result<CalendarEvent[]>>
+    save: (input: CalendarEventInput) => Promise<Result<CalendarEvent>>
+    delete: (id: string) => Promise<Result<{ id: string }>>
+    importFeed: (text: string) => Promise<Result<{ events: CalendarEvent[]; skipped: number }>>
+    create: (input: CalendarDropInput) => Promise<Result<{ tasks: PublicTask[]; schedule: DropSchedule }>>
+  }
   analytics: {
     get: () => Promise<Result<AnalyticsReport>>
     csv: () => Promise<Result<{ csv: string }>>
@@ -129,6 +139,7 @@ export interface AioApi {
     create: (input: BulkShared) => Promise<Result<{ tasks: PublicTask[]; errors: string[] }>>
     edit: (input: BulkEdit) => Promise<Result<{ updated: string[]; errors: { id: string; error: string }[] }>>
     duplicate: (ids: string[]) => Promise<Result<PublicTask[]>>
+    clone: (taskId: string, accountIds: string[]) => Promise<Result<PublicTask[]>>
     delete: (ids: string[]) => Promise<Result<{ deleted: string[]; errors: { id: string; error: string }[] }>>
   }
   updates: {
@@ -146,6 +157,10 @@ export interface AioApi {
     orders: () => Promise<Result<OrderRecord[]>>
     imap: () => Promise<Result<ImapView>>
     saveImap: (input: ImapInput) => Promise<Result<ImapView>>
+  }
+  shipments: {
+    list: () => Promise<Result<OrderRecord[]>>
+    scan: () => Promise<Result<{ orders: OrderRecord[]; updated: number; note: string }>>
   }
   mail: {
     list: () => Promise<Result<MailboxView[]>>

@@ -6,6 +6,7 @@ import { createAesCipher } from "../src/engine/cipher"
 import { Database } from "../src/engine/database"
 import { applyBlockRates } from "../src/engine/health"
 import { backoffDelay, isBlockStatus, jitterDelay, PoliteLimiter, STORE_GAP_MS } from "../src/engine/polite"
+import { healthScore } from "../src/shared/consistency"
 import { BENCH_AFTER, chooseSticky, noteBlock, noteScore } from "../src/engine/proxy-hygiene"
 import { looksSignedOut, storeHome, warmupDue } from "../src/engine/session-care"
 import type { ProxyEndpoint, StoreId } from "../src/shared/types"
@@ -60,8 +61,11 @@ describe("proxy hygiene", () => {
     expect(again.choice.rotated).toBe(false)
     let scores = noteScore([], "a", 403, 0)
     scores = noteScore(scores, "a", 412, 0)
-    expect(scores[0]?.benchedUntil).toBe(0)
     scores = noteScore(scores, "a", 429, 1_000)
+    expect(scores[0]?.streak).toBe(2)
+    expect(scores[0]?.benchedUntil).toBe(0)
+    expect(healthScore(scores[0])).toBe(0)
+    scores = noteScore(scores, "a", 435, 1_000)
     expect(scores[0]?.streak).toBe(BENCH_AFTER)
     expect(scores[0]?.benchedUntil).toBeGreaterThan(1_000)
     const moved = chooseSticky(proxies, again.pins, scores, "acct", "group", 1_000)

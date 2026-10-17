@@ -148,6 +148,7 @@ const TEXT = {
     monitorDelay: "Monitor delay (ms)",
     retryDelay: "Error / retry delay (ms)",
     jitter: "Jitter (%)",
+    jitterHint: "Blank uses the global jitter. A number here applies only to this task.",
     proxy: "Proxy group",
     zip: "ZIP / location",
     priceCap: "Price cap",
@@ -180,7 +181,15 @@ const TEXT = {
     direct: "Direct connection",
     sameProxy: "Same as checkout",
     confirm: "This task may place a real shipping order and charge the saved card when the item is in stock. Ignored while test mode is on.",
-    from: "From"
+    from: "From",
+    healthTitle: "Store health check",
+    healthHint: "Read-only monitor. No cart or checkout.",
+    healthRun: "Run health check",
+    healthStore: "Store",
+    healthProxy: "Proxy",
+    healthStatus: "Status",
+    healthBlock: "Block rate",
+    healthResult: "Result"
   },
   es: {
     monitor: "Monitor",
@@ -193,6 +202,7 @@ const TEXT = {
     monitorDelay: "Espera del monitor (ms)",
     retryDelay: "Espera de error / reintento (ms)",
     jitter: "Variación (%)",
+    jitterHint: "Vacío usa la variación global. Un número aquí vale solo para esta tarea.",
     proxy: "Grupo de proxy",
     zip: "ZIP / ubicación",
     priceCap: "Tope de precio",
@@ -225,7 +235,15 @@ const TEXT = {
     direct: "Conexión directa",
     sameProxy: "Igual que la compra",
     confirm: "Esta tarea puede hacer un pedido real y cobrar la tarjeta guardada cuando haya stock. Se ignora con el modo de prueba.",
-    from: "Origen"
+    from: "Origen",
+    healthTitle: "Salud de las tiendas",
+    healthHint: "Monitor de solo lectura. Sin carrito ni compra.",
+    healthRun: "Comprobar salud",
+    healthStore: "Tienda",
+    healthProxy: "Proxy",
+    healthStatus: "Estado",
+    healthBlock: "Tasa de bloqueo",
+    healthResult: "Resultado"
   }
 } as const
 

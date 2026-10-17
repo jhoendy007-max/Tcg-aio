@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { STORE_IDS, type AlertsView, type DiscordWatchInput, type KeywordWatch, type KeywordWatchInput, type ProxyGroup, type PublicAccount, type PublicProfile, type PublicTask, type RestockRule, type RestockRuleInput, type StoreId, type StoreInfo } from "../../../shared/types"
+import { dropOpsText } from "../../../shared/drop-ops"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
@@ -59,7 +60,8 @@ export function AlertsPage() {
   const [stores, setStores] = useState<StoreInfo[]>([])
   const [rule, setRule] = useState<RestockRuleInput | null>(null)
   const [watch, setWatch] = useState<KeywordWatchInput | null>(null)
-  const [discord, setDiscord] = useState<DiscordWatchInput>({ channelId: "", enabled: false, token: "", tokenAction: "keep" })
+  const [discord, setDiscord] = useState<DiscordWatchInput>({ channelId: "", channelIds: "", allowlist: "", dedupeMin: 30, enabled: false, token: "", tokenAction: "keep" })
+  const [lang, setLang] = useState<"en" | "es">("en")
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
@@ -79,7 +81,18 @@ export function AlertsPage() {
     setGroups(nextGroups)
     setTasks(nextTasks)
     setStores(nextStores)
-    setDiscord((current) => ({ ...current, channelId: next.channelId, enabled: next.discordWatch, token: "", tokenAction: "keep" }))
+    setDiscord((current) => ({
+      ...current,
+      channelId: next.channelId,
+      channelIds: next.channelIds || next.channelId,
+      allowlist: next.allowlist,
+      dedupeMin: next.dedupeMin,
+      enabled: next.discordWatch,
+      token: "",
+      tokenAction: "keep"
+    }))
+    const settings = await unwrap(window.aio.settings.get())
+    setLang(settings.settings.language === "es" ? "es" : "en")
   }
 
   useEffect(() => {
@@ -153,12 +166,18 @@ export function AlertsPage() {
         void run(async () => { await unwrap(window.aio.alerts.saveDiscord(discord)) }, "Discord watcher saved.")
       }}>
         <h2 className="span-2">Discord channel watcher</h2>
-        <p className="span-2">A bot you create reads one channel for SKUs, product links, or the JSON above. The token stays on this PC. Messages already in the channel are ignored when the watcher first turns on.</p>
+        <p className="span-2">A bot you create reads the channels you list for SKUs, product links, or the JSON above. The token stays on this PC and is not sent to the phone. Messages already in a channel are ignored when that channel is first armed.</p>
         <Field label="Bot token" hint={view?.hasBot ? "Saved. Leave blank to keep it." : "Required to turn the watcher on."}>
           <TextInput type="password" value={discord.token} autoComplete="off" onChange={(event) => setDiscord({ ...discord, token: event.target.value, tokenAction: event.target.value ? "replace" : "keep" })} />
         </Field>
-        <Field label="Channel ID">
-          <TextInput value={discord.channelId} onChange={(event) => setDiscord({ ...discord, channelId: event.target.value })} placeholder="123456789012345678" />
+        <Field className="span-2" label={dropOpsText(lang, "channels")} hint={dropOpsText(lang, "channelsHint")}>
+          <textarea rows={3} value={discord.channelIds ?? ""} onChange={(event) => setDiscord({ ...discord, channelIds: event.target.value, channelId: event.target.value })} placeholder="123456789012345678" />
+        </Field>
+        <Field className="span-2" label={dropOpsText(lang, "allowlist")} hint={dropOpsText(lang, "allowlistHint")}>
+          <textarea rows={3} value={discord.allowlist ?? ""} onChange={(event) => setDiscord({ ...discord, allowlist: event.target.value })} />
+        </Field>
+        <Field label={dropOpsText(lang, "dedupe")} hint={dropOpsText(lang, "dedupeHint")}>
+          <TextInput type="number" min={0} max={1440} value={discord.dedupeMin ?? 30} onChange={(event) => setDiscord({ ...discord, dedupeMin: Number(event.target.value) })} />
         </Field>
         <label className="check span-2">
           <input type="checkbox" checked={discord.enabled} onChange={(event) => setDiscord({ ...discord, enabled: event.target.checked })} />

@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.19-beta monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.22-beta checks out Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct. Account tasks stay on that account's persistent Chromium profile and one sticky proxy.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -33,9 +33,9 @@ To add a store:
 4. Set the polite gap, Session Keeper home, challenge host and page, health probe, listing search, and bulk/restock parsers.
 5. Add fixtures and tests. A missing session must not call the store. A guest session must not add to cart. Test mode must end as `tested` and must not call the place-order URL.
 
-GameStop, Barnes & Noble, Costco, and Sam's Club read the product page with the saved session cookies. Purchasable means schema.org InStock, LimitedAvailability, PreOrder, or PreSale, or a visible Add to Cart control. A challenge page pauses for a person. These four modules do not add to cart: an in-stock checkout pauses and tells the user to add it in the account browser. Test mode ends as `tested` without a cart or place-order POST. Costco's product JSON often says OutOfStock when the page is only a default. No add control means the task keeps watching, and the log does not invent a warehouse count. Do not call `ecom-api.costco.com` or replay a client id from the page bundle.
+GameStop, Barnes & Noble, Costco, and Sam's Club read the product page with the saved session cookies. Purchasable means schema.org InStock, LimitedAvailability, PreOrder, or PreSale, or a visible Add to Cart control. A challenge page pauses for a person. Checkout posts only to a form action on that store's host, using the fields and CSRF token the page already included. If the in-stock page has no same-host add-to-cart form, the task pauses and the user adds it in the account browser. Address, shipping, and payment steps come from later forms on that same host. A saved card shown on the page is selected. The card number is posted only to a tokenization form the page itself links on that host. If neither exists, checkout pauses and the card is not sent. Place order is only the form action `isFinalSubmit` already names, and test mode returns `tested` before that POST. A page price above the task max, or a spend-limit refusal, does not add to cart. Costco's product JSON often says OutOfStock when the page is only a default. No add control means the task keeps watching, and the log does not invent a warehouse count. Do not call `ecom-api.costco.com`, follow a redirect off the store host, or replay a client id from the page bundle. Do not forge sensor data, cookies, or a TLS fingerprint.
 
-TCGplayer Direct uses the public catalog: GET `mp-search-api.tcgplayer.com/v1/product/{id}/details` and POST that host's `/listings` search. A missing session may still make those catalog requests. Direct stock means `directListing` or `directInventory` on a listing with quantity. A Direct-enrolled seller with neither is not Direct stock. Sold by any seller accepts any listing with quantity. The module does not POST a cart or an order. Keyword search stays a GET of the public search URL. Do not reverse the cart microfrontend.
+TCGplayer Direct uses the public catalog: GET `mp-search-api.tcgplayer.com/v1/product/{id}/details` and POST that host's `/listings` search. A missing session may still make those catalog requests. Direct stock means `directListing` or `directInventory` on a listing with quantity. A Direct-enrolled seller with neither is not Direct stock. Sold by any seller accepts any listing with quantity. Checkout needs the saved www.tcgplayer.com session and a cart form on that host. The catalog host still refuses cart, checkout, and place-order paths. Keyword search stays a GET of the public search URL. Do not reverse the cart microfrontend or invent a cart POST.
 
 Official US Pokémon Center preorders stay on the Pokémon Center module (`PRE_ORDER` / `PREORDER` are buyable). Official Premium Bandai preorders, including One Piece card-shop drops, stay on the Premium Bandai module (`PRE_ORDER` and `preOrderStatus` InProgress). Do not add a second store for those. Japan Pokémon Center is out of scope.
 
@@ -124,6 +124,28 @@ The phone can set autopilot and pause every running task. The desktop app stays 
 Host permissions are only the store sites in the catalog. The user links each account explicitly. The extension reads cookies, and the allowlisted localStorage keys in `extension/policy.mjs`, only for a linked account. A push is stored with `updateSession(..., quiet)` so it does not echo back. Two-way is off until the user turns it on. A two-way pull or `vault.session` writes cookie pairs the desktop already saved. It does not invent cookie names.
 
 The desktop Session Sync page shows expiry, last used, and a flag. It does not show the cookie. A one-minute check uses the saved expiry. It does not open store login pages. Logged-out and expiring-soon notices go to Discord and the phone at most once per day. The cookie never goes in the phone snapshot or a broadcast to every device.
+
+## Session consistency
+
+Account tasks run in that account's persistent Chromium partition `persist:account-${id}`, the same profile Session Keeper and hidden refresh already use. Cookies written into it are only ones Session Sync or the store already set. Do not launch the user's Chrome user-data directory, and do not spoof or randomize TLS, JA3, the browser, canvas, or a device fingerprint. Do not forge anti-bot sensors or cookies.
+
+Each account has one sticky proxy, not shared with another account. A checkout does not rotate off it. The next task start may pick another proxy only after that proxy is quarantined. Quarantine is three HTTP 403, 412, or 435 responses, then a 30 minute cooldown. HTTP 429 stays a block for pacing and does not quarantine. The Proxies page shows a 0–100 health score. Tasks with no account may pick their own proxy and may move after a block. The task table and editor show the effective account, proxy, and browser profile, and where each came from. A task proxy group that would replace the account's sticky proxy is a warning, not a switch. Pacing, jitter, retries, max price, and test mode stay on the task, with task over store over global Settings.
+
+Requests that share an account or a proxy share one polite clock per store. The gap is that task's rate limit, never under the store floor, plus that task's jitter. Optional warm-up, when Session Keeper is on, browses the store homepage and checks the sign-in in the days before a drop. It does not add to cart. Near-expiry sessions refresh across the last few minutes before the drop. Hidden session windows are capped (Settings, default 3) and the rest wait. The captcha phone handoff is unchanged.
+
+Residential proxies the user controls are the right pool. Datacenter addresses are challenged more often. TCGAIO does not hide TLS to compensate.
+
+## Drop operations
+
+The Drops page accepts Pokémon and One Piece release dates the user types, or a JSON array / ICS feed the user pastes. Other games are skipped. One click creates a task per selected account and a schedule. Each task uses that account's proxy group, not a shared group copied from another account.
+
+Discord-to-task uses the local restock webhook and the optional Discord bot. The bot token stays encrypted and is not returned to the renderer or the phone. The user lists the channel ids the bot may read. An allowlist of channel ids, user ids, or source names can limit which alerts start tasks. An empty allowlist keeps the saved channels and the authenticated webhook. The same store and SKU is ignored for the dedupe window. 0 turns dedupe off.
+
+Clone copies a task onto the accounts the user selects. Each copy keeps that account's sticky proxy group and browser profile. The payment profile stays. The source task's proxy group and monitor pool are not copied.
+
+A schedule can run a rehearsal N minutes before the drop. It checks the saved session, the sticky proxy, the address, and the card last four and expiry. It does not add to cart and does not place an order. Failures go out through the same Discord notice and phone notice as other drop messages.
+
+Shipping status is read from IMAP mail the user connected. The status page is one order at a time. The client does not send mail. Per-account daily spend, per-card daily spend, and per-card daily order count are Settings. 0 means off. `allowCheckout` refuses the order before place-order. Checkout rows store the last four only, never the full card number.
 
 Do not harvest other sites, share a session with another user, or forge cookies. `scripts/pack-extension.mjs` writes `release/TCGAIO-Session-Sync-<version>.zip` (manifest at the zip root) and a `.crx` around that zip. The private key is not written. Load unpacked is the install path. A `v*` tag publishes the zip next to the Windows installer and the release APK.
 

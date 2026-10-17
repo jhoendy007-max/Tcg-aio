@@ -51,6 +51,12 @@ describe("store module settings", () => {
     expect(slow.rateLimitMs).toEqual({ value: 1000, source: "module" })
     const raised = resolveModule("amazon", moduleScope(DEFAULT_SETTINGS), { rateLimitMs: 100 })
     expect(raised.rateLimitMs.value).toBe(MODULE_RATE_FLOOR.amazon)
+    const taskPace = resolveModule("target", moduleScope({
+      ...DEFAULT_SETTINGS,
+      modules: { target: { rateLimitMs: 2000, maxRetries: 2 } }
+    }), { rateLimitMs: 1500, maxRetries: 6 })
+    expect(taskPace.rateLimitMs).toEqual({ value: 1500, source: "task" })
+    expect(taskPace.maxRetries).toEqual({ value: 6, source: "task" })
   })
 
   it("exports and imports one store preset", () => {

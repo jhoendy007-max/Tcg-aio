@@ -174,7 +174,7 @@ describe("shared monitor", () => {
 })
 
 describe("block recovery", () => {
-  it("rotates after a block and does not treat a product queue as a block", async () => {
+  it("keeps the account proxy after a block and does not treat a product queue as a block", async () => {
     resetBlockRecoveryState()
     expect(backoffMs(1, 1000, 0)).toBe(500)
     expect(backoffMs(3, 1000, 1)).toBe(4000)
@@ -202,9 +202,9 @@ describe("block recovery", () => {
       blocked: (result) => isBlockStatus(result.status, result)
     })
     expect(response.status).toBe(200)
-    expect(seen).toEqual(["a", "b"])
+    expect(seen).toEqual(["a", "a"])
     expect(applied).toEqual(["fresh"])
-    expect(ctx.proxy?.id).toBe("b")
+    expect(ctx.proxy?.id).toBe("a")
   })
 })
 

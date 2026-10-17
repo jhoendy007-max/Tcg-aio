@@ -10,6 +10,7 @@ import { AppError } from "../shared/errors"
 import { parseProxyList } from "../shared/proxy"
 import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
+import { accountPartition, sessionFreshness } from "../shared/consistency"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
 import { openBackup, sealBackup, type BackupAccount, type BackupDocument, type BackupProfile } from "./backup"
@@ -17,6 +18,9 @@ import { assertLicenseAllowed, bindMachine, createLicenseIdentity, readLicense, 
 import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent } from "./monitor"
 import { vaultFlag } from "./vault"
 import { parseAstLocal } from "./time"
+import { calendarTaskInputs, gameOf, parseCalendar } from "./calendar"
+import { clonedTaskInputs } from "./clone-task"
+import { channelIdsFrom } from "./discord-gate"
 import { cleanModuleRecord, cleanTaskOverrides, parseModulePreset } from "../shared/module-settings"
 import { cleanRole, normalizeRole, structuralChange } from "../shared/task-role"
 import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
@@ -60,6 +64,9 @@ import type {
   TaskTemplateInput,
   OrderRecord,
   OrderStatus,
+  CalendarEvent,
+  CalendarEventInput,
+  CalendarDropInput,
   ImapView,
   ImapInput,
   MailboxInput,
@@ -105,8 +112,13 @@ interface RestockFile {
   tokenSecret?: string
   discordBotSecret?: string
   discordChannelId: string
+  discordChannelIds?: string[]
+  discordCursors?: Record<string, string>
   discordWatch: boolean
   lastDiscordMessageId: string
+  alertAllowlist?: string
+  alertDedupeMin?: number
+  alertSeen?: { key: string; at: number }[]
   rules: RestockRule[]
   watches: KeywordWatch[]
   log: AlertLog[]
@@ -153,6 +165,7 @@ interface DbFile {
   hygiene?: HygieneFile
   schedules?: DropSchedule[]
   checkouts?: CheckoutRecord[]
+  calendar?: CalendarEvent[]
   updates?: UpdateFile
   backup?: { tokenSecret?: string }
   license?: LicenseFile
@@ -221,6 +234,7 @@ export class Database {
       hygiene: normalizeHygiene(parsed.hygiene),
       schedules: normalizeSchedules(parsed.schedules),
       checkouts: normalizeCheckouts(parsed.checkouts),
+      calendar: normalizeCalendar(parsed.calendar),
       updates: normalizeUpdates(parsed.updates),
       backup: normalizeBackup(parsed.backup),
       license: normalizeLicense(parsed.license),
@@ -382,7 +396,22 @@ export class Database {
   }
 
   listAccounts(): PublicAccount[] {
-    return this.data.accounts.map(toPublicAccount)
+    const pins = this.hygiene().pins
+    const proxies = this.data.proxyGroups.flatMap((group) => group.proxies)
+    const freshMin = this.data.settings?.sessionWarmupMin ?? 30
+    const now = Date.now()
+    return this.data.accounts.map((record) => {
+      const account = toPublicAccount(record)
+      const pin = pins.find((item) => item.accountId === account.id && item.exclusive !== false)
+      const proxy = pin ? proxies.find((item) => item.id === pin.proxyId) : undefined
+      return {
+        ...account,
+        stickyProxyId: pin?.proxyId ?? null,
+        stickyProxyLabel: proxy ? `${proxy.host}:${proxy.port}` : null,
+        profilePartition: accountPartition(account.id),
+        freshness: sessionFreshness(account, now, freshMin)
+      }
+    })
   }
 
   saveAccount(input: AccountInput): PublicAccount {
@@ -499,12 +528,20 @@ export class Database {
     return this.data.hygiene
   }
 
-  assignProxy(accountId: string, groupId: string, proxies: ProxyEndpoint[], now = Date.now()) {
+  assignProxy(accountId: string, groupId: string, proxies: ProxyEndpoint[], now = Date.now(), exclusive = true) {
     const hygiene = this.hygiene()
-    const result = chooseSticky(proxies, hygiene.pins, hygiene.scores, accountId, groupId, now)
+    const result = chooseSticky(proxies, hygiene.pins, hygiene.scores, accountId, groupId, now, exclusive)
     hygiene.pins = result.pins
     this.flush()
     return result.choice
+  }
+
+  findProxy(id: string): ProxyEndpoint | undefined {
+    for (const group of this.data.proxyGroups) {
+      const proxy = group.proxies.find((item) => item.id === id)
+      if (proxy) return { ...proxy }
+    }
+    return undefined
   }
 
   listProxyGroups(): ProxyGroup[] {
@@ -614,6 +651,15 @@ export class Database {
     this.data.tasks.unshift(...tasks)
     this.flush()
     return tasks.map(cloneTask)
+  }
+
+  cloneAcrossAccounts(taskId: string, accountIds: string[]): PublicTask[] {
+    const task = this.requireTask(taskId)
+    const accounts = [...new Set(accountIds)].map((id) => this.requireAccount(id))
+    const planned = clonedTaskInputs(task, accounts)
+    if (!planned.inputs.length) throw new AppError("Choose an account for this store.")
+    if (planned.inputs.length > 50) throw new AppError("Clone at most 50 accounts at once.")
+    return planned.inputs.map((input) => this.saveTask(input))
   }
 
   duplicateTasks(ids: string[]): PublicTask[] {
@@ -820,6 +866,8 @@ export class Database {
     if (stopAt !== null && (!Number.isFinite(stopAt) || stopAt <= startAt)) throw new AppError("Stop time has to be after the start time.")
     const warmupMin = Math.round(Number(input.warmupMin))
     if (!Number.isInteger(warmupMin) || warmupMin < 0 || warmupMin > 180) throw new AppError("Warm-up has to be from 0 to 180 minutes.")
+    const rehearsalMin = Math.round(Number(input.rehearsalMin ?? 0))
+    if (!Number.isInteger(rehearsalMin) || rehearsalMin < 0 || rehearsalMin > 180) throw new AppError("Rehearsal has to be from 0 to 180 minutes.")
     const taskIds = [...new Set((input.taskIds ?? []).filter((id) => typeof id === "string" && id))]
     const group = (input.group ?? "").trim().slice(0, 40)
     if (!taskIds.length && !group) throw new AppError("Choose tasks or a task group.")
@@ -833,6 +881,8 @@ export class Database {
       startAt,
       stopAt,
       warmupMin,
+      rehearsalMin,
+      rehearsalAt: existing && existing.startAt === startAt ? existing.rehearsalAt ?? null : null,
       taskIds,
       group,
       phase: existing && existing.startAt === startAt ? existing.phase : "waiting"
@@ -858,6 +908,92 @@ export class Database {
     this.flush()
   }
 
+  markRehearsal(id: string, at: number): void {
+    const schedule = this.data.schedules?.find((item) => item.id === id)
+    if (!schedule) return
+    schedule.rehearsalAt = at
+    this.flush()
+  }
+
+  listCalendar(): CalendarEvent[] {
+    return (this.data.calendar ?? []).map((event) => ({ ...event }))
+  }
+
+  saveCalendarEvent(input: CalendarEventInput): CalendarEvent {
+    const game = gameOf(input.game)
+    if (!game) throw new AppError("The calendar only accepts Pokémon and One Piece.")
+    const name = input.name.trim()
+    if (!name) throw new AppError("Release name is required.")
+    const startAt = typeof input.startAt === "number" ? input.startAt : parseAstLocal(String(input.startAt))
+    if (!Number.isFinite(startAt)) throw new AppError("Start time is required.")
+    const store = assertStore(input.store)
+    const sku = input.sku.trim()
+    if (!sku) throw new AppError("SKU is required.")
+    const existing = input.id ? this.data.calendar?.find((event) => event.id === input.id) : undefined
+    const event: CalendarEvent = {
+      id: existing?.id ?? randomUUID(),
+      game,
+      name: name.slice(0, 80),
+      startAt,
+      store,
+      sku: sku.slice(0, 180),
+      note: (input.note ?? "").trim().slice(0, 180)
+    }
+    if (!this.data.calendar) this.data.calendar = []
+    if (existing) this.data.calendar = this.data.calendar.map((item) => (item.id === event.id ? event : item))
+    else this.data.calendar.unshift(event)
+    this.flush()
+    return { ...event }
+  }
+
+  importCalendar(text: string): { events: CalendarEvent[]; skipped: number } {
+    const parsed = parseCalendar(text)
+    if ("error" in parsed) throw new AppError(parsed.error)
+    const saved: CalendarEvent[] = []
+    for (const draft of parsed.events) {
+      const existing = (this.data.calendar ?? []).find((event) => event.game === draft.game && event.store === draft.store && event.sku === draft.sku && event.startAt === draft.startAt)
+      saved.push(this.saveCalendarEvent({ ...draft, id: existing?.id }))
+    }
+    return { events: saved, skipped: parsed.skipped }
+  }
+
+  deleteCalendarEvent(id: string): void {
+    const next = (this.data.calendar ?? []).filter((event) => event.id !== id)
+    if (next.length === (this.data.calendar ?? []).length) throw new AppError("That release was not found.")
+    this.data.calendar = next
+    this.flush()
+  }
+
+  createCalendarDrop(input: CalendarDropInput): { tasks: PublicTask[]; schedule: DropSchedule } {
+    const event = this.data.calendar?.find((item) => item.id === input.eventId)
+    if (!event) throw new AppError("That release was not found.")
+    this.requireProfile(input.profileId)
+    const accounts = [...new Set(input.accountIds)].map((id) => this.requireAccount(id))
+    const quantity = Math.round(Number(input.quantity))
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
+    const planned = calendarTaskInputs({
+      event,
+      accounts,
+      profileId: input.profileId,
+      quantity,
+      testMode: input.testMode === true,
+      confirmPurchase: input.confirmPurchase === true && input.testMode !== true
+    })
+    if (!planned.length) throw new AppError("Choose an account for this store.")
+    if (planned.length > 50) throw new AppError("Create at most 50 tasks at once.")
+    const tasks = planned.map((item) => this.saveTask(item))
+    const schedule = this.saveSchedule({
+      name: event.name,
+      enabled: true,
+      startAt: event.startAt,
+      warmupMin: input.warmupMin,
+      rehearsalMin: input.rehearsalMin,
+      taskIds: tasks.map((task) => task.id),
+      group: event.name.slice(0, 40)
+    })
+    return { tasks, schedule }
+  }
+
   recordCheckout(input: Omit<CheckoutRecord, "id" | "at" | "price" | "detail"> & { detail: string; price?: number | null }): CheckoutRecord {
     const detail = redact(input.detail).slice(0, 240)
     const record: CheckoutRecord = {
@@ -873,6 +1009,7 @@ export class Database {
       accountId: input.accountId,
       profileId: input.profileId,
       quantity: input.quantity,
+      last4: cardLast4(input.last4),
       detail
     }
     if (!this.data.checkouts) this.data.checkouts = []
@@ -1425,23 +1562,26 @@ export class Database {
     return token
   }
 
-  discordWatchConfig(): { enabled: boolean; channelId: string; token: string; lastMessageId: string; hasBot: boolean } {
+  discordWatchConfig(): { enabled: boolean; channelId: string; channelIds: string[]; token: string; lastMessageId: string; hasBot: boolean; allowlist: string; dedupeMin: number } {
     const restock = this.restock()
+    const channelIds = discordChannels(restock)
     return {
       enabled: restock.discordWatch,
-      channelId: restock.discordChannelId,
+      channelId: channelIds[0] ?? "",
+      channelIds,
       token: restock.discordBotSecret ? this.cipher.decrypt(restock.discordBotSecret) : "",
       lastMessageId: restock.lastDiscordMessageId,
-      hasBot: Boolean(restock.discordBotSecret)
+      hasBot: Boolean(restock.discordBotSecret),
+      allowlist: restock.alertAllowlist ?? "",
+      dedupeMin: typeof restock.alertDedupeMin === "number" ? restock.alertDedupeMin : 30
     }
   }
 
   saveDiscordWatch(input: DiscordWatchInput): void {
-    const channelId = input.channelId.trim()
-    if (channelId && !/^\d{17,22}$/.test(channelId)) throw new AppError("Discord channel ID must be the numeric channel id.")
-    if (input.enabled && !channelId) throw new AppError("Enter the Discord channel ID before turning the watcher on.")
+    const listed = channelIdsFrom(`${input.channelId ?? ""}\n${input.channelIds ?? ""}`)
+    if (input.enabled && !listed.length) throw new AppError("Enter the Discord channel ID before turning the watcher on.")
     const restock = this.restock()
-    if (channelId !== restock.discordChannelId) restock.lastDiscordMessageId = ""
+    const previous = new Set(discordChannels(restock))
     if (input.tokenAction === "clear") restock.discordBotSecret = undefined
     if (input.tokenAction === "replace") {
       const token = input.token.trim()
@@ -1449,9 +1589,22 @@ export class Database {
       restock.discordBotSecret = this.cipher.encrypt(token)
     }
     if (input.enabled && !restock.discordBotSecret) throw new AppError("Save a Discord bot token before turning the watcher on.")
-    restock.discordChannelId = channelId
+    restock.discordChannelId = listed[0] ?? ""
+    restock.discordChannelIds = listed.slice(1)
+    const cursors = { ...(restock.discordCursors ?? {}) }
+    for (const id of Object.keys(cursors)) {
+      if (!listed.includes(id)) delete cursors[id]
+    }
+    restock.discordCursors = cursors
+    if (!previous.has(restock.discordChannelId)) restock.lastDiscordMessageId = ""
     restock.discordWatch = input.enabled === true
     if (!restock.discordWatch) restock.lastDiscordMessageId = ""
+    if (input.allowlist !== undefined) restock.alertAllowlist = input.allowlist.trim().slice(0, 2000)
+    if (input.dedupeMin !== undefined) {
+      const minutes = Math.round(Number(input.dedupeMin))
+      if (!Number.isInteger(minutes) || minutes < 0 || minutes > 1440) throw new AppError("Dedupe has to be from 0 to 1440 minutes.")
+      restock.alertDedupeMin = minutes
+    }
     this.flush()
   }
 
@@ -1460,8 +1613,26 @@ export class Database {
     this.flush()
   }
 
-  setDiscordCursor(id: string): void {
-    this.restock().lastDiscordMessageId = id
+  setDiscordCursor(channelId: string, id: string): void {
+    const restock = this.restock()
+    if (!restock.discordCursors) restock.discordCursors = {}
+    restock.discordCursors[channelId] = id
+    if (channelId === restock.discordChannelId) restock.lastDiscordMessageId = id
+    this.flush()
+  }
+
+  discordCursor(channelId: string): string {
+    const restock = this.restock()
+    if (channelId === restock.discordChannelId && restock.lastDiscordMessageId) return restock.lastDiscordMessageId
+    return restock.discordCursors?.[channelId] ?? ""
+  }
+
+  alertSeen(): { key: string; at: number }[] {
+    return (this.restock().alertSeen ?? []).map((item) => ({ ...item }))
+  }
+
+  rememberAlerts(seen: { key: string; at: number }[]): void {
+    this.restock().alertSeen = seen.slice(0, 200)
     this.flush()
   }
 
@@ -1764,11 +1935,12 @@ export class Database {
     return { ...order }
   }
 
-  noteOrder(id: string, status: OrderStatus, tracking: string, detail: string): void {
+  noteOrder(id: string, status: OrderStatus, tracking: string, detail: string, carrier = ""): void {
     const order = this.data.orders?.find((item) => item.id === id)
     if (!order) return
     order.status = status
     order.tracking = tracking.slice(0, 40)
+    order.carrier = carrier.slice(0, 20)
     order.detail = detail.slice(0, 240)
     order.checkedAt = Date.now()
     this.flush()
@@ -2213,7 +2385,15 @@ function normalizeImap(value: DbFile["imap"]): NonNullable<DbFile["imap"]> {
 }
 
 function emptyRestock(): RestockFile {
-  return { discordChannelId: "", discordWatch: false, lastDiscordMessageId: "", rules: [], watches: [], log: [] }
+  return { discordChannelId: "", discordChannelIds: [], discordCursors: {}, discordWatch: false, lastDiscordMessageId: "", alertAllowlist: "", alertDedupeMin: 30, alertSeen: [], rules: [], watches: [], log: [] }
+}
+
+function discordChannels(restock: RestockFile): string[] {
+  return [...new Set([restock.discordChannelId, ...(restock.discordChannelIds ?? [])].map((id) => id.trim()).filter((id) => /^\d{17,22}$/.test(id)))]
+}
+
+function cardLast4(value: string | undefined): string | undefined {
+  return value && /^\d{4}$/.test(value) ? value : undefined
 }
 
 function toPublicProfile(record: ProfileRecord): PublicProfile {
@@ -2371,6 +2551,19 @@ function normalizeUpdates(value: UpdateFile | undefined): UpdateFile {
   }
 }
 
+function normalizeCalendar(value: CalendarEvent[] | undefined): CalendarEvent[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((event) => event && typeof event.id === "string" && (event.game === "pokemon" || event.game === "onepiece") && typeof event.startAt === "number" && STORE_IDS.includes(event.store)).map((event) => ({
+    id: event.id,
+    game: event.game,
+    name: typeof event.name === "string" ? event.name : "Release",
+    startAt: event.startAt,
+    store: event.store,
+    sku: typeof event.sku === "string" ? event.sku : "",
+    note: typeof event.note === "string" ? event.note : ""
+  })).slice(0, 200)
+}
+
 function normalizeSchedules(value: DropSchedule[] | undefined): DropSchedule[] {
   if (!Array.isArray(value)) return []
   return value.filter((schedule) => schedule && typeof schedule.id === "string" && typeof schedule.startAt === "number").map((schedule) => ({
@@ -2380,6 +2573,8 @@ function normalizeSchedules(value: DropSchedule[] | undefined): DropSchedule[] {
     startAt: schedule.startAt,
     stopAt: typeof schedule.stopAt === "number" ? schedule.stopAt : null,
     warmupMin: typeof schedule.warmupMin === "number" ? schedule.warmupMin : 0,
+    rehearsalMin: typeof schedule.rehearsalMin === "number" ? schedule.rehearsalMin : 0,
+    rehearsalAt: typeof schedule.rehearsalAt === "number" ? schedule.rehearsalAt : null,
     taskIds: Array.isArray(schedule.taskIds) ? schedule.taskIds.filter((id) => typeof id === "string") : [],
     group: typeof schedule.group === "string" ? schedule.group : "",
     phase: schedule.phase === "warming" || schedule.phase === "started" || schedule.phase === "stopped" ? schedule.phase : "waiting"
@@ -2390,9 +2585,8 @@ function normalizeCheckouts(value: CheckoutRecord[] | undefined): CheckoutRecord
   if (!Array.isArray(value)) return []
   const outcomes = new Set<CheckoutOutcome>(["success", "failure", "paused", "tested"])
   return value.filter((record) => record && typeof record.id === "string" && outcomes.has(record.outcome)).slice(0, 400).map((record) => {
-    const marketValue = record.marketValue
-    if (typeof marketValue === "number" && Number.isFinite(marketValue) && marketValue >= 0) return { ...record, marketValue: Math.round(marketValue * 100) / 100 }
-    return { ...record, marketValue: null }
+    const marketValue = typeof record.marketValue === "number" && Number.isFinite(record.marketValue) && record.marketValue >= 0 ? Math.round(record.marketValue * 100) / 100 : null
+    return { ...record, marketValue, last4: cardLast4(record.last4) }
   })
 }
 
@@ -2403,8 +2597,13 @@ function normalizeRestock(value: RestockFile | undefined): RestockFile {
     tokenSecret: typeof value.tokenSecret === "string" ? value.tokenSecret : undefined,
     discordBotSecret: typeof value.discordBotSecret === "string" ? value.discordBotSecret : undefined,
     discordChannelId: typeof value.discordChannelId === "string" ? value.discordChannelId : "",
+    discordChannelIds: Array.isArray(value.discordChannelIds) ? value.discordChannelIds.filter((id) => typeof id === "string").slice(0, 20) : [],
+    discordCursors: value.discordCursors && typeof value.discordCursors === "object" ? value.discordCursors : {},
     discordWatch: value.discordWatch === true,
     lastDiscordMessageId: typeof value.lastDiscordMessageId === "string" ? value.lastDiscordMessageId : "",
+    alertAllowlist: typeof value.alertAllowlist === "string" ? value.alertAllowlist.slice(0, 2000) : "",
+    alertDedupeMin: typeof value.alertDedupeMin === "number" ? value.alertDedupeMin : 30,
+    alertSeen: Array.isArray(value.alertSeen) ? value.alertSeen.filter((item) => item && typeof item.key === "string" && typeof item.at === "number").slice(0, 200) : [],
     rules: Array.isArray(value.rules) ? value.rules : [],
     watches: Array.isArray(value.watches) ? value.watches : [],
     log: Array.isArray(value.log) ? value.log : []

@@ -1,10 +1,11 @@
-import { cookieHeader } from "../../engine/challenge"
 import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
-import { finishTest, note } from "../../engine/test-mode"
-import type { SessionCookies } from "../../shared/types"
+import { note } from "../../engine/test-mode"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
+import { checkoutCopy, checkoutLang } from "./copy"
+import { checkoutFromPage } from "./flow"
+import { PageCookies } from "./jar"
 import {
   isLoginWall,
   isPageChallenge,
@@ -14,54 +15,16 @@ import {
   type PageSpec
 } from "./parse"
 
+export { pageHandoff } from "./copy"
+
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-export function pageChallengePause(name: string): string {
-  return `${name} presented a challenge. Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges.`
+export function pageChallengePause(name: string, language?: string): string {
+  return checkoutCopy(checkoutLang(language)).challenge(name)
 }
 
 export function pageSessionPause(name: string, host: string): string {
   return `Paste a signed-in ${name} session (the ${host} cookie header) or use Sign in on the Session Keeper page. TCGAIO does not solve challenges.`
-}
-
-export function pageHandoff(title: string): string {
-  return `${title} is in stock. Add it in the account browser. TCGAIO did not add it to the cart or place an order.`
-}
-
-class CookieJar {
-  private cookies = new Map<string, string>()
-
-  load(session?: SessionCookies): void {
-    const header = cookieHeader(session)
-    if (!header) return
-    for (const part of header.split(/;\s*/)) {
-      const eq = part.indexOf("=")
-      if (eq <= 0) continue
-      this.cookies.set(part.slice(0, eq).trim(), part.slice(eq + 1).trim())
-    }
-  }
-
-  absorb(headers: HttpResponse["headers"]): boolean {
-    const value = headers["set-cookie"]
-    const list = Array.isArray(value) ? value : value ? [value] : []
-    let changed = false
-    for (const cookie of list) {
-      const pair = cookie.split(";")[0]?.trim() ?? ""
-      const eq = pair.indexOf("=")
-      if (eq <= 0) continue
-      const name = pair.slice(0, eq).trim()
-      const next = pair.slice(eq + 1).trim()
-      if (this.cookies.get(name) !== next) {
-        this.cookies.set(name, next)
-        changed = true
-      }
-    }
-    return changed
-  }
-
-  header(): string {
-    return [...this.cookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ")
-  }
 }
 
 interface StepOk<T> {
@@ -73,6 +36,11 @@ interface StepStop {
   reason: string
 }
 type Step<T> = StepOk<T> | StepStop
+
+interface OfferHit {
+  reading: PageReading
+  html: string
+}
 
 export function createPageModule(spec: PageSpec): StoreModule {
   return {
@@ -91,9 +59,9 @@ async function runPage(ctx: StoreRunContext, spec: PageSpec): Promise<StoreRunRe
   if (ctx.account.store !== spec.id) return fail(`Choose a ${spec.name} account.`)
   if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(pageSessionPause(spec.name, spec.host))
 
-  const jar = new CookieJar()
+  const jar = new PageCookies()
   jar.load(ctx.account.session)
-  const challenge = pageChallengePause(spec.name)
+  const challenge = pageChallengePause(spec.name, ctx.settings.language)
   ctx.phase("monitoring")
   ctx.log("info", `Watching ${target.sku} on ${spec.name}.`)
   note(ctx, "session", "pass", `Saved ${spec.name} session loaded.`)
@@ -108,7 +76,7 @@ async function runPage(ctx: StoreRunContext, spec: PageSpec): Promise<StoreRunRe
       continue
     }
     if (stock.kind !== "ok") return asResult(stock)
-    const reading = stock.value
+    const { reading, html } = stock.value
     if (reading.title) ctx.detail(reading.title)
     if (!reading.inStock) {
       waits += 1
@@ -122,12 +90,20 @@ async function runPage(ctx: StoreRunContext, spec: PageSpec): Promise<StoreRunRe
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
     if (await holdMonitorOnly(ctx)) continue
-    note(ctx, "cart", "skip", "TCGAIO did not add it to the cart.")
-    note(ctx, "address", "skip", "The shipping address stays on the profile.")
-    note(ctx, "shipping", "skip", "Shipping is chosen in the account browser.")
-    note(ctx, "payment", "skip", "The card number was not sent.")
-    if (ctx.testMode) return finishTest(ctx)
-    return pause(pageHandoff(reading.title || target.sku))
+    const bought = await checkoutFromPage(ctx, spec, target.url, html, reading.title || target.sku, target.sku, reading.price, {
+      request: async (method, url, referer, body) => {
+        const result = await checkoutRequest(ctx, spec, jar, method, url, referer, body)
+        if (result.kind === "ok") return result
+        return { kind: result.kind === "paused" ? "paused" : "failed", reason: result.reason }
+      }
+    })
+    if (bought.outcome === "oos") {
+      ctx.log("warn", bought.reason)
+      ctx.phase("monitoring")
+      await ctx.sleep(ctx.settings.monitorDelayMs)
+      continue
+    }
+    return bought
   }
   return { outcome: "stopped", reason: "Stopped" }
 }
@@ -135,18 +111,18 @@ async function runPage(ctx: StoreRunContext, spec: PageSpec): Promise<StoreRunRe
 async function readOffer(
   ctx: StoreRunContext,
   spec: PageSpec,
-  jar: CookieJar,
+  jar: PageCookies,
   sku: string,
   page: string,
   challenge: string
-): Promise<Step<PageReading>> {
+): Promise<Step<OfferHit>> {
   const response = await sharedValue(ctx, monitorKey(spec.id, sku, "page", ctx.proxy), () =>
     store(ctx, spec, jar, { method: "GET", url: page, headers: pageHeaders(jar, spec.home) })
   )
   if (response.kind !== "ok") return response
   if (isPageChallenge(response.value.status, response.value.body)) return { kind: "paused", reason: challenge }
   if (response.value.status === 401 || isLoginWall(response.value.body)) {
-    return { kind: "paused", reason: `The ${spec.name} session is not signed in. Sign in on the Session Keeper page, then resume.` }
+    return { kind: "paused", reason: checkoutCopy(checkoutLang(ctx.settings.language)).notSignedIn(spec.name) }
   }
   if (response.value.status === 429 || response.value.status >= 500) {
     return { kind: "retry", reason: `Monitor request returned HTTP ${response.value.status}. Retrying.` }
@@ -155,7 +131,10 @@ async function readOffer(
   if (response.value.status === 404) {
     return {
       kind: "ok",
-      value: { ...reading, inStock: false, status: "UNAVAILABLE", reason: `${reading.title || sku} product page was not found.` }
+      value: {
+        html: response.value.body,
+        reading: { ...reading, inStock: false, status: "UNAVAILABLE", reason: `${reading.title || sku} product page was not found.` }
+      }
     }
   }
   if (response.value.status >= 400) {
@@ -163,18 +142,35 @@ async function readOffer(
   }
   reading.imageUrl = productImage(response.value.body) || undefined
   noteWatch(ctx, { ...reading, url: page })
-  return { kind: "ok", value: reading }
+  return { kind: "ok", value: { reading, html: response.value.body } }
 }
 
-async function store(ctx: StoreRunContext, spec: PageSpec, jar: CookieJar, request: HttpRequest): Promise<Step<HttpResponse>> {
-  if (request.method !== "GET") return { kind: "failed", reason: `${spec.name} checkout is not sent from TCGAIO.` }
+async function checkoutRequest(
+  ctx: StoreRunContext,
+  spec: PageSpec,
+  jar: PageCookies,
+  method: "GET" | "POST",
+  url: string,
+  referer: string,
+  body?: string
+): Promise<Step<HttpResponse>> {
+  const headers = pageHeaders(jar, referer)
+  if (method === "POST") {
+    headers["content-type"] = "application/x-www-form-urlencoded"
+    headers.origin = `https://${spec.host}`
+  }
+  return store(ctx, spec, jar, { method, url, headers, body, redirect: "manual" })
+}
+
+async function store(ctx: StoreRunContext, spec: PageSpec, jar: PageCookies, request: HttpRequest): Promise<Step<HttpResponse>> {
+  if (request.method !== "GET" && request.method !== "POST") return { kind: "failed", reason: `${spec.name} checkout is not sent from TCGAIO.` }
   let host = ""
   try {
-    host = new URL(request.url).hostname
+    host = new URL(request.url).hostname.toLowerCase()
   } catch {
     return { kind: "failed", reason: `The ${spec.name} request URL is invalid.` }
   }
-  if (host !== spec.host) return { kind: "failed", reason: `Refusing to contact ${host}.` }
+  if (host !== spec.host || host.includes("ecom-api")) return { kind: "failed", reason: `Refusing to contact ${host}.` }
   const response = await ctx.http.request({ ...request, proxy: ctx.proxy, signal: ctx.signal })
   if (jar.absorb(response.headers) && ctx.account.id) {
     await ctx.onSession({
@@ -188,9 +184,9 @@ async function store(ctx: StoreRunContext, spec: PageSpec, jar: CookieJar, reque
   return { kind: "ok", value: response }
 }
 
-function pageHeaders(jar: CookieJar, referer: string): Record<string, string> {
+function pageHeaders(jar: PageCookies, referer: string): Record<string, string> {
   return {
-    accept: "text/html,application/xhtml+xml",
+    accept: "text/html,application/xhtml+xml,application/json",
     "accept-language": "en-US,en;q=0.9",
     referer,
     "user-agent": USER_AGENT,

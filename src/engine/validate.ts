@@ -82,6 +82,10 @@ export function cleanSettings(input: Settings): Settings {
   if (!Number.isFinite(sessionWarmupMin) || sessionWarmupMin < 10 || sessionWarmupMin > 240) {
     throw new AppError("Session warm-up interval must be between 10 and 240 minutes.")
   }
+  const sessionWindowCap = Math.round(Number(input.sessionWindowCap ?? DEFAULT_SETTINGS.sessionWindowCap))
+  if (!Number.isFinite(sessionWindowCap) || sessionWindowCap < 1 || sessionWindowCap > 10) {
+    throw new AppError("Session window cap must be from 1 to 10.")
+  }
   const monitorJitterPct = Math.round(Number(input.monitorJitterPct ?? DEFAULT_SETTINGS.monitorJitterPct))
   if (!Number.isFinite(monitorJitterPct) || monitorJitterPct < 0 || monitorJitterPct > 40) {
     throw new AppError("Monitor jitter must be between 0 and 40 percent.")
@@ -113,6 +117,7 @@ export function cleanSettings(input: Settings): Settings {
     challengeTimeoutSec,
     sessionWarmup: input.sessionWarmup === true,
     sessionWarmupMin,
+    sessionWindowCap,
     monitorJitterPct,
     blockRetries,
     monitorFastDelayMs,
@@ -133,6 +138,9 @@ export function cleanSettings(input: Settings): Settings {
     dropBudget: cleanMoney(input.dropBudget, "Drop budget"),
     maxPerSku: cleanCount(input.maxPerSku, "Max per SKU"),
     maxPerAccount: cleanCount(input.maxPerAccount, "Max per account"),
+    accountDailySpend: cleanMoney(input.accountDailySpend, "Account daily spend"),
+    cardDailySpend: cleanMoney(input.cardDailySpend, "Card daily spend"),
+    cardDailyOrders: cleanCount(input.cardDailyOrders, "Card daily orders"),
     storePurchaseLimits: cleanStoreLimits(input.storePurchaseLimits ?? ""),
     healthReportTime: cleanClock(input.healthReportTime ?? ""),
     healthReportZone: cleanZone(input.healthReportZone ?? ""),

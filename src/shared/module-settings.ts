@@ -356,6 +356,22 @@ export function moduleText(lang: MailLang, key: ModuleTextKey): string {
   return TEXT[lang][key]
 }
 
+/** Checkout note for stores whose cart form comes from the signed-in page. */
+export function moduleCheckoutNote(lang: MailLang, store: StoreId): string {
+  const es = lang === "es"
+  if (store === "gamestop" || store === "barnes-noble" || store === "costco" || store === "sams") {
+    return es
+      ? "La compra usa la sesión guardada y el formulario que ya viene en la página de la tienda. Un desafío se pausa. El modo de prueba se detiene antes de hacer el pedido. Costco no llama a ecom-api."
+      : "Checkout uses the saved session and the form already on that store's page. A challenge pauses. Test mode stops before place order. Costco does not call ecom-api."
+  }
+  if (store === "tcgplayer") {
+    return es
+      ? "El catálogo público no necesita sesión. La compra sí: hace falta una sesión de www.tcgplayer.com y un formulario de carrito en esa página. TCGAIO no inventa la petición."
+      : "The public catalog does not need a session. Checkout does: it needs a www.tcgplayer.com session and a cart form on that page. TCGAIO does not invent the cart request."
+  }
+  return ""
+}
+
 export function sourceLabel(lang: MailLang, source: SettingSource): string {
   if (source === "task") return moduleText(lang, "task")
   if (source === "module") return moduleText(lang, "module")

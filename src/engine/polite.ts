@@ -43,13 +43,27 @@ export function backoffDelay(streak: number, baseMs: number): number {
  * Spaces requests to one store and reports the status the site returned.
  * It does not change headers, TLS, or the body.
  */
+export interface PaceShare {
+  accountId?: string
+  proxyId?: string
+  /** This task's resolved rate limit. The built-in store gap is still the floor. */
+  gapMs?: number
+  /** This task's jitter. 0 keeps the gap exact. */
+  jitterPct?: number
+}
+
+export function paceClock(store: StoreId, kind: "account" | "proxy" | "direct", id: string): string {
+  return `${store}|${kind}:${id}`
+}
+
 export class PoliteLimiter {
-  private readonly nextAt = new Map<StoreId, number>()
+  private readonly nextAt = new Map<string, number>()
   private readonly floors = new Map<StoreId, number>()
 
   constructor(
     private readonly now: () => number = Date.now,
-    private readonly wait: (ms: number, signal?: AbortSignal) => Promise<void> = (ms, signal) => sleep(ms, signal ?? new AbortController().signal)
+    private readonly wait: (ms: number, signal?: AbortSignal) => Promise<void> = (ms, signal) => sleep(ms, signal ?? new AbortController().signal),
+    private readonly random: () => number = Math.random
   ) {}
 
   /** A store page can slow requests down. It cannot go under the built-in gap. */
@@ -58,11 +72,16 @@ export class PoliteLimiter {
     this.floors.set(store, Math.max(floor, Math.round(ms)))
   }
 
-  async before(store: StoreId, signal?: AbortSignal): Promise<void> {
-    const gap = this.floors.get(store) ?? STORE_GAP_MS[store] ?? 1000
-    const delay = Math.max(0, (this.nextAt.get(store) ?? 0) - this.now())
+  async before(store: StoreId, share: PaceShare = {}, signal?: AbortSignal): Promise<void> {
+    const configured = share.gapMs ?? this.floors.get(store) ?? STORE_GAP_MS[store] ?? 1000
+    const gap = Math.max(STORE_GAP_MS[store] ?? 1000, Math.round(configured))
+    const keys = paceKeys(store, share)
+    const delay = Math.max(0, ...keys.map((key) => (this.nextAt.get(key) ?? 0) - this.now()))
     if (delay > 0) await this.wait(delay, signal)
-    this.nextAt.set(store, this.now() + gap)
+    const jitter = share.jitterPct ?? 0
+    const step = jitter > 0 ? jitterDelay(gap, jitter, this.random()) : gap
+    const next = this.now() + step
+    for (const key of keys) this.nextAt.set(key, Math.max(this.nextAt.get(key) ?? 0, next))
   }
 
   wrap(
@@ -70,15 +89,25 @@ export class PoliteLimiter {
     proxyId: string | undefined,
     inner: HttpClient,
     onStatus: (proxyId: string | undefined, status: number) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    pace?: PaceShare
   ): HttpClient {
     return {
       request: async (input: HttpRequest) => {
-        await this.before(store, input.signal ?? signal)
+        const shareProxy = input.proxy?.id ?? pace?.proxyId ?? proxyId
+        await this.before(store, { ...pace, proxyId: shareProxy }, input.signal ?? signal)
         const response = await inner.request(input)
-        onStatus(input.proxy?.id ?? proxyId, response.status)
+        onStatus(shareProxy, response.status)
         return response
       }
     }
   }
+}
+
+function paceKeys(store: StoreId, share: PaceShare): string[] {
+  const keys: string[] = []
+  if (share.accountId) keys.push(paceClock(store, "account", share.accountId))
+  if (share.proxyId) keys.push(paceClock(store, "proxy", share.proxyId))
+  if (!keys.length) keys.push(paceClock(store, "direct", "direct"))
+  return keys
 }

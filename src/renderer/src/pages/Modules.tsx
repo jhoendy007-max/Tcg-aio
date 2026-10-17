@@ -5,6 +5,7 @@ import {
   MODULE_FIELDS,
   exportModulePreset,
   moduleScope,
+  moduleCheckoutNote,
   moduleText,
   moduleUsesGlobal,
   recommendedModule,
@@ -138,6 +139,7 @@ export function ModulesPage() {
         <div>
           <h1>{t("title")}</h1>
           <p>{t("intro")}</p>
+          {moduleCheckoutNote(lang, store) ? <p>{moduleCheckoutNote(lang, store)}</p> : null}
         </div>
         <Select value={lang} onChange={(event) => void saveLanguage(event.target.value === "es" ? "es" : "en")} aria-label={t("from")}>
           <option value="en">English</option>

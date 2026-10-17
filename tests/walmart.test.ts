@@ -263,7 +263,7 @@ describe("walmart module", () => {
           expect(req.proxy?.host).toBe("10.0.0.1")
           return json(412, challenge)
         }
-        expect(req.proxy?.host).toBe("10.0.0.2")
+        expect(req.proxy?.host).toBe("10.0.0.1")
         return json(200, internal)
       }
       return happy(req)
@@ -277,7 +277,33 @@ describe("walmart module", () => {
     expect(result).toMatchObject({ outcome: "success", orderId: "WM100" })
     expect(offers).toBe(2)
     expect(sleeps).toEqual([1000])
-    expect(logs.some((line) => line.includes("HTTP 412") && line.includes("10.0.0.1:8000") && line.includes("Rotating to proxy 10.0.0.2:8001"))).toBe(true)
+    expect(logs.some((line) => line.includes("HTTP 412") && line.includes("10.0.0.1:8000") && line.includes("Keeping this account's sticky proxy"))).toBe(true)
+  })
+
+  it("moves to the next proxy after an HTTP 412 when the task has no account", async () => {
+    const proxies = [
+      { id: "a", host: "10.0.0.1", port: 8000 },
+      { id: "b", host: "10.0.0.2", port: 8001 }
+    ]
+    let offers = 0
+    const logs: string[] = []
+    const fake = client((req) => {
+      if (req.url.includes("GetAllSellerOffers")) {
+        offers += 1
+        if (offers === 1) return json(412, challenge)
+        expect(req.proxy?.host).toBe("10.0.0.2")
+        return json(200, internal)
+      }
+      return happy(req)
+    })
+    const result = await createWalmartModule().run(ctx(fake.http, {
+      account: { ...account, id: "" },
+      proxy: proxies[0],
+      proxies,
+      log: (_level, message) => logs.push(message)
+    }))
+    expect(result).toMatchObject({ outcome: "success", orderId: "WM100" })
+    expect(logs.some((line) => line.includes("Rotating to proxy 10.0.0.2:8001"))).toBe(true)
   })
 
   it("pauses after the 412 budget when the group has no other proxy", async () => {
@@ -297,7 +323,7 @@ describe("walmart module", () => {
     expect(result).toMatchObject({ outcome: "paused", reason: WALMART_PAUSE })
     expect(fake.calls.filter((call) => call.url.includes("GetAllSellerOffers"))).toHaveLength(3)
     expect(sleeps).toEqual([1000, 2000])
-    expect(logs.some((line) => line.includes("No other proxy is in the group"))).toBe(true)
+    expect(logs.some((line) => line.includes("Keeping this account's sticky proxy"))).toBe(true)
     expect(fake.calls.some((call) => call.url.includes("CreateAccountCreditCard"))).toBe(false)
   })
 

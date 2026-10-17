@@ -94,6 +94,12 @@ export interface PublicAccount {
   proxyGroupId: string | null
   sessionState: SessionState
   lastWarmAt: number | null
+  /** Host:port of the proxy pinned to this account. Empty until the first task start. */
+  stickyProxyId?: string | null
+  stickyProxyLabel?: string | null
+  /** Persistent Chromium partition. One per account. */
+  profilePartition?: string
+  freshness?: "missing" | "expired" | "fresh" | "due" | "stale"
 }
 
 export interface AccountInput {
@@ -337,6 +343,8 @@ export interface Settings {
   sessionWarmup: boolean
   /** Minutes between session warm-ups. */
   sessionWarmupMin: number
+  /** How many hidden session windows can load at once. The rest wait. */
+  sessionWindowCap: number
   /** Percent of jitter added to monitor sleeps. */
   monitorJitterPct: number
   /** How many times to back off, rotate proxy, and reload the store session after a block. */
@@ -373,6 +381,12 @@ export interface Settings {
   maxPerSku: number
   /** 0 means no daily order cap for one account. */
   maxPerAccount: number
+  /** 0 means no daily dollar cap for one account. */
+  accountDailySpend: number
+  /** 0 means no daily dollar cap for one card last four. */
+  cardDailySpend: number
+  /** 0 means no daily order cap for one card last four. */
+  cardDailyOrders: number
   /** Lines like target:1. Max quantity of one SKU per account per day. */
   storePurchaseLimits: string
   /** Local time HH:MM. Blank turns the daily report off. */
@@ -419,6 +433,7 @@ export const DEFAULT_SETTINGS: Settings = {
   challengeTimeoutSec: 180,
   sessionWarmup: false,
   sessionWarmupMin: 30,
+  sessionWindowCap: 3,
   monitorJitterPct: 20,
   blockRetries: 3,
   monitorFastDelayMs: 1000,
@@ -439,6 +454,9 @@ export const DEFAULT_SETTINGS: Settings = {
   dropBudget: 0,
   maxPerSku: 0,
   maxPerAccount: 0,
+  accountDailySpend: 0,
+  cardDailySpend: 0,
+  cardDailyOrders: 0,
   storePurchaseLimits: "",
   healthReportTime: "",
   healthReportZone: "",
@@ -563,7 +581,7 @@ export interface TaskTemplateInput {
   group?: string
 }
 
-export type OrderStatus = "placed" | "confirmed" | "cancelled" | "shipped"
+export type OrderStatus = "placed" | "confirmed" | "cancelled" | "label" | "shipped" | "out" | "delivered"
 
 export interface OrderRecord {
   id: string
@@ -575,6 +593,8 @@ export interface OrderRecord {
   profileId: string
   status: OrderStatus
   tracking: string
+  /** Carrier named in the shipping mail. Empty until a tracking number is read. */
+  carrier?: string
   detail: string
   checkedAt: number
   quantity: number
@@ -774,6 +794,12 @@ export interface AlertsView {
   rules: RestockRule[]
   watches: KeywordWatch[]
   log: AlertLog[]
+  /** Channel ids, user ids, or source names. Empty keeps the saved channels and the local webhook. */
+  allowlist: string
+  /** Minutes before the same store and SKU can start again. 0 is off. */
+  dedupeMin: number
+  /** Extra channel ids, one per line. The bot token is not included. */
+  channelIds: string
 }
 
 export interface DiscordWatchInput {
@@ -781,6 +807,10 @@ export interface DiscordWatchInput {
   enabled: boolean
   token: string
   tokenAction: "keep" | "replace" | "clear"
+  /** One channel id per line, including the first channel. */
+  channelIds?: string
+  allowlist?: string
+  dedupeMin?: number
 }
 
 export type SchedulePhase = "waiting" | "warming" | "started" | "stopped"
@@ -792,6 +822,10 @@ export interface DropSchedule {
   startAt: number
   stopAt: number | null
   warmupMin: number
+  /** Minutes before start for a dry run. 0 skips it. The dry run does not place an order. */
+  rehearsalMin: number
+  /** When the dry run last reported. Empty until it runs. */
+  rehearsalAt?: number | null
   taskIds: string[]
   group: string
   phase: SchedulePhase
@@ -805,6 +839,7 @@ export interface DropScheduleInput {
   startAt: number | string
   stopAt?: number | string | null
   warmupMin: number
+  rehearsalMin?: number
   taskIds: string[]
   group: string
 }
@@ -824,9 +859,54 @@ export interface CheckoutRecord {
   accountId?: string
   profileId?: string
   quantity?: number
+  /** Card last four from the profile. Never the full card number. */
+  last4?: string
   detail: string
   /** Current value of this purchase. Empty until the user enters one. */
   marketValue?: number | null
+}
+
+export type CalendarGame = "pokemon" | "onepiece"
+
+export interface CalendarDraft {
+  game: CalendarGame
+  name: string
+  startAt: number
+  store: StoreId
+  sku: string
+  note: string
+}
+
+export interface CalendarEvent {
+  id: string
+  game: CalendarGame
+  name: string
+  startAt: number
+  store: StoreId
+  sku: string
+  note: string
+}
+
+export interface CalendarEventInput {
+  id?: string
+  game: CalendarGame
+  name: string
+  /** Epoch milliseconds, or `YYYY-MM-DDTHH:mm` in Atlantic Time. */
+  startAt: number | string
+  store: StoreId
+  sku: string
+  note?: string
+}
+
+export interface CalendarDropInput {
+  eventId: string
+  accountIds: string[]
+  profileId: string
+  quantity: number
+  warmupMin: number
+  rehearsalMin: number
+  testMode: boolean
+  confirmPurchase: boolean
 }
 
 export interface StoreAnalytics {

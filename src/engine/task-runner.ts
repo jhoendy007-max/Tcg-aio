@@ -8,6 +8,7 @@ import { cleanImageUrl } from "./validate"
 import { postDiscord } from "./discord"
 import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../shared/module-settings"
 import { checkoutsToStart, triggerDecision } from "../shared/task-role"
+import { accountPartition } from "../shared/consistency"
 import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
 import { storeHome } from "./session-care"
 import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
@@ -140,55 +141,107 @@ export class TaskService {
     try {
       const profile = task.profileId ? this.db.readProfile(task.profileId) : blankProfile()
       let account = task.accountId ? this.db.readAccount(task.accountId) : blankAccount(task.store)
-      const proxyOwner = account.id || task.id
-      const separateMonitor = Boolean(task.monitorProxyGroupId && task.monitorProxyGroupId !== task.proxyGroupId)
       let monitorProxy: ProxyEndpoint | undefined
       let monitorProxies: ProxyEndpoint[] | undefined
-      if (separateMonitor && task.monitorProxyGroupId) {
-        const group = this.db.getProxyGroup(task.monitorProxyGroupId)
-        monitorProxies = group.proxies
-        const choice = this.db.assignProxy(`${proxyOwner}:monitor`, group.id, group.proxies)
-        monitorProxy = choice.proxy
-        const network = group.network === "residential" ? "residential" : "datacenter"
-        const detail = !monitorProxy
-          ? `Monitor pool ${group.name} is empty. Using a direct connection for stock checks.`
-          : `Monitoring through ${network} proxy ${proxyLabel(monitorProxy)} from ${group.name}.`
-        update({ log: line("info", detail) })
-      }
-      if (task.proxyGroupId) {
-        const group = this.db.getProxyGroup(task.proxyGroupId)
-        proxies = group.proxies
-        const choice = this.db.assignProxy(proxyOwner, group.id, group.proxies)
-        proxy = choice.proxy
-        const network = group.network === "residential" ? "residential" : "datacenter"
-        const samePool = !task.monitorProxyGroupId || task.monitorProxyGroupId === task.proxyGroupId
-        const detail = !proxy
-          ? `Checkout pool ${group.name} is empty. Using a direct connection.`
-          : samePool
-            ? `Checkout uses the same ${network} pool, ${group.name}.`
-            : `Checkout uses ${network} proxy ${proxyLabel(proxy)} from ${group.name}.`
-        update({ log: line(choice.allBenched ? "warn" : "info", detail) })
-      } else if (!monitorProxy) {
-        update({ log: line("info", "Direct connection. No proxy group selected.") })
-      }
-      if (!monitorProxy) {
+      if (account.id) {
+        update({ log: line("info", `Using browser profile ${accountPartition(account.id)} for ${account.label}. Session cookies already saved for this account stay in that profile.`) })
+        const preferredGroup = account.proxyGroupId || task.proxyGroupId
+        if (task.proxyGroupId && account.proxyGroupId && task.proxyGroupId !== account.proxyGroupId) {
+          update({ log: line("warn", "This task's proxy group does not override the account's sticky proxy.") })
+        }
+        if (task.monitorProxyGroupId && task.monitorProxyGroupId !== preferredGroup) {
+          update({ log: line("warn", "Monitor checks use the account's sticky proxy. The monitor pool is not used.") })
+        }
+        if (preferredGroup) {
+          const group = this.db.getProxyGroup(preferredGroup)
+          const choice = this.db.assignProxy(account.id, group.id, group.proxies)
+          if (choice.stickyOutside && choice.heldProxyId) {
+            proxy = this.db.findProxy(choice.heldProxyId)
+            proxies = proxy ? [proxy] : undefined
+            update({ log: line("warn", "The selected proxy group does not include this account's sticky proxy. Keeping the sticky proxy.") })
+          } else {
+            proxy = choice.proxy
+            proxies = proxy ? [proxy] : undefined
+            const network = group.network === "residential" ? "residential" : "datacenter"
+            const detail = !proxy
+              ? `No free proxy is left in ${group.name}. Using a direct connection for this account.`
+              : `Sticky ${network} proxy ${proxyLabel(proxy)} for ${account.label}. It stays on this proxy for the whole run.`
+            update({ log: line(choice.allBenched ? "warn" : "info", detail) })
+          }
+        } else {
+          update({ log: line("info", "Direct connection. This account has no proxy group.") })
+        }
         monitorProxy = proxy
         monitorProxies = proxies
+      } else {
+        const separateMonitor = Boolean(task.monitorProxyGroupId && task.monitorProxyGroupId !== task.proxyGroupId)
+        if (separateMonitor && task.monitorProxyGroupId) {
+          const group = this.db.getProxyGroup(task.monitorProxyGroupId)
+          monitorProxies = group.proxies
+          const choice = this.db.assignProxy(task.id, group.id, group.proxies, Date.now(), false)
+          monitorProxy = choice.proxy
+          const network = group.network === "residential" ? "residential" : "datacenter"
+          const detail = !monitorProxy
+            ? `Monitor pool ${group.name} is empty. Using a direct connection for stock checks.`
+            : `Monitoring through ${network} proxy ${proxyLabel(monitorProxy)} from ${group.name}.`
+          update({ log: line("info", detail) })
+        }
+        if (task.proxyGroupId) {
+          const group = this.db.getProxyGroup(task.proxyGroupId)
+          proxies = group.proxies
+          const choice = this.db.assignProxy(`${task.id}:checkout`, group.id, group.proxies, Date.now(), false)
+          proxy = choice.proxy
+          const network = group.network === "residential" ? "residential" : "datacenter"
+          const samePool = !task.monitorProxyGroupId || task.monitorProxyGroupId === task.proxyGroupId
+          const detail = !proxy
+            ? `Checkout pool ${group.name} is empty. Using a direct connection.`
+            : samePool
+              ? `Checkout uses the same ${network} pool, ${group.name}.`
+              : `Checkout uses ${network} proxy ${proxyLabel(proxy)} from ${group.name}.`
+          update({ log: line(choice.allBenched ? "warn" : "info", detail) })
+        } else if (!monitorProxy) {
+          update({ log: line("info", "Direct connection. No proxy group selected.") })
+        }
+        if (!monitorProxy) {
+          monitorProxy = proxy
+          monitorProxies = proxies
+        }
       }
       const loaded = this.db.getSettings()
       const pace = resolvedValues(resolveModule(task.store, moduleScope(loaded), task.overrides))
       const settings = tuneSettings(loaded, task.store, pace)
-      this.polite.setFloor(task.store, pace.rateLimitMs)
+      const jitterPct = typeof task.jitterPct === "number" ? task.jitterPct : loaded.monitorJitterPct
       const http = this.polite.wrap(task.store, monitorProxy?.id, this.http, (proxyId, status) => {
         this.db.noteTraffic(task.store, proxyId, status)
-      }, controller.signal)
+      }, controller.signal, {
+        accountId: account.id || undefined,
+        proxyId: monitorProxy?.id,
+        gapMs: pace.rateLimitMs,
+        jitterPct
+      })
       const checks: string[] = []
       if (testMode) update({ log: line("warn", "TEST MODE. The real flow runs through payment, then stops. The place-order request is not sent.") })
       let handoffs = 0
       let detectedAt = 0
       const guarded = testMode ? guardTestMode(task.store, http) : http
       const ctx = {
-        task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store },
+        task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store, maxPrice: task.maxPrice },
+        spendCheck: (price: number | null) => {
+          if (testMode) return { ok: true as const }
+          const fresh = this.db.getTask(id)
+          const cap = fresh.maxPrice
+          if (cap && price !== null && price > cap) return { ok: false as const, reason: `The price is above this checkout's max of $${cap.toFixed(2)}.` }
+          return allowCheckout(this.db.getSettings(), this.db.listCheckouts(), {
+            store: task.store,
+            sku: task.sku,
+            accountId: account.id,
+            quantity: task.quantity,
+            price,
+            now: Date.now(),
+            dropStart: activeDropStart(this.db.listSchedules(), Date.now()),
+            last4: profile.last4
+          })
+        },
         profile,
         account,
         settings,
@@ -353,7 +406,8 @@ export class TaskService {
                 quantity: task.quantity,
                 price,
                 now: Date.now(),
-                dropStart: activeDropStart(this.db.listSchedules(), Date.now())
+                dropStart: activeDropStart(this.db.listSchedules(), Date.now()),
+                last4: profile.last4
               })
               if (!decision.ok) throw new SpendLimitError(decision.reason)
             }
@@ -382,7 +436,7 @@ export class TaskService {
           }
           return
         }
-        await this.finishResult(update, result, task, module.displayName, profile.name)
+        await this.finishResult(update, result, { store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4 }, module.displayName, profile.name)
         return
       }
     } catch (err) {
@@ -485,7 +539,7 @@ export class TaskService {
   private async finishResult(
     update: (patch: Parameters<Database["patchTask"]>[1]) => void,
     result: StoreRunResult,
-    task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number },
+    task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string },
     storeNameText: string,
     profileNameText: string
   ): Promise<void> {
@@ -554,7 +608,7 @@ export class TaskService {
     })
   }
 
-  private remember(task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string): void {
+  private remember(task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string): void {
     this.db.recordCheckout({
       store: task.store,
       sku: task.sku,
@@ -565,7 +619,8 @@ export class TaskService {
       orderId,
       accountId: task.accountId,
       profileId: task.profileId,
-      quantity: task.quantity
+      quantity: task.quantity,
+      last4: task.last4
     })
   }
 

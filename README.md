@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, Amazon by ASIN or product URL, and Premium Bandai by product code. GameStop, Barnes & Noble, Costco, and Sam's Club watch the product page with your saved session and stop so you can add the item in that browser. TCGplayer Direct watches the public catalog. Pokémon Center and Premium Bandai remain the official US preorder sources. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
+Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 checks out Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, Amazon by ASIN or product URL, and Premium Bandai by product code. GameStop, Barnes & Noble, Costco, and Sam's Club use your saved session and the store's own checkout forms. TCGplayer Direct reads the public catalog and checks out only when www.tcgplayer.com shows a cart form. If a page has no form, TCGAIO pauses so you can add the item in that browser. Pokémon Center and Premium Bandai remain the official US preorder sources. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
 
 Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If a store shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
 
@@ -12,8 +12,8 @@ Test mode, from Settings or a task, runs the real monitor, cart, address, shippi
 - **Tasks** — separate monitor and checkout tasks. A monitor watches a SKU, URL, or keywords and can start several linked checkouts. A checkout can start by hand, on a schedule, from a monitor, from a restock alert, or with its own monitor. Delays, caps, hours, and the webhook can change while a task is running. The same editor is on the phone, in English or Spanish. Compact or detailed. Dark, light, and accent colors, plus a name and logo, are in Settings.
 - **Setup** — a first-run wizard for a profile, an account, optional proxies, and one test-mode task. It stays hidden once you have a profile or an account, or after you skip it.
 - **Profiles** — shipping and billing. Card number and CVV are encrypted locally.
-- **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.
-- **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
+- **Proxies** — import `host:port` or `host:port:user:pass` lists and test them. A proxy is quarantined after repeated HTTP 403, 412, or 435 responses. Use a residential proxy you control. Datacenter addresses are challenged more often. TCGAIO does not hide TLS or change the browser fingerprint.
+- **Accounts** — per-store logins. Each account keeps one Chromium profile and one sticky proxy. Passwords and browser sessions are encrypted. Optional warm-up browses the store before a drop and does not add to cart.
 - **Stores** — one settings page per store, with recommended defaults, reset, and JSON presets. A task override wins over the store, which wins over global Settings. The same page is on the phone, in English or Spanish.
 - **Settings** — Discord webhook, Target monitor delay, store ID, ZIP, and state, and read-only IMAP mailboxes. An email address fills the server settings. Google and Microsoft can sign in; iCloud and Yahoo use an app password. The same mail screen is on the phone, in English or Spanish. An encrypted backup uses a passphrase you keep. The optional cloud copy is the same sealed file.
 - **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. One phone can switch among several PCs. Card numbers and passwords stay on the PC.
@@ -69,7 +69,9 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on the stores in the catalog (Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer). It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.19.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.22.zip` next to the Windows installer and the phone APK.
+
+The Drops page keeps a Pokémon and One Piece calendar. You can type a date or paste a JSON or ICS feed, then create the scheduled tasks in one click. A Discord bot you add can read the channels you choose and start the linked tasks. An allowlist and a dedupe window ignore repeats. Clone copies a task onto the accounts you select and keeps each account's sticky proxy and browser profile. A rehearsal before a drop checks the session, proxy, profile, and card and does not place an order. Shipping mail from a mailbox you connected shows a status for each order. Daily spend and order caps for an account or a card last-four are checked before place order.
 
 Analytics can check a win against the public TCGplayer market price and the public eBay sold search, show profit, and copy a listing draft. It does not post the listing. Inventory lists those purchases, the current value you enter, total profit, and a CSV export.
 

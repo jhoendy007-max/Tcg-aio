@@ -1,7 +1,11 @@
 import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
-import { finishTest, note } from "../../engine/test-mode"
+import { note } from "../../engine/test-mode"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
+import { checkoutCopy, checkoutLang } from "../page/copy"
+import { checkoutFromPage } from "../page/flow"
+import { PageCookies } from "../page/jar"
+import { isLoginWall, isPageChallenge } from "../page/parse"
 import {
   chooseListings,
   detailsUrl,
@@ -18,6 +22,7 @@ import {
 
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const HOST = "mp-search-api.tcgplayer.com"
+const SHOP = "www.tcgplayer.com"
 
 export const TCGPLAYER_PAUSE =
   "TCGplayer presented a challenge. Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges."
@@ -84,12 +89,44 @@ async function runTcgplayer(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("success", offer.reason)
     note(ctx, "monitor", "pass", offer.reason)
     if (await holdMonitorOnly(ctx)) continue
-    note(ctx, "cart", "skip", "TCGAIO did not add it to the cart.")
-    note(ctx, "address", "skip", "The shipping address stays on the profile.")
-    note(ctx, "shipping", "skip", "Shipping is chosen in the account browser.")
-    note(ctx, "payment", "skip", "The card number was not sent.")
-    if (ctx.testMode) return finishTest(ctx)
-    return pause(`${offer.product.title || id} is in stock. Add it in the account browser. TCGAIO did not add it to the cart or place an order.`)
+    const copy = checkoutCopy(checkoutLang(ctx.settings.language))
+    if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(copy.needSession("TCGplayer"))
+    const jar = new PageCookies()
+    jar.load(ctx.account.session)
+    const shopPage = await shop(ctx, jar, { method: "GET", url: page, headers: shopHeaders(jar, page) })
+    if (shopPage.kind !== "ok") return asResult(shopPage)
+    if (isPageChallenge(shopPage.value.status, shopPage.value.body) || isCatalogChallenge(shopPage.value.status, shopPage.value.body)) {
+      return pause(copy.challenge("TCGplayer"))
+    }
+    if (shopPage.value.status === 401 || isLoginWall(shopPage.value.body)) return pause(copy.notSignedIn("TCGplayer"))
+    if (shopPage.value.status === 429 || shopPage.value.status >= 500) {
+      ctx.detail(`TCGplayer checkout page returned HTTP ${shopPage.value.status}. Retrying.`)
+      await ctx.sleep(retryWait(ctx))
+      continue
+    }
+    const bought = await checkoutFromPage(
+      ctx,
+      { id: "tcgplayer", name: "TCGplayer", host: SHOP },
+      page,
+      shopPage.value.body,
+      offer.product.title || id,
+      id,
+      offer.product.marketPrice,
+      {
+        request: async (method, url, referer, body) => {
+          const result = await shop(ctx, jar, shopCall(jar, method, url, referer, body))
+          if (result.kind === "ok") return result
+          return { kind: result.kind === "paused" ? "paused" : "failed", reason: result.reason }
+        }
+      }
+    )
+    if (bought.outcome === "oos") {
+      ctx.log("warn", bought.reason)
+      ctx.phase("monitoring")
+      await ctx.sleep(ctx.settings.monitorDelayMs)
+      continue
+    }
+    return bought
   }
   return { outcome: "stopped", reason: "Stopped" }
 }
@@ -165,6 +202,47 @@ async function catalog(ctx: StoreRunContext, request: HttpRequest): Promise<Step
   if (/cart|checkout|place-order/i.test(path)) return { kind: "failed", reason: "TCGplayer checkout is not sent from TCGAIO." }
   const response = await ctx.http.request({ ...request, proxy: ctx.proxy, signal: ctx.signal })
   return { kind: "ok", value: response }
+}
+
+async function shop(ctx: StoreRunContext, jar: PageCookies, request: HttpRequest): Promise<Step<HttpResponse>> {
+  if (request.method !== "GET" && request.method !== "POST") return { kind: "failed", reason: "TCGplayer checkout is not sent from TCGAIO." }
+  let host = ""
+  try {
+    host = new URL(request.url).hostname.toLowerCase()
+  } catch {
+    return { kind: "failed", reason: "The TCGplayer request URL is invalid." }
+  }
+  if (host !== SHOP || host.includes("ecom-api")) return { kind: "failed", reason: `Refusing to contact ${host}.` }
+  const response = await ctx.http.request({ ...request, proxy: ctx.proxy, signal: ctx.signal, redirect: "manual" })
+  if (jar.absorb(response.headers) && ctx.account.id) {
+    await ctx.onSession({
+      accessToken: ctx.account.session?.accessToken || "session",
+      visitorId: ctx.account.session?.visitorId,
+      refreshToken: ctx.account.session?.refreshToken,
+      idToken: ctx.account.session?.idToken,
+      cookie: jar.header()
+    })
+  }
+  return { kind: "ok", value: response }
+}
+
+function shopCall(jar: PageCookies, method: "GET" | "POST", url: string, referer: string, body?: string): HttpRequest {
+  const headers = shopHeaders(jar, referer)
+  if (method === "POST") {
+    headers["content-type"] = "application/x-www-form-urlencoded"
+    headers.origin = `https://${SHOP}`
+  }
+  return { method, url, headers, body, redirect: "manual" }
+}
+
+function shopHeaders(jar: PageCookies, referer: string): Record<string, string> {
+  return {
+    accept: "text/html,application/xhtml+xml,application/json",
+    "accept-language": "en-US,en;q=0.9",
+    referer,
+    "user-agent": USER_AGENT,
+    cookie: jar.header()
+  }
 }
 
 function catalogHeaders(referer: string, write = false): Record<string, string> {
