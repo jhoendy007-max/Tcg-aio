@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.16 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.17 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -44,6 +44,10 @@ Official US Pokémon Center preorders stay on the Pokémon Center module (`PRE_O
 Analytics has a Resale card for a recorded win. It GETs the public TCGplayer catalog when the user supplies a product id, and GETs the public eBay sold search for the product name. Profit is unit price times quantity, minus the cost the user entered, minus a fee percent the user entered. Zero fee percent does not invent marketplace fees. The card drafts a listing and can copy it. It does not POST to eBay, TCGplayer, or any other marketplace. A challenge page returns no prices.
 
 Inventory lists successful checkouts. Cost is the recorded price. Current value is a number the user saves on that purchase. Profit is value minus cost, and the total profit counts only purchases that have a value. Test runs are not purchases. Export writes `tcgaio-inventory.csv`. It does not fetch a live price for every row.
+
+## Backup
+
+Settings can export a `.tcgaio-backup` file sealed with a passphrase the user types and TCGAIO does not save. PBKDF2-SHA256 (210000 iterations) derives an AES-256-GCM key. The file and an optional https PUT are ciphertext only. The document inside holds settings, tasks, profiles (including cards), accounts (including passwords and sessions), proxy groups, schedules, and templates. It does not hold phone device tokens or the backup upload token. Restore keeps this PC's id, paired phones, upload token, and checkout history, and re-encrypts secrets with this PC's cipher. The backup URL is https with no userinfo and no query string. A redirect is not followed. One phone can store several PC pairings and switch which PC it controls. Forgetting a PC, or a revoked pairing, removes that PC only. `PHONE_PROTOCOL` stays 1.
 
 Shipping state is a two-letter US code from `src/engine/validate.ts`. Puerto Rico is not in that set. ZIP is `^\d{5}(?:-\d{4})?$`.
 

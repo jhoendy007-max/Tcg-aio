@@ -162,6 +162,13 @@ export interface AioApi {
     setValue: (id: string, value: number | null) => Promise<Result<InventoryReport>>
     csv: () => Promise<Result<{ csv: string }>>
   }
+  backup: {
+    exportFile: (passphrase: string) => Promise<Result<{ file: string }>>
+    restoreFile: (passphrase: string, file: string) => Promise<Result<{ restored: true }>>
+    saveToken: (input: { action: "keep" | "replace" | "clear"; token: string }) => Promise<Result<{ hasToken: boolean }>>
+    upload: (passphrase: string) => Promise<Result<{ uploaded: true }>>
+    download: (passphrase: string) => Promise<Result<{ restored: true }>>
+  }
   vault: {
     list: () => Promise<Result<PublicVault[]>>
     unlink: (deviceId: string, accountId: string) => Promise<Result<PublicVault[]>>

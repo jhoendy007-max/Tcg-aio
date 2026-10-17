@@ -142,6 +142,13 @@ const api: AioApi = {
     setValue: (id, value) => ipcRenderer.invoke(channels.inventoryValue, id, value),
     csv: () => ipcRenderer.invoke(channels.inventoryCsv)
   },
+  backup: {
+    exportFile: (passphrase) => ipcRenderer.invoke(channels.backupExport, passphrase),
+    restoreFile: (passphrase, file) => ipcRenderer.invoke(channels.backupRestore, passphrase, file),
+    saveToken: (input) => ipcRenderer.invoke(channels.backupToken, input),
+    upload: (passphrase) => ipcRenderer.invoke(channels.backupUpload, passphrase),
+    download: (passphrase) => ipcRenderer.invoke(channels.backupDownload, passphrase)
+  },
   vault: {
     list: () => ipcRenderer.invoke(channels.vaultList),
     unlink: (deviceId: string, accountId: string) => ipcRenderer.invoke(channels.vaultUnlink, deviceId, accountId),
