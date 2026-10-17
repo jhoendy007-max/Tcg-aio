@@ -145,6 +145,7 @@ export interface PhoneSnapshot {
   analytics: PhoneAnalytics
   updates: PhoneUpdates
   keeper: PhoneKeeper
+  autopilot?: boolean
 }
 
 /** Challenge handoff for the paired phone. The cookie is only on this message. */
@@ -153,7 +154,7 @@ export interface PhoneChallenge extends PublicChallenge {
 }
 
 export interface PhoneNotice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop" | "health"
   storeName: string
   sku: string
   profileName: string
@@ -223,6 +224,8 @@ export type ClientMessage =
   | { type: "task.stop"; req: string; conn: string; taskId: string }
   | { type: "task.startAll"; req: string; conn: string }
   | { type: "task.stopAll"; req: string; conn: string }
+  | { type: "task.pauseAll"; req: string; conn: string }
+  | { type: "autopilot.set"; req: string; conn: string; enabled: boolean }
   | { type: "task.save"; req: string; conn: string; task: PhoneTaskDraft }
   | { type: "task.delete"; req: string; conn: string; taskId: string }
   | { type: "rule.save"; req: string; conn: string; rule: RestockRuleInput }
@@ -452,7 +455,8 @@ export function asClientMessage(value: unknown): ClientMessage {
     if (typeof message.taskId !== "string" || !message.taskId) throw new Error("Choose a task.")
     return { type: message.type, req: message.req, conn: message.conn, taskId: message.taskId }
   }
-  if (message.type === "task.startAll" || message.type === "task.stopAll") return { type: message.type, req: message.req, conn: message.conn }
+  if (message.type === "task.startAll" || message.type === "task.stopAll" || message.type === "task.pauseAll") return { type: message.type, req: message.req, conn: message.conn }
+  if (message.type === "autopilot.set") return { type: "autopilot.set", req: message.req, conn: message.conn, enabled: message.enabled === true }
   if (message.type === "health.check") {
     const proxyGroupId = "proxyGroupId" in message && typeof message.proxyGroupId === "string" && message.proxyGroupId ? message.proxyGroupId : null
     return { type: "health.check", req: message.req, conn: message.conn, proxyGroupId }

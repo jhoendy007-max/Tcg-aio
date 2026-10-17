@@ -7,6 +7,7 @@ import { isListingBlock, listingHeaders, listingSearchUrl, parseListings, type L
 import { searchTerms } from "./keywords"
 import { keywordsAllow } from "./keywords"
 import { parseDiscordContent, parseWebhook, type RestockSignal } from "./restock-parse"
+import { matchTemplate, planTemplateStart } from "./autopilot"
 import { decideRestock } from "./restock-rules"
 import { tokenAccepted } from "./body"
 import type { TaskService } from "./task-runner"
@@ -171,6 +172,11 @@ export class AlertService {
         this.log(source, signal, `${rule.name}: ${reason}`)
       }
     }
+    const started = hits.some((hit) => hit.action === "start" || hit.action === "create")
+    if (!started && this.db.getSettings().autopilot) {
+      const launched = await this.launchTemplate(signal, source)
+      if (launched) hits.push(launched)
+    }
     if (!hits.length) this.log(source, signal, "No rule matched.")
     this.emitChange()
     return hits
@@ -317,6 +323,20 @@ export class AlertService {
       seen.push(listing.sku)
       const signal = listingSignal(listing)
       if (!watch.autoStart) {
+        if (settings.autopilot) {
+          const launched = await this.launchTemplate(signal, "keyword")
+          this.logLine("keyword", watch.store, listing.sku, listing.title, launched ? `${watch.name}: ${launched.reason}` : `${watch.name}: new match. Autopilot had no template.`)
+          if (launched) {
+            await this.notify({
+              kind: "alert",
+              storeName: storeName(watch.store),
+              sku: listing.sku,
+              profileName: "Autopilot",
+              detail: launched.reason
+            })
+          }
+          continue
+        }
         this.logLine("keyword", watch.store, listing.sku, listing.title, `${watch.name}: new match. Auto-start is off.`)
         await this.notify({
           kind: "alert",
@@ -359,6 +379,32 @@ export class AlertService {
       : `Watching ${storeName(watch.store)}. No new match.`
     this.db.patchWatch(watch.id, { status: "watching", detail, seenSkus: seen.slice(-300) })
     this.emitChange()
+  }
+
+  private async launchTemplate(signal: RestockSignal, source: AlertLog["source"]): Promise<IngestHit | null> {
+    const settings = this.db.getSettings()
+    const template = matchTemplate(this.db.listTemplates(), signal, Date.now(), settings.autopilotPriceCap)
+    if (!template) return null
+    const plan = planTemplateStart({
+      template,
+      signal,
+      accounts: this.db.listAccounts(),
+      checkouts: this.db.listCheckouts(),
+      settings,
+      now: Date.now()
+    })
+    if (!plan.ok) {
+      this.log(source, signal, `${template.name}: ${plan.reason}`)
+      return { rule: template.name, action: "skip", reason: plan.reason }
+    }
+    const runner = this.getRunner()
+    if (!runner) return { rule: template.name, action: "skip", reason: "The desktop app is still starting." }
+    const task = this.db.saveTask(plan.task)
+    this.db.touchTemplate(template.id, Date.now())
+    runner.start(task.id, plan.task.testMode ? { test: true } : undefined)
+    const reason = plan.task.testMode ? `Autopilot started a test from ${template.name}.` : `Autopilot started ${template.name}.`
+    this.log(source, signal, reason)
+    return { rule: template.name, action: "create", reason, taskId: task.id }
   }
 
   private async apply(rule: RestockRule, signal: RestockSignal, decision: Extract<ReturnType<typeof decideRestock>, { action: "start" | "create" }>): Promise<string> {

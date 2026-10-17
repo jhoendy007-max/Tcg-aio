@@ -265,6 +265,32 @@ export interface Settings {
   alertNewOffer: boolean
   alertAvailable: boolean
   alertRetailer: boolean
+  /** When on, templates can create and start tasks from alerts, keywords, and learned restock hours. */
+  autopilot: boolean
+  /** Extra price cap for autopilot. 0 means the template cap is the only cap. */
+  autopilotPriceCap: number
+  /** Restart a task that has not logged anything for this many minutes. */
+  stuckMinutes: number
+  /** Windows login item. Off until the user turns it on. */
+  launchOnBoot: boolean
+  /** After a crash or an unclean exit, start tasks that were still running. */
+  resumeOnLaunch: boolean
+  /** Relaunch the app after an uncaught error, at most once a minute. */
+  relaunchOnCrash: boolean
+  /** 0 means no daily spend cap. */
+  dailyBudget: number
+  /** 0 means no cap for the active scheduled drop. */
+  dropBudget: number
+  /** 0 means no daily quantity cap for one SKU. */
+  maxPerSku: number
+  /** 0 means no daily order cap for one account. */
+  maxPerAccount: number
+  /** Lines like target:1. Max quantity of one SKU per account per day. */
+  storePurchaseLimits: string
+  /** Local time HH:MM. Blank turns the daily report off. */
+  healthReportTime: string
+  /** IANA timezone for budgets and the daily report. Blank uses UTC. */
+  healthReportZone: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -289,7 +315,20 @@ export const DEFAULT_SETTINGS: Settings = {
   alertPrice: true,
   alertNewOffer: true,
   alertAvailable: true,
-  alertRetailer: true
+  alertRetailer: true,
+  autopilot: false,
+  autopilotPriceCap: 0,
+  stuckMinutes: 15,
+  launchOnBoot: false,
+  resumeOnLaunch: true,
+  relaunchOnCrash: true,
+  dailyBudget: 0,
+  dropBudget: 0,
+  maxPerSku: 0,
+  maxPerAccount: 0,
+  storePurchaseLimits: "",
+  healthReportTime: "",
+  healthReportZone: ""
 }
 
 export interface SecurityInfo {
@@ -335,12 +374,85 @@ export interface PublicChallenge {
 }
 
 export interface Notice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop" | "health"
   storeName: string
   sku: string
   profileName: string
   detail: string
   orderId?: string
+}
+
+export interface TaskTemplate {
+  id: string
+  name: string
+  enabled: boolean
+  store: StoreId | ""
+  sku: string
+  keywords: string
+  profileIds: string[]
+  accountIds: string[]
+  proxyGroupId: string | null
+  monitorProxyGroupId: string | null
+  quantity: number
+  maxPrice: number | null
+  testMode: boolean
+  confirmPurchase: boolean
+  group: string
+  lastFiredAt: number
+}
+
+export interface TaskTemplateInput {
+  id?: string
+  name: string
+  enabled: boolean
+  store: StoreId | ""
+  sku: string
+  keywords: string
+  profileIds: string[]
+  accountIds: string[]
+  proxyGroupId: string | null
+  monitorProxyGroupId?: string | null
+  quantity: number
+  maxPrice: number | null
+  testMode: boolean
+  confirmPurchase: boolean
+  group?: string
+}
+
+export type OrderStatus = "placed" | "confirmed" | "cancelled" | "shipped"
+
+export interface OrderRecord {
+  id: string
+  at: number
+  store: StoreId
+  sku: string
+  orderId: string
+  accountId: string
+  profileId: string
+  status: OrderStatus
+  tracking: string
+  detail: string
+  checkedAt: number
+  quantity: number
+}
+
+export interface ImapView {
+  enabled: boolean
+  host: string
+  port: number
+  user: string
+  mailbox: string
+  hasPassword: boolean
+}
+
+export interface ImapInput {
+  enabled: boolean
+  host: string
+  port: number
+  user: string
+  mailbox: string
+  password: string
+  passwordAction: "keep" | "replace" | "clear"
 }
 
 export interface RestockRule {
@@ -494,6 +606,9 @@ export interface CheckoutRecord {
   outcome: CheckoutOutcome
   profileName: string
   orderId?: string
+  accountId?: string
+  profileId?: string
+  quantity?: number
   detail: string
 }
 

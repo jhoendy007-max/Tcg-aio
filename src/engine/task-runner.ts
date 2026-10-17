@@ -4,6 +4,7 @@ import { isBlockStatus as blockStatus, sendWithRecovery, type SessionRefresher }
 import { adaptiveDelay, detectChanges, MonitorHub, type WatchSnapshot } from "./monitor"
 import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
 import { storeHome } from "./session-care"
+import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
 import { guardTestMode, isFinalSubmit, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
 import { proxyLabel } from "../shared/proxy"
 import { redact } from "../shared/redact"
@@ -60,6 +61,21 @@ export class TaskService {
 
   stopAll(): void {
     for (const controller of this.controllers.values()) controller.abort()
+  }
+
+  /** Persist a stop before the process exits so the next launch does not treat it as a crash. */
+  haltAll(): void {
+    for (const [id, controller] of this.controllers) {
+      controller.abort()
+      try {
+        const task = this.db.getTask(id)
+        if (isActiveStatus(task.status)) {
+          this.db.patchTask(id, { status: "stopped", detail: "Stopped", finishedAt: Date.now() })
+        }
+      } catch {
+        // The task was already removed.
+      }
+    }
   }
 
   startAll(): { started: string[]; errors: { id: string; error: string }[] } {
@@ -245,7 +261,22 @@ export class TaskService {
       }
       ctx.http = {
         request: (input) => {
-          if (isFinalSubmit(task.store, input)) return guarded.request(input)
+          if (isFinalSubmit(task.store, input)) {
+            if (!testMode) {
+              const price = this.watches.get(`${task.store}:${task.sku}`)?.price ?? null
+              const decision = allowCheckout(this.db.getSettings(), this.db.listCheckouts(), {
+                store: task.store,
+                sku: task.sku,
+                accountId: account.id,
+                quantity: task.quantity,
+                price,
+                now: Date.now(),
+                dropStart: activeDropStart(this.db.listSchedules(), Date.now())
+              })
+              if (!decision.ok) throw new SpendLimitError(decision.reason)
+            }
+            return guarded.request(input)
+          }
           return sendWithRecovery(ctx, input, {
             homeUrl: storeHome(task.store),
             inner: guarded,
@@ -275,6 +306,17 @@ export class TaskService {
     } catch (err) {
       if (controller.signal.aborted || isAbortError(err)) {
         finish(update, "stopped", "Stopped", "info")
+        return
+      }
+      if (err instanceof SpendLimitError) {
+        finish(update, "paused", err.message, "warn")
+        await this.safeNotify(update, {
+          kind: "paused",
+          storeName: module.displayName,
+          sku: task.sku,
+          profileName: profileName(),
+          detail: err.message
+        })
         return
       }
       const message = err instanceof Error ? err.message : String(err)
@@ -361,7 +403,7 @@ export class TaskService {
   private async finishResult(
     update: (patch: Parameters<Database["patchTask"]>[1]) => void,
     result: StoreRunResult,
-    task: { store: StoreId; sku: string },
+    task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number },
     storeNameText: string,
     profileNameText: string
   ): Promise<void> {
@@ -369,6 +411,18 @@ export class TaskService {
     if (result.outcome === "success") {
       finish(update, "success", result.detail, "success")
       this.remember(task, "success", profileNameText, result.detail, result.orderId)
+      if (result.orderId) {
+        this.db.rememberOrder({
+          at: Date.now(),
+          store: task.store,
+          sku: task.sku,
+          orderId: result.orderId,
+          accountId: task.accountId,
+          profileId: task.profileId,
+          quantity: task.quantity,
+          detail: result.detail
+        })
+      }
       await this.safeNotify(update, {
         kind: "success",
         storeName: storeNameText,
@@ -418,8 +472,19 @@ export class TaskService {
     })
   }
 
-  private remember(task: { store: StoreId; sku: string }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string): void {
-    this.db.recordCheckout({ store: task.store, sku: task.sku, product: task.sku, outcome, profileName, detail, orderId })
+  private remember(task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string): void {
+    this.db.recordCheckout({
+      store: task.store,
+      sku: task.sku,
+      product: task.sku,
+      outcome,
+      profileName,
+      detail,
+      orderId,
+      accountId: task.accountId,
+      profileId: task.profileId,
+      quantity: task.quantity
+    })
   }
 
   private async safeNotify(update: (patch: Parameters<Database["patchTask"]>[1]) => void, notice: Notice): Promise<void> {

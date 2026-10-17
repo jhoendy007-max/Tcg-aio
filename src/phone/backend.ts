@@ -48,7 +48,8 @@ export function createPhoneHost(
       schedules: schedules(),
       analytics: analytics(),
       updates: updates(),
-      keeper: keeper()
+      keeper: keeper(),
+      autopilot: settings.autopilot
     }
   }
   const schedules = (): PhoneSchedule[] => db.listSchedules().map((schedule) => ({
@@ -128,6 +129,13 @@ export function createPhoneHost(
     },
     stopAll() {
       getRunner()?.stopAll()
+    },
+    pauseAll() {
+      getRunner()?.stopAll()
+    },
+    setAutopilot(enabled: boolean) {
+      const settings = db.getSettings()
+      db.saveSettings({ ...settings, autopilot: enabled })
     },
     devices: () => db.listDevices(),
     deviceTokens: () => db.deviceTokens(),

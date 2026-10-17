@@ -13,6 +13,7 @@ Electron 33. Main process in `src/main`, preload bridge in `src/preload`, React 
 - Closing the challenge window does not submit. The user presses **I solved it**. One resume per task start. A second challenge pauses.
 - Auto-update uses `electron-updater` against this private GitHub repo, prereleases included, `autoDownload` false. The token is encrypted and is not returned to the renderer or the phone. `dist:win` uses `--publish never`. The tag workflow uploads the exe, `latest.yml`, and blockmap.
 - Ship the desktop app for Windows only. Do not add an electron-builder `mac` target, a dmg, a macOS CI job, or Mac signing.
+- Autopilot, spend limits, boot launch, and the daily report live in Settings and the Autopilot page. Place-order requests stay behind `isFinalSubmit`. A budget or quantity limit throws before that request is sent.
 - Desktop pages that show a countdown import `src/engine/time`, which re-exports `src/shared/clock.ts`. Do not give the renderer a Node import.
 - Drop times are Atlantic Time (Puerto Rico, UTC−4, no daylight-saving shift).
 - Electron windows and the updater download path are not unit-tested. Do not claim a live sign-in, captcha solve, or update download from a unit test.

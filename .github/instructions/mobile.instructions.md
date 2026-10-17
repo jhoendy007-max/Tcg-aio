@@ -17,3 +17,5 @@ Do not copy engine modules into `mobile/` to get around Metro. Move the shared p
 Release APK: `mobile/scripts/assemble-release.sh`. It restores the existing upload keystore (`CN=TCGAIO Phone`). A missing keystore is a failure, not a prompt to mint a new one, unless `TCGAIO_GENERATE_KEYSTORE=1`.
 
 iOS stays TestFlight-ready. `mobile/eas.json` production sets `ios.distribution` to `store`. From `mobile/`, `npx eas build -p ios --profile production` then `npx eas submit -p ios --profile production`. Keep the `preview` profile. Do not add a macOS desktop build from this app.
+
+The phone can turn Autopilot on or off and pause every running task. Those commands do not carry a card, password, or proxy password.

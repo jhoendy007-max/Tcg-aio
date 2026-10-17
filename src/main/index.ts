@@ -1,4 +1,5 @@
 import { app, BrowserWindow, safeStorage, session } from "electron"
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
 import { Database } from "../engine/database"
@@ -20,7 +21,11 @@ import { createChallengeController } from "./challenge-window"
 import { createSessionBrowser, type SessionBrowser } from "./session-window"
 import { createUpdateController } from "./auto-update"
 import { planDrops } from "../engine/drops"
+import { HandsFree } from "../engine/hands-free"
+import { openImap } from "../engine/imap"
+import { shouldRelaunch } from "../engine/watchdog"
 import { registerIpc } from "./ipc"
+import type { Settings } from "../shared/types"
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
@@ -32,6 +37,8 @@ let alerts: AlertService | null = null
 let sessions: SessionBrowser | null = null
 let sessionTimer: ReturnType<typeof setInterval> | null = null
 let dropTimer: ReturnType<typeof setInterval> | null = null
+let handsTimer: ReturnType<typeof setInterval> | null = null
+let hands: HandsFree | null = null
 let dropBusy = false
 
 function createCipher(): Cipher {
@@ -154,7 +161,17 @@ if (gotLock) void app.whenReady().then(async () => {
   const updates = createUpdateController(db, (status) => {
     window?.webContents.send(channels.updatesEvent, status)
   })
-  registerIpc(db, runner, registry, () => window, desktop, alerts, challenge, sessions, updates)
+  registerIpc(db, runner, registry, () => window, desktop, alerts, challenge, sessions, updates, applyBoot)
+  hands = new HandsFree(db, runner, (id) => sessions!.warm(id), publish, defaultHttp, openImap)
+  if (db.getSettings().resumeOnLaunch) hands.resumeInterrupted()
+  applyBoot(db.getSettings())
+  installCrashRelaunch(db)
+  handsTimer = setInterval(() => {
+    void hands?.heal()
+    void hands?.learned()
+    void hands?.track()
+    void hands?.maybeReport()
+  }, 60_000)
   sessionTimer = setInterval(() => {
     void warmNext(db, publish)
   }, 60_000)
@@ -177,11 +194,61 @@ app.on("second-instance", () => {
 app.on("before-quit", () => {
   if (sessionTimer) clearInterval(sessionTimer)
   if (dropTimer) clearInterval(dropTimer)
+  if (handsTimer) clearInterval(handsTimer)
+  clearCrashFlag()
   void sessions?.close()
   alerts?.stop()
-  runner?.stopAll()
+  runner?.haltAll()
   void phone?.stop()
 })
+
+function applyBoot(settings: Settings): void {
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: settings.launchOnBoot === true,
+      args: settings.resumeOnLaunch ? ["--resume"] : []
+    })
+  } catch {
+    // Login items are a Windows setting. Other platforms keep the preference stored.
+  }
+}
+
+function crashFile(): string {
+  return join(app.getPath("userData"), "crash-relaunch.json")
+}
+
+function clearCrashFlag(): void {
+  try {
+    if (existsSync(crashFile())) unlinkSync(crashFile())
+  } catch {
+    // The next launch still refuses to relaunch more than once a minute.
+  }
+}
+
+function installCrashRelaunch(db: { getSettings(): Settings }): void {
+  process.on("uncaughtException", (err) => {
+    console.error(err)
+    if (!db.getSettings().relaunchOnCrash) {
+      app.exit(1)
+      return
+    }
+    let last = 0
+    try {
+      last = Number(JSON.parse(readFileSync(crashFile(), "utf8")).at) || 0
+    } catch {
+      last = 0
+    }
+    const now = Date.now()
+    if (!shouldRelaunch(last, now)) return
+    try {
+      writeFileSync(crashFile(), JSON.stringify({ at: now }))
+    } catch {
+      return
+    }
+    app.relaunch({ args: ["--resume"] })
+    app.exit(1)
+  })
+}
 
 async function tickDrops(db: Database, publish: (notice: Notice) => Promise<boolean>, desktop: { publishSnapshot(): void }): Promise<void> {
   if (dropBusy || !runner || !sessions) return

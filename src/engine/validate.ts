@@ -116,8 +116,75 @@ export function cleanSettings(input: Settings): Settings {
     alertPrice: input.alertPrice !== false,
     alertNewOffer: input.alertNewOffer !== false,
     alertAvailable: input.alertAvailable !== false,
-    alertRetailer: input.alertRetailer !== false
+    alertRetailer: input.alertRetailer !== false,
+    autopilot: input.autopilot === true,
+    autopilotPriceCap: cleanMoney(input.autopilotPriceCap, "Autopilot price cap"),
+    stuckMinutes: cleanRange(input.stuckMinutes, 5, 120, "Stuck task restart"),
+    launchOnBoot: input.launchOnBoot === true,
+    resumeOnLaunch: input.resumeOnLaunch !== false,
+    relaunchOnCrash: input.relaunchOnCrash !== false,
+    dailyBudget: cleanMoney(input.dailyBudget, "Daily budget"),
+    dropBudget: cleanMoney(input.dropBudget, "Drop budget"),
+    maxPerSku: cleanCount(input.maxPerSku, "Max per SKU"),
+    maxPerAccount: cleanCount(input.maxPerAccount, "Max per account"),
+    storePurchaseLimits: cleanStoreLimits(input.storePurchaseLimits ?? ""),
+    healthReportTime: cleanClock(input.healthReportTime ?? ""),
+    healthReportZone: cleanZone(input.healthReportZone ?? "")
   }
+}
+
+function cleanMoney(value: number, label: string): number {
+  const amount = Number(value ?? 0)
+  if (!Number.isFinite(amount) || amount < 0 || amount > 100000) throw new AppError(`${label} must be from 0 to 100000. 0 means no cap.`)
+  return Math.round(amount * 100) / 100
+}
+
+function cleanRange(value: number, min: number, max: number, label: string): number {
+  const amount = Math.round(Number(value))
+  if (!Number.isInteger(amount) || amount < min || amount > max) throw new AppError(`${label} must be from ${min} to ${max} minutes.`)
+  return amount
+}
+
+function cleanCount(value: number, label: string): number {
+  const amount = Math.round(Number(value ?? 0))
+  if (!Number.isInteger(amount) || amount < 0 || amount > 99) throw new AppError(`${label} must be from 0 to 99. 0 means no cap.`)
+  return amount
+}
+
+function cleanClock(value: string): string {
+  const time = value.trim()
+  if (!time) return ""
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time)
+  if (!match) throw new AppError("Health report time uses 24-hour HH:MM in your timezone.")
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour > 23 || minute > 59) throw new AppError("Health report time uses 24-hour HH:MM in your timezone.")
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+}
+
+function cleanZone(value: string): string {
+  const zone = value.trim()
+  if (!zone) return ""
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: zone }).format(0)
+  } catch {
+    throw new AppError("Health report timezone must be an IANA name like America/New_York, or blank.")
+  }
+  return zone
+}
+
+function cleanStoreLimits(value: string): string {
+  const lines: string[] = []
+  for (const raw of value.split(/\n+/)) {
+    const line = raw.trim()
+    if (!line) continue
+    const match = /^([a-z0-9-]+)\s*[:=]\s*(\d+)$/i.exec(line)
+    if (!match || !isStoreId(match[1]) || Number(match[2]) < 1 || Number(match[2]) > 99) {
+      throw new AppError("Store purchase limits use lines like target:1.")
+    }
+    lines.push(`${match[1].toLowerCase()}:${Number(match[2])}`)
+  }
+  return lines.join("\n")
 }
 
 function parseWindowLines(text: string): void {

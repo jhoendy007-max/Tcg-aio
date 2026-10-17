@@ -30,7 +30,9 @@ export async function notify(notice: PhoneNotice): Promise<void> {
             ? "Sign in again"
             : notice.kind === "drop"
               ? "Drop"
-              : notice.kind === "paused"
+              : notice.kind === "health"
+                ? "Daily report"
+                : notice.kind === "paused"
                 ? "Needs attention"
                 : "Checkout failed"
   await Notifications.scheduleNotificationAsync({

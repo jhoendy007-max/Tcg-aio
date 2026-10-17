@@ -49,7 +49,13 @@ import type {
   Settings,
   StoreHealth,
   StoreId,
-  TaskInput
+  TaskInput,
+  TaskTemplate,
+  TaskTemplateInput,
+  OrderRecord,
+  OrderStatus,
+  ImapView,
+  ImapInput
 } from "../shared/types"
 
 interface ProfileRecord extends PublicProfile {
@@ -117,10 +123,17 @@ interface DbFile {
   updates?: UpdateFile
   stockLog?: RestockEvent[]
   monitorSamples?: MonitorSample[]
+  templates?: TaskTemplate[]
+  orders?: OrderRecord[]
+  heals?: Record<string, number>
+  learnedKeys?: string[]
+  reportDay?: string
+  imap?: { enabled: boolean; host: string; port: number; user: string; mailbox: string; passwordSecret?: string }
 }
 
 export class Database {
   private data: DbFile = emptyDb()
+  private interrupted: string[] = []
 
   constructor(
     private readonly file: string,
@@ -151,18 +164,27 @@ export class Database {
       checkouts: normalizeCheckouts(parsed.checkouts),
       updates: normalizeUpdates(parsed.updates),
       stockLog: Array.isArray(parsed.stockLog) ? parsed.stockLog.slice(0, 400) : [],
-      monitorSamples: Array.isArray(parsed.monitorSamples) ? parsed.monitorSamples.slice(0, 500) : []
+      monitorSamples: Array.isArray(parsed.monitorSamples) ? parsed.monitorSamples.slice(0, 500) : [],
+      templates: Array.isArray(parsed.templates) ? parsed.templates : [],
+      orders: Array.isArray(parsed.orders) ? parsed.orders.slice(0, 200) : [],
+      heals: parsed.heals && typeof parsed.heals === "object" ? parsed.heals : {},
+      learnedKeys: Array.isArray(parsed.learnedKeys) ? parsed.learnedKeys.slice(0, 200) : [],
+      reportDay: typeof parsed.reportDay === "string" ? parsed.reportDay : "",
+      imap: normalizeImap(parsed.imap)
     }
     let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
+    const interrupted: string[] = []
     for (const task of this.data.tasks) {
       task.group = typeof task.group === "string" ? task.group : ""
       if (isActiveStatus(task.status)) {
+        interrupted.push(task.id)
         task.status = "paused"
         task.detail = "App closed while this task was running. Resume to continue."
         task.logs.push({ ts: Date.now(), level: "warn", message: task.detail })
         changed = true
       }
     }
+    this.interrupted = interrupted
     if (changed) this.flush()
   }
 
@@ -634,6 +656,9 @@ export class Database {
       outcome: input.outcome,
       profileName: input.profileName.slice(0, 80),
       orderId: input.orderId?.slice(0, 80),
+      accountId: input.accountId,
+      profileId: input.profileId,
+      quantity: input.quantity,
       detail
     }
     if (!this.data.checkouts) this.data.checkouts = []
@@ -655,6 +680,11 @@ export class Database {
     this.data.monitorSamples.unshift(sample)
     this.data.monitorSamples = this.data.monitorSamples.slice(0, 500)
     this.flush()
+  }
+
+  lastRestockPrice(store: StoreId, sku: string): number | null {
+    const found = (this.data.stockLog ?? []).find((event) => event.store === store && event.sku === sku && event.price !== null)
+    return found?.price ?? null
   }
 
   recordRestock(event: RestockEvent): void {
@@ -909,6 +939,210 @@ export class Database {
     return { ...saved }
   }
 
+  takeInterrupted(): string[] {
+    const ids = this.interrupted
+    this.interrupted = []
+    return ids
+  }
+
+  listCheckouts(): CheckoutRecord[] {
+    return (this.data.checkouts ?? []).map((record) => ({ ...record }))
+  }
+
+  listTemplates(): TaskTemplate[] {
+    return (this.data.templates ?? []).map((template) => ({ ...template, profileIds: [...template.profileIds], accountIds: [...template.accountIds] }))
+  }
+
+  saveTemplate(input: TaskTemplateInput): TaskTemplate {
+    const name = input.name.trim()
+    if (!name) throw new AppError("Template name is required.")
+    const store = input.store ? assertStore(input.store) : ""
+    const profileIds = [...new Set(input.profileIds.filter(Boolean))]
+    const accountIds = [...new Set(input.accountIds.filter(Boolean))]
+    if (!profileIds.length || !accountIds.length) throw new AppError("Choose at least one profile and one account.")
+    for (const id of profileIds) this.requireProfile(id)
+    for (const id of accountIds) {
+      const account = this.requireAccount(id)
+      if (store && account.store !== store) throw new AppError("Each account has to match the template store.")
+    }
+    if (input.proxyGroupId) this.getProxyGroup(input.proxyGroupId)
+    if (input.monitorProxyGroupId) this.getProxyGroup(input.monitorProxyGroupId)
+    const quantity = Math.round(Number(input.quantity))
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
+    const maxPrice = input.maxPrice === null || input.maxPrice === undefined || input.maxPrice === ("" as unknown) ? null : Number(input.maxPrice)
+    if (maxPrice !== null && (!Number.isFinite(maxPrice) || maxPrice < 0)) throw new AppError("Price cap must be a dollar amount, or blank.")
+    const existing = input.id ? this.data.templates?.find((template) => template.id === input.id) : undefined
+    const template: TaskTemplate = {
+      id: existing?.id ?? randomUUID(),
+      name: name.slice(0, 80),
+      enabled: input.enabled !== false,
+      store,
+      sku: input.sku.trim().slice(0, 180),
+      keywords: input.keywords.trim().slice(0, 200),
+      profileIds,
+      accountIds,
+      proxyGroupId: input.proxyGroupId || null,
+      monitorProxyGroupId: input.monitorProxyGroupId || null,
+      quantity,
+      maxPrice,
+      testMode: input.testMode === true,
+      confirmPurchase: input.confirmPurchase === true,
+      group: (input.group ?? "").trim().slice(0, 40),
+      lastFiredAt: existing?.lastFiredAt ?? 0
+    }
+    if (!template.sku && !template.keywords) throw new AppError("A template needs a SKU or keywords.")
+    if (!this.data.templates) this.data.templates = []
+    if (existing) this.data.templates = this.data.templates.map((item) => (item.id === template.id ? template : item))
+    else this.data.templates.unshift(template)
+    this.flush()
+    return { ...template, profileIds: [...template.profileIds], accountIds: [...template.accountIds] }
+  }
+
+  deleteTemplate(id: string): void {
+    const next = (this.data.templates ?? []).filter((template) => template.id !== id)
+    if (next.length === (this.data.templates ?? []).length) throw new AppError("That template was not found.")
+    this.data.templates = next
+    this.flush()
+  }
+
+  touchTemplate(id: string, ts: number): void {
+    const template = this.data.templates?.find((item) => item.id === id)
+    if (!template) return
+    template.lastFiredAt = ts
+    this.flush()
+  }
+
+  reassignTask(id: string, accountId: string, profileId?: string): PublicTask {
+    const task = this.requireTask(id)
+    if (isActiveStatus(task.status)) throw new AppError("Stop the task before changing its account.")
+    const account = this.requireAccount(accountId)
+    if (account.store !== task.store) throw new AppError("Choose an account for the same store.")
+    task.accountId = accountId
+    if (profileId) {
+      this.requireProfile(profileId)
+      task.profileId = profileId
+    }
+    this.flush()
+    return cloneTask(task)
+  }
+
+  listOrders(): OrderRecord[] {
+    return (this.data.orders ?? []).map((order) => ({ ...order }))
+  }
+
+  rememberOrder(input: Omit<OrderRecord, "id" | "checkedAt" | "status" | "tracking" | "detail"> & { detail?: string }): OrderRecord {
+    const existing = (this.data.orders ?? []).find((order) => order.store === input.store && order.orderId === input.orderId)
+    if (existing) return { ...existing }
+    const order: OrderRecord = {
+      id: randomUUID(),
+      at: input.at,
+      store: input.store,
+      sku: input.sku.slice(0, 180),
+      orderId: input.orderId.slice(0, 80),
+      accountId: input.accountId,
+      profileId: input.profileId,
+      status: "placed",
+      tracking: "",
+      detail: input.detail?.slice(0, 240) ?? "Order placed.",
+      checkedAt: 0,
+      quantity: input.quantity
+    }
+    if (!this.data.orders) this.data.orders = []
+    this.data.orders.unshift(order)
+    this.data.orders = this.data.orders.slice(0, 200)
+    this.flush()
+    return { ...order }
+  }
+
+  noteOrder(id: string, status: OrderStatus, tracking: string, detail: string): void {
+    const order = this.data.orders?.find((item) => item.id === id)
+    if (!order) return
+    order.status = status
+    order.tracking = tracking.slice(0, 40)
+    order.detail = detail.slice(0, 240)
+    order.checkedAt = Date.now()
+    this.flush()
+  }
+
+  touchOrder(id: string): void {
+    const order = this.data.orders?.find((item) => item.id === id)
+    if (!order) return
+    order.checkedAt = Date.now()
+    this.flush()
+  }
+
+  heals(): Record<string, number> {
+    return { ...(this.data.heals ?? {}) }
+  }
+
+  bumpHeal(id: string): number {
+    if (!this.data.heals) this.data.heals = {}
+    this.data.heals[id] = (this.data.heals[id] ?? 0) + 1
+    this.flush()
+    return this.data.heals[id]
+  }
+
+  learnedKeys(): string[] {
+    return [...(this.data.learnedKeys ?? [])]
+  }
+
+  markLearned(key: string): void {
+    const keys = this.data.learnedKeys ?? []
+    if (!keys.includes(key)) keys.unshift(key)
+    this.data.learnedKeys = keys.slice(0, 200)
+    this.flush()
+  }
+
+  reportDay(): string {
+    return this.data.reportDay ?? ""
+  }
+
+  setReportDay(day: string): void {
+    this.data.reportDay = day
+    this.flush()
+  }
+
+  imapView(): ImapView {
+    const imap = this.imapFile()
+    return { enabled: imap.enabled, host: imap.host, port: imap.port, user: imap.user, mailbox: imap.mailbox, hasPassword: Boolean(imap.passwordSecret) }
+  }
+
+  imapLogin(): { host: string; port: number; user: string; mailbox: string; password: string } | null {
+    const imap = this.imapFile()
+    if (!imap.enabled || !imap.host || !imap.user || !imap.passwordSecret) return null
+    return { host: imap.host, port: imap.port, user: imap.user, mailbox: imap.mailbox, password: this.cipher.decrypt(imap.passwordSecret) }
+  }
+
+  saveImap(input: ImapInput): ImapView {
+    const imap = this.imapFile()
+    const host = input.host.trim()
+    const user = input.user.trim()
+    const mailbox = (input.mailbox || "INBOX").trim() || "INBOX"
+    const port = Math.round(Number(input.port))
+    if (input.enabled && (!host || !user)) throw new AppError("Enter the mail host and username before turning mail tracking on.")
+    if (host && !/^[A-Za-z0-9.-]{1,253}$/.test(host)) throw new AppError("Mail host must be a hostname.")
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AppError("Mail port must be from 1 to 65535.")
+    if (input.passwordAction === "clear") imap.passwordSecret = undefined
+    if (input.passwordAction === "replace") {
+      const password = input.password
+      if (!password) throw new AppError("Enter the mail password.")
+      imap.passwordSecret = this.cipher.encrypt(password)
+    }
+    if (input.enabled && !imap.passwordSecret) throw new AppError("Save the mail password before turning mail tracking on.")
+    imap.enabled = input.enabled === true
+    imap.host = host
+    imap.port = port
+    imap.user = user.slice(0, 180)
+    imap.mailbox = mailbox.slice(0, 80)
+    this.flush()
+    return this.imapView()
+  }
+
+  private imapFile(): NonNullable<DbFile["imap"]> {
+    if (!this.data.imap) this.data.imap = { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" }
+    return this.data.imap
+  }
+
   private restock(): RestockFile {
     if (!this.data.restock) this.data.restock = emptyRestock()
     return this.data.restock
@@ -963,7 +1197,24 @@ function emptyDb(): DbFile {
     checkouts: [],
     stockLog: [],
     monitorSamples: [],
+    templates: [],
+    orders: [],
+    heals: {},
+    learnedKeys: [],
+    reportDay: "",
+    imap: { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" },
     updates: emptyUpdates()
+  }
+}
+
+function normalizeImap(value: DbFile["imap"]): DbFile["imap"] {
+  return {
+    enabled: value?.enabled === true,
+    host: typeof value?.host === "string" ? value.host : "",
+    port: typeof value?.port === "number" ? value.port : 993,
+    user: typeof value?.user === "string" ? value.user : "",
+    mailbox: typeof value?.mailbox === "string" && value.mailbox ? value.mailbox : "INBOX",
+    passwordSecret: typeof value?.passwordSecret === "string" ? value.passwordSecret : undefined
   }
 }
 
