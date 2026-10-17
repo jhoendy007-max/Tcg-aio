@@ -7,7 +7,8 @@ import { errorText, unwrap } from "../lib"
 
 const empty: AnalyticsReport = {
   attempts: 0, success: 0, failure: 0, paused: 0, tested: 0, winRate: 0, spend: 0, byStore: [], byProduct: [], timeline: [], recent: [],
-  monitor: { samples: 0, blocked: 0, blockRate: 0, avgMs: 0, byStore: [] },
+  monitor: { samples: 0, blocked: 0, blockRate: 0, avgMs: 0, p50Ms: 0, p95Ms: 0, byStore: [] },
+  stockLog: [],
   restockHints: []
 }
 
@@ -50,13 +51,15 @@ export function AnalyticsPage() {
         <div className="stat"><strong>{report.paused}</strong><span>paused</span></div>
         <div className="stat"><strong>{report.tested}</strong><span>tested</span></div>
         <div className="stat"><strong>{report.monitor.avgMs} ms</strong><span>avg monitor</span></div>
+        <div className="stat"><strong>{report.monitor.p50Ms} ms</strong><span>monitor p50</span></div>
+        <div className="stat"><strong>{report.monitor.p95Ms} ms</strong><span>monitor p95</span></div>
         <div className="stat"><strong>{Math.round(report.monitor.blockRate * 100)}%</strong><span>monitor block rate</span></div>
       </div>
       <div className="card">
         <h2>Monitor</h2>
-        <p className="hint">{report.monitor.samples} stock reads · {report.monitor.blocked} blocked · average {report.monitor.avgMs} ms.</p>
+        <p className="hint">{report.monitor.samples} stock reads · {report.monitor.blocked} blocked · average {report.monitor.avgMs} ms · p50 {report.monitor.p50Ms} ms · p95 {report.monitor.p95Ms} ms.</p>
         {report.monitor.byStore.length === 0 ? null : report.monitor.byStore.map((row) => (
-          <p key={row.store} className="hint">{row.store} · {row.samples} reads · {Math.round(row.blockRate * 100)}% blocked · {row.avgMs} ms</p>
+          <p key={row.store} className="hint">{row.store} · {row.samples} reads · {Math.round(row.blockRate * 100)}% blocked · avg {row.avgMs} ms · p50 {row.p50Ms} ms · p95 {row.p95Ms} ms</p>
         ))}
         {report.restockHints.length === 0 ? <p className="hint">Restock times show up here after the same SKU comes back at least twice in the same hour.</p> : report.restockHints.map((hint) => (
           <p key={`${hint.store}:${hint.sku}:${hint.hourAst}`} className="hint">{hint.detail}</p>
@@ -74,7 +77,26 @@ export function AnalyticsPage() {
       </div>
       <div className="card">
         <h2>Monitor speed</h2>
-        <SpeedChart rows={report.monitor.byStore.map((row) => ({ name: row.store, ms: row.avgMs }))} />
+        <SpeedChart rows={report.monitor.byStore.map((row) => ({ name: row.store, ms: row.p50Ms }))} />
+      </div>
+      <div className="table-wrap card">
+        <h2>Stock changes</h2>
+        {report.stockLog.length === 0 ? <p className="hint">Price, restock, and sell-out notes show up after a monitor sees a change.</p> : (
+          <table>
+            <thead><tr><th>When</th><th>Store</th><th>SKU</th><th>Change</th><th>Price</th></tr></thead>
+            <tbody>
+              {report.stockLog.map((row, index) => (
+                <tr key={`${row.at}-${row.sku}-${index}`}>
+                  <td>{formatAst(row.at)}</td>
+                  <td>{row.store}</td>
+                  <td className="sku">{row.sku}</td>
+                  <td>{row.kind ?? "restock"}{row.title ? ` · ${row.title}` : ""}</td>
+                  <td>{row.price === null ? "—" : `$${row.price.toFixed(2)}`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
       <div className="card">
         <h2>Timeline</h2>

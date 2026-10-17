@@ -84,7 +84,9 @@ export function createPhoneHost(
       monitorSamples: report.monitor.samples,
       monitorBlocked: report.monitor.blocked,
       monitorBlockRate: report.monitor.blockRate,
-      monitorAvgMs: report.monitor.avgMs
+      monitorAvgMs: report.monitor.avgMs,
+      monitorP50Ms: report.monitor.p50Ms,
+      monitorP95Ms: report.monitor.p95Ms
     }
   }
   const updates = (): PhoneUpdates => db.updateNotice()

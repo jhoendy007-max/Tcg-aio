@@ -21,4 +21,4 @@ Electron 33. Main process in `src/main`, preload bridge in `src/preload`, React 
 
 UI copy is a short sentence. Test mode shows a TEST badge. A test run’s log is the checklist from `note()` / `finishTest`.
 
-Home is the default page. Appearance (theme, accent, app name, logo, success sound, task density) is saved with the other settings. The setup wizard runs only for an empty vault that has not finished setup. Store marks are letter tiles. Product photos are optional https URLs. Do not fetch retailer artwork or copy a store logo.
+Home is the default page. Appearance (theme, accent, app name, logo, success sound, task density) is saved with the other settings. The setup wizard runs only for an empty vault that has not finished setup. Store marks are letter tiles. A product photo is the https image already in the monitor response, or an optional https URL on the task. Do not guess a CDN URL or copy a store logo. The task row shows the last monitor time in milliseconds. Monitor-only tasks never cart. Analytics shows p50, p95, and the stock-change log.

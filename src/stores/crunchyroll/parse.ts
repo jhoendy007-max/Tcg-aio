@@ -8,6 +8,7 @@ export interface StockReading {
   price?: number
   listPrice?: number
   reason: string
+  imageUrl?: string
 }
 
 export interface ShippingMethod {

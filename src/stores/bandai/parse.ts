@@ -9,6 +9,7 @@ export interface StockReading {
   areaItemNo?: string
   maxQuantity: number
   reason: string
+  imageUrl?: string
 }
 
 export interface CartLine {

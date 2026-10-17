@@ -56,7 +56,8 @@ export function summarize(records: CheckoutRecord[]): AnalyticsReport {
     byProduct: [...byProduct.values()].sort((a, b) => b.success - a.success || a.sku.localeCompare(b.sku)),
     timeline: [...days.values()].sort((a, b) => a.day.localeCompare(b.day)),
     recent: records.slice(0, 40),
-    monitor: { samples: 0, blocked: 0, blockRate: 0, avgMs: 0, byStore: [] },
+    monitor: { samples: 0, blocked: 0, blockRate: 0, avgMs: 0, p50Ms: 0, p95Ms: 0, byStore: [] },
+    stockLog: [],
     restockHints: []
   }
 }

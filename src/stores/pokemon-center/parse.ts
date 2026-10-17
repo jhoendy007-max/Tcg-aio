@@ -9,6 +9,7 @@ export interface StockReading {
   productUri: string
   availability: string
   reason: string
+  imageUrl?: string
 }
 
 export interface QueueTarget {

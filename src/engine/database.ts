@@ -623,6 +623,7 @@ export class Database {
       group: (input.group ?? existing?.group ?? "").trim().slice(0, 40),
       rank: existing?.rank ?? (ranks.length ? Math.min(...ranks) - 1 : 0),
       imageUrl: input.imageUrl === undefined ? existing?.imageUrl ?? "" : cleanImageUrl(input.imageUrl),
+      monitorOnly: input.monitorOnly === undefined ? existing?.monitorOnly === true : input.monitorOnly === true,
       status: existing?.status === "paused" ? "paused" : "idle",
       detail: existing?.detail ?? "",
       logs: existing?.logs ?? [],
@@ -711,6 +712,7 @@ export class Database {
   analytics(): AnalyticsReport {
     const report = summarize(this.data.checkouts ?? [])
     report.monitor = summarizeMonitor(this.data.monitorSamples ?? [])
+    report.stockLog = (this.data.stockLog ?? []).slice(0, 40)
     report.restockHints = suggestWarmups(this.data.stockLog ?? [])
     return report
   }
@@ -836,13 +838,16 @@ export class Database {
     return cloneTask(this.requireTask(id))
   }
 
-  patchTask(id: string, patch: Partial<Pick<PublicTask, "status" | "detail" | "startedAt" | "finishedAt">> & { log?: PublicTask["logs"][number]; resetLogs?: boolean }): PublicTask {
+  patchTask(id: string, patch: Partial<Pick<PublicTask, "status" | "detail" | "startedAt" | "finishedAt" | "monitorMs" | "detectToCartMs" | "imageUrl">> & { log?: PublicTask["logs"][number]; resetLogs?: boolean }): PublicTask {
     const task = this.requireTask(id)
     if (patch.resetLogs) task.logs = []
     if (patch.status) task.status = patch.status
     if (patch.detail !== undefined) task.detail = patch.detail
     if ("startedAt" in patch) task.startedAt = patch.startedAt
     if ("finishedAt" in patch) task.finishedAt = patch.finishedAt
+    if (typeof patch.monitorMs === "number") task.monitorMs = patch.monitorMs
+    if (typeof patch.detectToCartMs === "number") task.detectToCartMs = patch.detectToCartMs
+    if (patch.imageUrl) task.imageUrl = patch.imageUrl
     if (patch.log) {
       task.logs.push(patch.log)
       if (task.logs.length > 300) task.logs.splice(0, task.logs.length - 300)
@@ -1409,7 +1414,7 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 }
 
 function cloneTask(task: PublicTask): PublicTask {
-  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", logs: task.logs.map((line) => ({ ...line })) }
+  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, logs: task.logs.map((line) => ({ ...line })) }
 }
 
 function emptyUpdates(): UpdateFile {

@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
 import { Database } from "../engine/database"
 import { AlertService, relayRestockUrl as relayUrl } from "../engine/alerts"
+import { warmTaskMonitors } from "../engine/bench"
 import { defaultHttp } from "../engine/http"
 import { refreshStoreSession } from "../engine/store-browser"
 import { postDiscord } from "../engine/discord"
@@ -119,6 +120,10 @@ if (gotLock) void app.whenReady().then(async () => {
       profileName: notice.profileName,
       detail: notice.detail,
       orderId: notice.orderId,
+      price: notice.price,
+      url: notice.url,
+      imageUrl: notice.imageUrl,
+      inStock: notice.inStock,
       ts: Date.now()
     })
     const webhook = db.getSettings().discordWebhook
@@ -294,6 +299,8 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
             // A page that fails to load does not erase the saved session.
           }
         }
+        const matched = db.listTasks().filter((task) => plan.taskIds.includes(task.id))
+        await warmTaskMonitors(defaultHttp, matched, db.listProxyGroups()).catch(() => undefined)
         await publish({ kind: "drop", storeName: "Session Keeper", sku: plan.name, profileName: "Drop", detail: "Session Keeper opened the store pages before the drop." })
       }
       if (plan.action === "start") {

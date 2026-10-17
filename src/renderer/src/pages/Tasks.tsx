@@ -17,7 +17,8 @@ const emptyForm = (): TaskInput => ({
   confirmPurchase: false,
   testMode: false,
   group: "",
-  imageUrl: ""
+  imageUrl: "",
+  monitorOnly: false
 })
 
 export function TasksPage() {
@@ -287,7 +288,7 @@ export function TasksPage() {
           <Field label="Group" hint="Optional. A drop can start every task with this label.">
             <TextInput value={form.group ?? ""} onChange={(event) => setForm({ ...form, group: event.target.value })} placeholder="ETB" />
           </Field>
-          <Field className="span-2" label="Product image URL" hint="Optional https link. Leave it blank to show the store mark. TCGAIO does not fetch retailer art on its own.">
+          <Field className="span-2" label="Product image URL" hint="Optional https link. A running monitor fills a blank field from the product data it already downloaded.">
             <TextInput value={form.imageUrl ?? ""} onChange={(event) => setForm({ ...form, imageUrl: event.target.value })} placeholder="https://" inputMode="url" />
           </Field>
           <Field label="Monitor proxy group" hint="Stock checks use this pool. Leave it blank to use the checkout proxy group.">
@@ -305,6 +306,10 @@ export function TasksPage() {
           {selectedStore && !selectedStore.implemented ? (
             <Banner tone="info">{selectedStore.name} is registered, and starting a task records that checkout is not implemented yet.</Banner>
           ) : null}
+          <label className="check span-2">
+            <input type="checkbox" checked={form.monitorOnly === true} onChange={(event) => setForm({ ...form, monitorOnly: event.target.checked })} />
+            <span>Monitor only. Watch stock and send alerts. This task never adds the item to a cart.</span>
+          </label>
           <label className="check span-2">
             <input type="checkbox" checked={form.testMode === true} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
             <span>Test mode for this task. Runs the real flow and stops before place order, even if the global test setting is off.</span>
@@ -477,8 +482,9 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
             <div className="product-cell">
               <ProductVisual store={task.store} name={storeName(task.store)} sku={task.sku} imageUrl={task.imageUrl} />
               <div>
-                <div>{storeName(task.store)}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
+                <div>{storeName(task.store)}{task.monitorOnly ? <span className="pill">MONITOR</span> : null}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
                 <div className="sku">{task.sku}</div>
+                {typeof task.monitorMs === "number" ? <div className="detail">{task.monitorMs} ms last read{typeof task.detectToCartMs === "number" ? ` · ${task.detectToCartMs} ms to cart` : ""}</div> : null}
               </div>
             </div>
           </td>
@@ -494,7 +500,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
             {isActiveStatus(task.status) ? (
               <button type="button" onClick={(event) => { event.stopPropagation(); void onStop(task.id) }}>Stop</button>
             ) : (
-              <button type="button" className="primary" disabled={!task.confirmPurchase && !task.testMode} onClick={(event) => { event.stopPropagation(); void onStart(task.id) }}>
+              <button type="button" className="primary" disabled={!task.confirmPurchase && !task.testMode && !task.monitorOnly && !globalTest} onClick={(event) => { event.stopPropagation(); void onStart(task.id) }}>
                 {task.status === "paused" ? "Resume" : "Start"}
               </button>
             )}
@@ -523,6 +529,7 @@ function toInput(task: PublicTask): TaskInput {
     confirmPurchase: task.confirmPurchase,
     testMode: task.testMode,
     group: task.group ?? "",
-    imageUrl: task.imageUrl ?? ""
+    imageUrl: task.imageUrl ?? "",
+    monitorOnly: task.monitorOnly === true
   }
 }

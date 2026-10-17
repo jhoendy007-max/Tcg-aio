@@ -24,6 +24,7 @@ export interface StockReading {
   csrf?: string
   seller?: string
   reason: string
+  imageUrl?: string
 }
 
 export interface PlaceOrderForm {

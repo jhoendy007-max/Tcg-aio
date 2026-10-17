@@ -2,15 +2,15 @@ import type { HttpClient, HttpRequest } from "./http"
 import type { StoreId } from "../shared/types"
 import { sleep } from "./sleep"
 
-/** Minimum gap between this app's requests to one store. This slows the app down on purpose. */
+/** Minimum gap between this app's requests to one store. The configured delay can be longer. */
 export const STORE_GAP_MS: Record<StoreId, number> = {
-  target: 3000,
-  walmart: 4000,
-  bestbuy: 3000,
-  "pokemon-center": 4000,
-  amazon: 4000,
-  crunchyroll: 3000,
-  bandai: 4000
+  target: 250,
+  walmart: 400,
+  bestbuy: 250,
+  "pokemon-center": 400,
+  amazon: 400,
+  crunchyroll: 250,
+  bandai: 400
 }
 
 export const BLOCK_STATUSES = new Set([403, 412, 429, 435])
