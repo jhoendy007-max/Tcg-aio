@@ -13,6 +13,7 @@ import { isBlockStatus } from "./polite"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
 import { openBackup, sealBackup, type BackupAccount, type BackupDocument, type BackupProfile } from "./backup"
+import { assertLicenseAllowed, bindMachine, createLicenseIdentity, readLicense, signLicense, type IssuedLicense, type LicenseStatus } from "./license"
 import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent } from "./monitor"
 import { vaultFlag } from "./vault"
 import { parseAstLocal } from "./time"
@@ -119,6 +120,26 @@ interface UpdateFile {
   checkedAt: number
 }
 
+interface LicenseRow extends IssuedLicense {
+  tokenSecret: string
+}
+
+interface LicenseFile {
+  publicKey: string
+  privateSecret?: string
+  adminSecret?: string
+  issued: LicenseRow[]
+  activation?: {
+    tokenSecret: string
+    licenseId: string
+    holder: string
+    expiresAt: number | null
+    seats: number
+    machineId: string
+    activatedAt: number
+  }
+}
+
 interface DbFile {
   version: 1
   pcId: string
@@ -134,6 +155,7 @@ interface DbFile {
   checkouts?: CheckoutRecord[]
   updates?: UpdateFile
   backup?: { tokenSecret?: string }
+  license?: LicenseFile
   stockLog?: RestockEvent[]
   monitorSamples?: MonitorSample[]
   templates?: TaskTemplate[]
@@ -201,6 +223,7 @@ export class Database {
       checkouts: normalizeCheckouts(parsed.checkouts),
       updates: normalizeUpdates(parsed.updates),
       backup: normalizeBackup(parsed.backup),
+      license: normalizeLicense(parsed.license),
       stockLog: Array.isArray(parsed.stockLog) ? parsed.stockLog.slice(0, 400) : [],
       monitorSamples: Array.isArray(parsed.monitorSamples) ? parsed.monitorSamples.slice(0, 500) : [],
       templates: Array.isArray(parsed.templates) ? parsed.templates : [],
@@ -923,6 +946,177 @@ export class Database {
 
   hasBackupToken(): boolean {
     return Boolean(this.data.backup?.tokenSecret)
+  }
+
+  licenseView(): {
+    machineId: string
+    publicKey: string
+    hasPrivateKey: boolean
+    hasAdmin: boolean
+    activated: boolean
+    holder: string
+    expiresAt: number | null
+    seats: number
+    issued: IssuedLicense[]
+  } {
+    const file = this.data.license
+    const activation = file?.activation
+    const active = Boolean(activation && activation.machineId === this.data.pcId && (activation.expiresAt === null || activation.expiresAt > Date.now()))
+    return {
+      machineId: this.data.pcId,
+      publicKey: this.getSettings().licensePublicKey,
+      hasPrivateKey: Boolean(file?.privateSecret),
+      hasAdmin: Boolean(file?.adminSecret),
+      activated: active,
+      holder: activation?.holder ?? "",
+      expiresAt: activation?.expiresAt ?? null,
+      seats: activation?.seats ?? 0,
+      issued: (file?.issued ?? []).map((row) => ({
+        id: row.id,
+        holder: row.holder,
+        seats: row.seats,
+        expiresAt: row.expiresAt,
+        revoked: row.revoked,
+        machines: [...row.machines]
+      }))
+    }
+  }
+
+  generateLicenseIdentity(): { publicKey: string } {
+    const identity = createLicenseIdentity()
+    const file = this.licenseFile()
+    file.publicKey = identity.publicKey
+    file.privateSecret = this.cipher.encrypt(identity.privateKey)
+    this.saveSettings({ ...this.getSettings(), licensePublicKey: identity.publicKey })
+    return { publicKey: identity.publicKey }
+  }
+
+  setLicenseAdmin(action: "keep" | "replace" | "clear", token: string): void {
+    const file = this.licenseFile()
+    if (action === "clear") file.adminSecret = undefined
+    if (action === "replace") {
+      const trimmed = token.trim()
+      if (trimmed.length < 8 || /[\r\n\s]/.test(trimmed)) throw new AppError("Admin token is invalid.")
+      file.adminSecret = this.cipher.encrypt(trimmed)
+    }
+    this.flush()
+  }
+
+  licenseAdminToken(): string {
+    const secret = this.data.license?.adminSecret
+    return secret ? this.cipher.decrypt(secret) : ""
+  }
+
+  mintLicense(input: { holder: string; seats: number; expiresAt: number | null }): { id: string; key: string } {
+    const file = this.licenseFile()
+    if (!file.privateSecret) throw new AppError("Generate a license identity on this PC first.")
+    const signed = signLicense(this.cipher.decrypt(file.privateSecret), input)
+    file.issued.unshift({
+      id: signed.payload.id,
+      holder: signed.payload.holder,
+      seats: signed.payload.seats,
+      expiresAt: signed.payload.exp,
+      revoked: false,
+      machines: [],
+      tokenSecret: this.cipher.encrypt(signed.token)
+    })
+    this.flush()
+    return { id: signed.payload.id, key: signed.token }
+  }
+
+  licenseToken(id: string): string {
+    const row = this.licenseFile().issued.find((item) => item.id === id)
+    if (!row) throw new AppError("That license was not found.")
+    return this.cipher.decrypt(row.tokenSecret)
+  }
+
+  revokeLicense(id: string): void {
+    const row = this.licenseFile().issued.find((item) => item.id === id)
+    if (!row) throw new AppError("That license was not found.")
+    row.revoked = true
+    if (this.data.license?.activation?.licenseId === id) this.data.license.activation = undefined
+    this.flush()
+  }
+
+  activateLicense(key: string): LicenseStatus {
+    const publicKey = this.getSettings().licensePublicKey || this.licenseFile().publicKey
+    if (!publicKey) throw new AppError("Paste the seller's public key first.")
+    const payload = readLicense(key, publicKey)
+    assertLicenseAllowed(payload)
+    const row = this.licenseFile().issued.find((item) => item.id === payload.id)
+    if (row) {
+      const bound = bindMachine(row, this.data.pcId)
+      row.machines = bound.machines
+    }
+    this.licenseFile().activation = {
+      tokenSecret: this.cipher.encrypt(key),
+      licenseId: payload.id,
+      holder: payload.holder,
+      expiresAt: payload.exp,
+      seats: payload.seats,
+      machineId: this.data.pcId,
+      activatedAt: Date.now()
+    }
+    this.flush()
+    return { licenseId: payload.id, holder: payload.holder, expiresAt: payload.exp, seats: payload.seats }
+  }
+
+  saveRemoteActivation(key: string, status: LicenseStatus): LicenseStatus {
+    this.licenseFile().activation = {
+      tokenSecret: this.cipher.encrypt(key),
+      licenseId: status.licenseId,
+      holder: status.holder,
+      expiresAt: status.expiresAt,
+      seats: status.seats,
+      machineId: this.data.pcId,
+      activatedAt: Date.now()
+    }
+    this.flush()
+    return status
+  }
+
+  licensePublicKey(): string {
+    return this.getSettings().licensePublicKey || this.data.license?.publicKey || ""
+  }
+
+  findLicenseToken(key: string): IssuedLicense | null {
+    const file = this.data.license
+    if (!file) return null
+    for (const row of file.issued) {
+      if (this.cipher.decrypt(row.tokenSecret) !== key) continue
+      return { id: row.id, holder: row.holder, seats: row.seats, expiresAt: row.expiresAt, revoked: row.revoked, machines: [...row.machines] }
+    }
+    return null
+  }
+
+  rememberLicense(record: IssuedLicense, key: string): void {
+    const file = this.licenseFile()
+    const row = file.issued.find((item) => item.id === record.id)
+    if (row) {
+      row.holder = record.holder
+      row.seats = record.seats
+      row.expiresAt = record.expiresAt
+      row.revoked = record.revoked
+      row.machines = [...record.machines]
+    } else {
+      file.issued.unshift({ ...record, machines: [...record.machines], tokenSecret: this.cipher.encrypt(key) })
+    }
+    this.flush()
+  }
+
+  licenseAllows(): boolean {
+    if (!this.getSettings().licenseRequired) return true
+    const activation = this.data.license?.activation
+    if (!activation || activation.machineId !== this.data.pcId) return false
+    if (activation.expiresAt !== null && activation.expiresAt <= Date.now()) return false
+    const row = this.data.license?.issued.find((item) => item.id === activation.licenseId)
+    if (row?.revoked) return false
+    return true
+  }
+
+  private licenseFile(): LicenseFile {
+    if (!this.data.license) this.data.license = emptyLicense()
+    return this.data.license
   }
 
   backupToken(): string {
@@ -2073,6 +2267,31 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 function cloneTask(task: PublicTask): PublicTask {
   const role = normalizeRole(task)
   return { ...task, ...role, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: role.kind === "monitor" || task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, overrides: task.overrides ? { ...task.overrides } : undefined, logs: task.logs.map((line) => ({ ...line })) }
+}
+
+function emptyLicense(): LicenseFile {
+  return { publicKey: "", issued: [] }
+}
+
+function normalizeLicense(value: LicenseFile | undefined): LicenseFile | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const issued = Array.isArray(value.issued) ? value.issued.filter((row) => row && typeof row.id === "string" && typeof row.tokenSecret === "string").map((row) => ({
+    id: row.id,
+    holder: typeof row.holder === "string" ? row.holder : "",
+    seats: Number.isInteger(row.seats) ? row.seats : 1,
+    expiresAt: typeof row.expiresAt === "number" ? row.expiresAt : null,
+    revoked: row.revoked === true,
+    machines: Array.isArray(row.machines) ? row.machines.filter((id) => typeof id === "string") : [],
+    tokenSecret: row.tokenSecret
+  })) : []
+  const activation = value.activation && typeof value.activation.tokenSecret === "string" && typeof value.activation.machineId === "string" ? value.activation : undefined
+  return {
+    publicKey: typeof value.publicKey === "string" ? value.publicKey : "",
+    privateSecret: typeof value.privateSecret === "string" ? value.privateSecret : undefined,
+    adminSecret: typeof value.adminSecret === "string" ? value.adminSecret : undefined,
+    issued,
+    activation
+  }
 }
 
 function normalizeBackup(value: { tokenSecret?: string } | undefined): { tokenSecret?: string } | undefined {

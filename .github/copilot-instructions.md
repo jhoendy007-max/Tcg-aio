@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.17 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.18 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -48,6 +48,10 @@ Inventory lists successful checkouts. Cost is the recorded price. Current value 
 ## Backup
 
 Settings can export a `.tcgaio-backup` file sealed with a passphrase the user types and TCGAIO does not save. PBKDF2-SHA256 (210000 iterations) derives an AES-256-GCM key. The file and an optional https PUT are ciphertext only. The document inside holds settings, tasks, profiles (including cards), accounts (including passwords and sessions), proxy groups, schedules, and templates. It does not hold phone device tokens or the backup upload token. Restore keeps this PC's id, paired phones, upload token, and checkout history, and re-encrypts secrets with this PC's cipher. The backup URL is https with no userinfo and no query string. A redirect is not followed. One phone can store several PC pairings and switch which PC it controls. Forgetting a PC, or a revoked pairing, removes that PC only. `PHONE_PROTOCOL` stays 1.
+
+## Licenses
+
+Licensing is off until `licenseRequired` is turned on. A seller PC creates an Ed25519 identity. The public key is copied to other PCs. The private key stays encrypted on the seller PC and is not in a backup, the phone snapshot, or a license request. Minted keys are signed tokens. Activation sends only the key, this PC's id, and the app version. A license server response that includes a card, password, cookie, or session is rejected and not stored. Seat limits are enforced by the optional server. The local server binds to 127.0.0.1. A remote server URL must be https. Redirects are not followed. Task start is refused when a license is required and this PC is not activated. This is optional seat tracking for selling or sharing. It does not add anti-bot behavior.
 
 Shipping state is a two-letter US code from `src/engine/validate.ts`. Puerto Rico is not in that set. ZIP is `^\d{5}(?:-\d{4})?$`.
 
