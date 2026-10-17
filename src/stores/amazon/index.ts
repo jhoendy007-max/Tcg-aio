@@ -5,7 +5,7 @@ import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
+import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
   asksForCard,
   asksForCvv,
@@ -95,7 +95,8 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
   ctx.log("info", "Using the saved Amazon session. Checkout uses the address and payment already saved on the account.")
   note(ctx, "session", "pass", "Saved Amazon session loaded.")
   ctx.phase("monitoring")
-  ctx.log("info", `Watching ${asin} for an offer sold and shipped by Amazon.com.`)
+  const soldBy = ctx.module?.soldBy === "any" ? "any" : "retailer"
+  ctx.log("info", soldBy === "any" ? `Watching ${asin} for any buyable offer.` : `Watching ${asin} for an offer sold and shipped by Amazon.com.`)
   let waits = 0
 
   while (!ctx.signal.aborted) {
@@ -103,7 +104,7 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
       ctx.log("warn", stock.reason)
-      await ctx.sleep(ctx.settings.monitorDelayMs)
+      await ctx.sleep(retryWait(ctx))
       continue
     }
     if (stock.kind !== "ok") return asResult(stock)
@@ -121,6 +122,7 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
     if (await holdMonitorOnly(ctx)) continue
+    await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, asin, reading)
     if (cart.kind === "oos") {
@@ -156,6 +158,18 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
 }
 
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Promise<Step<StockReading>> {
+  const soldBy = ctx.module?.soldBy === "any" ? "any" : "retailer"
+  if (ctx.module?.endpoint === "page") {
+    const page = await sharedValue(ctx, monitorKey("amazon", asin, "page", ctx.proxy), () => amazon(ctx, jar, { method: "GET", url: productUrl(asin), headers: pageHeaders(jar, "https://www.amazon.com/") }))
+    if (page.kind !== "ok") return page
+    if (page.value.status === 429 || page.value.status >= 500) {
+      return { kind: "retry", reason: `Monitor request returned HTTP ${page.value.status}. Retrying.` }
+    }
+    const reading = readStock(page.value.status === 200 ? page.value.body : "", "", asin, soldBy)
+    reading.imageUrl = productImage(page.value.body) || undefined
+    noteWatch(ctx, { ...reading, url: productUrl(asin) })
+    return { kind: "ok", value: reading }
+  }
   const offers = await sharedValue(ctx, monitorKey("amazon", asin, "offers", ctx.proxy), () => amazon(ctx, jar, {
     method: "GET",
     url: offersUrl(asin),
@@ -176,7 +190,7 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Pr
     }
     productHtml = page.value.body
   }
-  const reading = readStock(productHtml, offerHtml, asin)
+  const reading = readStock(productHtml, offerHtml, asin, soldBy)
   reading.imageUrl = productImage(productHtml) || productImage(offerHtml) || undefined
   noteWatch(ctx, { ...reading, url: productUrl(asin) })
   return { kind: "ok", value: reading }

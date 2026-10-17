@@ -6,7 +6,7 @@ import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
+import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import { encryptBestBuyPan } from "./card"
 import {
   decodeQueueSeconds,
@@ -102,7 +102,7 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
       ctx.log("warn", stock.reason)
-      await ctx.sleep(ctx.settings.monitorDelayMs)
+      await ctx.sleep(retryWait(ctx))
       continue
     }
     if (stock.kind !== "ok") return asResult(stock)
@@ -120,6 +120,7 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
     if (await holdMonitorOnly(ctx)) continue
+    await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, sku, pageUrl)
     if (cart.kind === "oos") {

@@ -2,6 +2,7 @@ import type { SessionRefreshResult } from "../engine/block-recovery"
 import type { WatchSnapshot } from "../engine/monitor"
 import type { CheckResult, TestStage } from "../engine/test-mode"
 import type { HttpClient } from "../engine/http"
+import type { ModulePace } from "../shared/module-settings"
 import type {
   FullAccount,
   FullProfile,
@@ -40,11 +41,24 @@ export interface StoreRunContext {
   mailCode?: () => Promise<string | null>
   /** Watch stock only. The module must not add to cart. */
   monitorOnly?: boolean
+  /** Resolved store settings. Task overrides already won. */
+  module?: ModulePace
   /** Set for a test run. The HTTP client also refuses place-order requests. */
   testMode?: boolean
   clearCartAfterTest?: boolean
   mark?: (stage: TestStage, result: CheckResult, detail: string) => void
   checklistText?: () => string
+}
+
+/** Standard add-to-cart waits one retry interval. Fast does not. */
+export async function paceAddToCart(ctx: StoreRunContext): Promise<void> {
+  if (ctx.module?.atcMode !== "standard") return
+  ctx.log("info", "Standard add-to-cart is on for this store. Waiting one retry interval before adding.")
+  await ctx.sleep(ctx.module.retryDelayMs)
+}
+
+export function retryWait(ctx: StoreRunContext): number {
+  return ctx.module?.retryDelayMs ?? ctx.settings.monitorDelayMs
 }
 
 export type StoreRunResult =

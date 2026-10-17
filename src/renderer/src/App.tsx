@@ -12,8 +12,10 @@ import { AnalyticsPage } from "./pages/Analytics"
 import { AutopilotPage } from "./pages/Autopilot"
 import { VaultPage } from "./pages/Vault"
 import { DashboardPage } from "./pages/Dashboard"
+import { ModulesPage } from "./pages/Modules"
 import { Wizard } from "./pages/Wizard"
 import { SuccessScreen, type WinCard } from "./components/Success"
+import { moduleText } from "../../shared/module-settings"
 import { APP_VERSION } from "../../shared/version"
 import { DEFAULT_SETTINGS, type Settings, type UpdateStatus } from "../../shared/types"
 import { errorText, unwrap } from "./lib"
@@ -33,7 +35,8 @@ const PAGES = [
   { id: "proxies", label: "Proxies" },
   { id: "accounts", label: "Accounts" },
   { id: "phone", label: "Phone" },
-  { id: "settings", label: "Settings" }
+  { id: "settings", label: "Settings" },
+  { id: "stores", label: "Stores" }
 ] as const
 
 type PageId = (typeof PAGES)[number]["id"]
@@ -144,7 +147,7 @@ export function App() {
         <nav aria-label="Sections">
           {PAGES.map((item) => (
             <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined}>
-              {item.label}
+              {item.id === "stores" ? moduleText(settings.language === "es" ? "es" : "en", "nav") : item.label}
             </a>
           ))}
         </nav>
@@ -182,6 +185,7 @@ export function App() {
         {!booting && !wizard && page === "accounts" ? <AccountsPage /> : null}
         {!booting && !wizard && page === "phone" ? <PhonePage /> : null}
         {!booting && !wizard && page === "settings" ? <SettingsPage /> : null}
+        {!booting && !wizard && page === "stores" ? <ModulesPage /> : null}
       </main>
       {win ? <SuccessScreen win={win} sound={settings.successSound} onSound={(on) => void setSound(on)} onClose={() => setWin(null)} /> : null}
     </div>

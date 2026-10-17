@@ -257,6 +257,18 @@ export class PhoneSession {
     return this.request({ type: "mail.oauth", req: rid(), conn: this.conn, provider, user })
   }
 
+  saveModule(store: import("../shared/types").StoreId, record: import("../shared/types").ModuleRecord): Promise<PhoneCommandResult> {
+    return this.request({ type: "module.save", req: rid(), conn: this.conn, store, record })
+  }
+
+  resetModule(store: import("../shared/types").StoreId): Promise<PhoneCommandResult> {
+    return this.request({ type: "module.reset", req: rid(), conn: this.conn, store })
+  }
+
+  importModule(text: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "module.import", req: rid(), conn: this.conn, text })
+  }
+
   saveTask(task: PhoneTaskDraft): Promise<PhoneCommandResult> {
     return this.request({ type: "task.save", req: rid(), conn: this.conn, task })
   }

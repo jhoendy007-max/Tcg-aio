@@ -11,6 +11,7 @@ import type {
   Result,
   Settings,
   SettingsPayload,
+  StoreId,
   StoreInfo,
   TaskEvent,
   TaskInput,
@@ -78,6 +79,9 @@ export interface AioApi {
     get: () => Promise<Result<SettingsPayload>>
     save: (input: Settings) => Promise<Result<SettingsPayload>>
     testWebhook: () => Promise<Result<{ delivered: true }>>
+    saveModule: (store: StoreId, record: unknown) => Promise<Result<SettingsPayload>>
+    resetModule: (store: StoreId) => Promise<Result<SettingsPayload>>
+    importModule: (text: string) => Promise<Result<SettingsPayload>>
   }
   stores: {
     list: () => Promise<Result<StoreInfo[]>>

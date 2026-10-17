@@ -20,6 +20,7 @@ import { imapCredential } from "../engine/mail-read"
 import { explainMailFailure, isMailHelpUrl } from "../shared/mail"
 import { AppError } from "../shared/errors"
 import type { ImapInput, MailboxInput, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
+import { isStoreId } from "../shared/stores"
 import { listStores } from "../stores/registry"
 import type { StoreId } from "../shared/types"
 import type { StoreModule } from "../stores/module"
@@ -107,6 +108,23 @@ export function registerIpc(
   handle(channels.settingsGet, () => ({ settings: db.getSettings(), security: db.security() }))
   handle(channels.settingsSave, (input: Settings) => {
     const settings = db.saveSettings(input)
+    onSettings?.(settings)
+    return { settings, security: db.security() }
+  })
+  handle(channels.moduleSave, (input: { store: StoreId; record: unknown }) => {
+    if (!input || !isStoreId(input.store)) throw new AppError("Choose a store.")
+    const settings = db.saveModule(input.store, input.record)
+    onSettings?.(settings)
+    return { settings, security: db.security() }
+  })
+  handle(channels.moduleReset, (store: StoreId) => {
+    if (!isStoreId(store)) throw new AppError("Choose a store.")
+    const settings = db.resetModule(store)
+    onSettings?.(settings)
+    return { settings, security: db.security() }
+  })
+  handle(channels.moduleImport, (text: string) => {
+    const settings = db.importModule(text)
     onSettings?.(settings)
     return { settings, security: db.security() }
   })

@@ -45,7 +45,10 @@ const api: AioApi = {
   settings: {
     get: () => ipcRenderer.invoke(channels.settingsGet),
     save: (input) => ipcRenderer.invoke(channels.settingsSave, input),
-    testWebhook: () => ipcRenderer.invoke(channels.settingsTest)
+    testWebhook: () => ipcRenderer.invoke(channels.settingsTest),
+    saveModule: (store, record) => ipcRenderer.invoke(channels.moduleSave, { store, record }),
+    resetModule: (store) => ipcRenderer.invoke(channels.moduleReset, store),
+    importModule: (text) => ipcRenderer.invoke(channels.moduleImport, text)
   },
   stores: {
     list: () => ipcRenderer.invoke(channels.storesList)

@@ -5,6 +5,7 @@ import { adaptiveDelay, detectChanges, MonitorHub, type WatchSnapshot } from "./
 import type { RequestTiming } from "./http"
 import { productImage } from "../shared/image"
 import { cleanImageUrl } from "./validate"
+import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../shared/module-settings"
 import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
 import { storeHome } from "./session-care"
 import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
@@ -15,7 +16,7 @@ import { isAbortError, sleep } from "./sleep"
 import type { Database } from "./database"
 import { defaultHttp, type HttpClient } from "./http"
 import type { StoreModule, StoreRunResult } from "../stores/module"
-import { isActiveStatus, type FullAccount, type LogLevel, type Notice, type ProxyEndpoint, type StoreId, type TaskEvent, type TaskStatus } from "../shared/types"
+import { isActiveStatus, type FullAccount, type LogLevel, type Notice, type ProxyEndpoint, type Settings, type StoreId, type TaskEvent, type TaskStatus } from "../shared/types"
 
 export class TaskService {
   private readonly inflight = new Map<string, Promise<void>>()
@@ -167,7 +168,10 @@ export class TaskService {
         monitorProxy = proxy
         monitorProxies = proxies
       }
-      const settings = this.db.getSettings()
+      const loaded = this.db.getSettings()
+      const pace = resolvedValues(resolveModule(task.store, moduleScope(loaded), task.overrides))
+      const settings = tuneSettings(loaded, task.store, pace)
+      this.polite.setFloor(task.store, pace.rateLimitMs)
       const http = this.polite.wrap(task.store, monitorProxy?.id, this.http, (proxyId, status) => {
         this.db.noteTraffic(task.store, proxyId, status)
       }, controller.signal)
@@ -181,6 +185,7 @@ export class TaskService {
         profile,
         account,
         settings,
+        module: pace,
         proxy: monitorProxy,
         proxies: monitorProxies,
         signal: controller.signal,
@@ -215,7 +220,7 @@ export class TaskService {
           const base = ms === settings.monitorDelayMs
             ? adaptiveDelay(task.store, Date.now(), settings, this.db.listSchedules(), Math.random())
             : jitterDelay(ms, settings.monitorJitterPct, Math.random())
-          return sleep(base + backoffDelay(score?.streak ?? 0, settings.monitorDelayMs), controller.signal)
+          return sleep(base + backoffDelay(score?.streak ?? 0, pace.blockBackoffMs), controller.signal)
         },
         onSession: async (session: FullAccount["session"]) => {
           if (!session) return
@@ -582,6 +587,22 @@ function readStatus(value: unknown): number | null {
     return value.value.status
   }
   return null
+}
+
+function tuneSettings(settings: Settings, store: StoreId, pace: ModulePace): Settings {
+  const next: Settings = {
+    ...settings,
+    monitorDelayMs: pace.monitorDelayMs,
+    blockRetries: pace.maxRetries,
+    sessionWarmupMin: Math.min(240, Math.max(10, pace.sessionRefreshMin))
+  }
+  const zip = pace.zips.split(",")[0]?.trim() ?? ""
+  const storeId = pace.storeIds.split(",")[0]?.trim() ?? ""
+  if (zip) next.monitorZips = pace.zips
+  if (storeId) next.monitorStoreIds = pace.storeIds
+  if (store === "target" && /^\d{5}/.test(zip)) next.targetZip = zip.slice(0, 5)
+  if (store === "target" && /^\d{3,6}$/.test(storeId)) next.targetStoreId = storeId
+  return next
 }
 
 function line(level: LogLevel, message: string) {

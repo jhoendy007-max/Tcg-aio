@@ -83,7 +83,7 @@ export function isSignIn(body: string, location = ""): boolean {
   return false
 }
 
-export function readStock(productHtml: string, offersHtml: string, asin: string): StockReading {
+export function readStock(productHtml: string, offersHtml: string, asin: string, soldBy: "retailer" | "any" = "retailer"): StockReading {
   const title = readTitle(productHtml)
   const listPrice = readListPrice(productHtml)
   const missing = isNotFound(productHtml) && !/aod-offer-soldBy/i.test(offersHtml)
@@ -94,8 +94,11 @@ export function readStock(productHtml: string, offersHtml: string, asin: string)
     if (box) offers = [box]
   }
   const label = title ?? `ASIN ${asin}`
-  const amazon = offers.filter((offer) => offer.amazonRetail && offer.buyable && offer.price !== undefined && offer.offerListingId)
+  const amazon = offers.filter((offer) => (soldBy === "any" || offer.amazonRetail) && offer.buyable && offer.price !== undefined && offer.offerListingId)
   if (!amazon.length) {
+    if (soldBy === "any") {
+      return { inStock: false, status: "OUT_OF_STOCK", title, asin, listPrice, reason: `${label} has no buyable offer.` }
+    }
     const waiting = offers.find((offer) => offer.amazonRetail)
     if (waiting) {
       return {
@@ -142,8 +145,10 @@ export function readStock(productHtml: string, offersHtml: string, asin: string)
     listPrice,
     offerListingId: choice.offerListingId,
     csrf: choice.csrf,
-    seller: "Amazon.com",
-    reason: `${label} is sold and shipped by Amazon.com at $${choice.price!.toFixed(2)}.`
+    seller: soldBy === "any" ? (choice.seller || "the seller") : "Amazon.com",
+    reason: soldBy === "any"
+      ? `${label} is $${choice.price!.toFixed(2)} from ${choice.seller || "the seller"}.`
+      : `${label} is sold and shipped by Amazon.com at $${choice.price!.toFixed(2)}.`
   }
 }
 

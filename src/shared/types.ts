@@ -214,6 +214,8 @@ export interface PublicTask {
   imageUrl?: string
   /** Watch stock and notify. Never add to cart. */
   monitorOnly?: boolean
+  /** Fields this task sets itself. Blank fields use the store page. */
+  overrides?: TaskOverrides
   /** Last shared stock-read time, in milliseconds. */
   monitorMs?: number
   /** Milliseconds from an in-stock reading to the add-to-cart call. */
@@ -240,7 +242,33 @@ export interface TaskInput {
   group?: string
   imageUrl?: string
   monitorOnly?: boolean
+  overrides?: TaskOverrides
 }
+
+export type QueueMode = "wait" | "skip" | "pause"
+export type AtcMode = "fast" | "standard"
+export type SoldByMode = "retailer" | "any"
+
+/** Saved values for one store. Absent keys use the recommended default. */
+export interface ModuleRecord {
+  monitorDelayMs?: number
+  retryDelayMs?: number
+  rateLimitMs?: number
+  endpoint?: string
+  zips?: string
+  storeIds?: string
+  queue?: QueueMode
+  atcMode?: AtcMode
+  soldBy?: SoldByMode
+  sessionRefreshMin?: number
+  maxRetries?: number
+  testMode?: boolean
+  blockBackoffMs?: number
+  useGlobal?: Array<"monitorDelayMs" | "retryDelayMs" | "rateLimitMs" | "zips" | "storeIds" | "sessionRefreshMin" | "maxRetries" | "testMode" | "blockBackoffMs">
+}
+
+/** Set on a task. These beat the store page, which beats global Settings. */
+export type TaskOverrides = Omit<ModuleRecord, "useGlobal">
 
 export interface Settings {
   discordWebhook: string
@@ -316,6 +344,8 @@ export interface Settings {
   googleMailClientId: string
   /** Public OAuth client id for Sign in with Microsoft. Not a secret. */
   microsoftMailClientId: string
+  /** Per-store defaults. Missing stores use the recommended values. */
+  modules: Partial<Record<StoreId, ModuleRecord>>
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -363,7 +393,8 @@ export const DEFAULT_SETTINGS: Settings = {
   wizardDone: false,
   language: "en",
   googleMailClientId: "",
-  microsoftMailClientId: ""
+  microsoftMailClientId: "",
+  modules: {}
 }
 
 export interface SecurityInfo {

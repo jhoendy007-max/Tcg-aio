@@ -15,6 +15,7 @@ import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
 import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent } from "./monitor"
 import { vaultFlag } from "./vault"
 import { parseAstLocal } from "./time"
+import { cleanModuleRecord, cleanTaskOverrides, parseModulePreset } from "../shared/module-settings"
 import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
 import { redact } from "../shared/redact"
 import type {
@@ -236,6 +237,24 @@ export class Database {
     this.data.settings = cleanSettings(input)
     this.flush()
     return this.getSettings()
+  }
+
+  saveModule(store: StoreId, input: unknown): Settings {
+    const settings = this.getSettings()
+    const modules = { ...settings.modules, [store]: cleanModuleRecord(store, input) }
+    return this.saveSettings({ ...settings, modules })
+  }
+
+  resetModule(store: StoreId): Settings {
+    const settings = this.getSettings()
+    const modules = { ...settings.modules }
+    delete modules[store]
+    return this.saveSettings({ ...settings, modules })
+  }
+
+  importModule(text: string): Settings {
+    const preset = parseModulePreset(text)
+    return this.saveModule(preset.store, preset.record)
   }
 
   listProfiles(): PublicProfile[] {
@@ -654,6 +673,7 @@ export class Database {
       rank: existing?.rank ?? (ranks.length ? Math.min(...ranks) - 1 : 0),
       imageUrl: input.imageUrl === undefined ? existing?.imageUrl ?? "" : cleanImageUrl(input.imageUrl),
       monitorOnly: input.monitorOnly === undefined ? existing?.monitorOnly === true : input.monitorOnly === true,
+      overrides: cleanTaskOverrides(store, input.overrides === undefined ? existing?.overrides : input.overrides),
       status: existing?.status === "paused" ? "paused" : "idle",
       detail: existing?.detail ?? "",
       logs: existing?.logs ?? [],
@@ -1727,7 +1747,7 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 }
 
 function cloneTask(task: PublicTask): PublicTask {
-  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, logs: task.logs.map((line) => ({ ...line })) }
+  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, overrides: task.overrides ? { ...task.overrides } : undefined, logs: task.logs.map((line) => ({ ...line })) }
 }
 
 function emptyUpdates(): UpdateFile {
