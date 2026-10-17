@@ -24,7 +24,7 @@ Electron 33. Main process in `src/main`, preload bridge in `src/preload`, React 
 - Mail lives in Settings. An email address fills the host, port, and SSL. Google and Microsoft can sign in with a public client ID (PKCE, XOAUTH2, no client secret). iCloud and Yahoo use an app password and the official setup links. Failures are short English or Spanish sentences. The client only reads mail and only from store sender domains. It does not send mail. The Autopilot page does not edit mailboxes.
 - Session Sync is the Vault page. It lists linked browsers, expiry, and last used. It never receives the cookie. Turning two-way on lets the extension pull a session this PC already saved. The health check flags expiry; it does not sign the user in.
 - Desktop pages that show a countdown import `src/engine/time`, which re-exports `src/shared/clock.ts`. Do not give the renderer a Node import.
-- Drop times are Atlantic Time (Puerto Rico, UTC−4, no daylight-saving shift).
+- Drop times are Atlantic Time (Puerto Rico, UTC−4, no daylight-saving shift). The release calendar is Pokémon and One Piece only. A rehearsal is a dry run and must not place an order. Clone keeps each account's sticky proxy. Discord channel reads use the encrypted bot token and the user's allowlist. Shipment status comes from mail the user connected. Account and card spend caps are checked before place-order.
 - Electron windows and the updater download path are not unit-tested. Do not claim a live sign-in, captcha solve, or update download from a unit test.
 
 UI copy is a short sentence. Test mode shows a TEST badge. A test run’s log is the checklist from `note()` / `finishTest`.

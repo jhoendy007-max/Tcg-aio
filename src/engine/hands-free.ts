@@ -5,7 +5,7 @@ import type { LineSocket } from "./imap"
 import { imapCredential, readOrderMail } from "./mail-read"
 import { fetchMailbox } from "./imap"
 import { explainMailFailure, looksLikeStoreAlert, mailAlertDetail, storeForSender } from "../shared/mail"
-import { orderStatusUrl, readOrderUpdate } from "./orders"
+import { orderStatusUrl, shipmentFromMail } from "./orders"
 import { dayKey } from "./limits"
 import { cookieHeader } from "./challenge"
 import { healthReport, reportDue, reportZone } from "./watchdog"
@@ -159,7 +159,7 @@ export class HandsFree {
   async track(now = Date.now()): Promise<void> {
     const mailByStore = new Map<string, string>()
     for (const order of this.db.listOrders()) {
-      if (order.status === "cancelled" || order.status === "shipped") continue
+      if (order.status === "cancelled" || order.status === "delivered") continue
       if (order.checkedAt && now - order.checkedAt < ORDER_GAP_MS) continue
       const url = orderStatusUrl(order.store, order.orderId)
       let text = ""
@@ -185,12 +185,12 @@ export class HandsFree {
         mail = await readOrderMail(this.db, this.connectMail, order.store, now)
         mailByStore.set(order.store, mail)
       }
-      const update = readOrderUpdate(`${text}\n${mail}`, order.orderId)
+      const update = shipmentFromMail(`${text}\n${mail}`, order.orderId)
       if (!update) {
         this.db.touchOrder(order.id)
         continue
       }
-      this.db.noteOrder(order.id, update.status, update.tracking, update.tracking ? `Tracking ${update.tracking}` : `Order ${order.orderId} is ${update.status}.`)
+      this.db.noteOrder(order.id, update.status, update.tracking, update.detail, update.carrier)
       await this.notify({
         kind: update.status === "cancelled" ? "failure" : "success",
         storeName: order.store,

@@ -8,6 +8,7 @@ import { isListingBlock, listingHeaders, listingSearchUrl, parseListings, type L
 import { searchTerms } from "./keywords"
 import { keywordsAllow } from "./keywords"
 import { parseDiscordContent, parseWebhook, type RestockSignal } from "./restock-parse"
+import { dedupeHit, parseAllowlist, sourceAllowed } from "./discord-gate"
 import { matchTemplate, planTemplateStart } from "./autopilot"
 import { decideRestock } from "./restock-rules"
 import { tokenAccepted } from "./body"
@@ -119,6 +120,9 @@ export class AlertService {
       discordWatch: discord.enabled,
       hasBot: discord.hasBot,
       channelId: discord.channelId,
+      allowlist: discord.allowlist,
+      dedupeMin: discord.dedupeMin,
+      channelIds: discord.channelIds.join("\n"),
       rules: this.db.listRestockRules(),
       watches: this.db.listWatches(),
       log: this.db.listAlertLog()
@@ -142,9 +146,16 @@ export class AlertService {
     return json(200, { ok: true, results })
   }
 
-  async ingest(signal: RestockSignal, source: AlertLog["source"]): Promise<IngestHit[]> {
+  async ingest(signal: RestockSignal, source: AlertLog["source"], meta?: { channelId?: string; authorId?: string }): Promise<IngestHit[]> {
     const hits: IngestHit[] = []
     const now = Date.now()
+    if (source === "webhook" || source === "discord") {
+      const gate = this.admit(signal, source, now, meta)
+      if (gate) {
+        this.emitChange()
+        return [gate]
+      }
+    }
     const globalTestMode = this.db.getSettings().testMode
     for (const rule of this.db.listRestockRules()) {
       const task = rule.taskId ? this.findTask(rule.taskId) : null
@@ -189,14 +200,38 @@ export class AlertService {
 
   async pollDiscordOnce(): Promise<void> {
     const config = this.db.discordWatchConfig()
-    if (!config.enabled || !config.token || !config.channelId) return
+    if (!config.enabled || !config.token || !config.channelIds.length) return
+    for (const channelId of config.channelIds) {
+      const stop = await this.pollDiscordChannel(config.token, channelId)
+      if (stop) return
+    }
+  }
+
+  private admit(signal: RestockSignal, source: AlertLog["source"], now: number, meta?: { channelId?: string; authorId?: string }): IngestHit | null {
+    const config = this.db.discordWatchConfig()
+    const sources = [signal.source, source, meta?.channelId ?? "", meta?.authorId ?? ""]
+    if (!sourceAllowed(parseAllowlist(config.allowlist), sources)) {
+      this.log(source, signal, "Source is not on the allowlist.")
+      return { rule: "", action: "skip", reason: "Source is not on the allowlist." }
+    }
+    if (!signal.inStock) return null
+    const decision = dedupeHit(this.db.alertSeen(), `${signal.store}|${signal.sku}`, now, config.dedupeMin)
+    if (!decision.fresh) {
+      this.log(source, signal, "Duplicate alert ignored.")
+      return { rule: "", action: "skip", reason: "Duplicate alert ignored." }
+    }
+    this.db.rememberAlerts(decision.seen)
+    return null
+  }
+
+  private async pollDiscordChannel(token: string, channelId: string): Promise<boolean> {
     let response
     try {
       response = await this.http.request({
         method: "GET",
-        url: `https://discord.com/api/v10/channels/${encodeURIComponent(config.channelId)}/messages?limit=20`,
+        url: `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages?limit=20`,
         headers: {
-          authorization: `Bot ${config.token}`,
+          authorization: `Bot ${token}`,
           "user-agent": `TCGAIO (tcgaio, ${APP_VERSION})`
         },
         timeoutMs: 15000
@@ -204,7 +239,7 @@ export class AlertService {
     } catch (err) {
       this.discordBackoff = Math.min(this.discordBackoff * 2, MAX_BACKOFF_MS)
       this.logLine("discord", "", "", "Discord watcher", err instanceof Error ? err.message : "Discord request failed.")
-      return
+      return true
     }
     if (response.status === 401 || response.status === 403) {
       this.db.setDiscordEnabled(false)
@@ -212,49 +247,51 @@ export class AlertService {
       await this.notify({
         kind: "paused",
         storeName: "Discord",
-        sku: config.channelId,
+        sku: channelId,
         profileName: "Alerts",
         detail: "Discord rejected the bot token or channel. The watcher is off."
       })
       this.emitChange()
-      return
+      return true
     }
     if (response.status === 429) {
       this.discordBackoff = Math.min(this.discordBackoff * 2, MAX_BACKOFF_MS)
       this.logLine("discord", "", "", "Discord watcher", "Discord rate limited the bot. Waiting longer before the next read.")
-      return
+      return true
     }
     if (response.status < 200 || response.status >= 300) {
       this.discordBackoff = Math.min(this.discordBackoff * 2, MAX_BACKOFF_MS)
       this.logLine("discord", "", "", "Discord watcher", `Discord returned ${response.status}.`)
-      return
+      return true
     }
     this.discordBackoff = DISCORD_MIN_MS
-    let messages: { id?: string; content?: string }[]
+    let messages: { id?: string; content?: string; author?: { id?: string } }[]
     try {
       const parsed = JSON.parse(response.body) as unknown
       messages = Array.isArray(parsed) ? parsed : []
     } catch {
       this.logLine("discord", "", "", "Discord watcher", "Discord returned a response that was not a message list.")
-      return
+      return false
     }
     const newest = messages.find((message) => typeof message.id === "string")?.id ?? ""
-    if (!config.lastMessageId) {
-      if (newest) this.db.setDiscordCursor(newest)
+    const cursor = this.db.discordCursor(channelId)
+    if (!cursor) {
+      if (newest) this.db.setDiscordCursor(channelId, newest)
       this.logLine("discord", "", "", "Discord watcher", "Watcher armed. Messages already in the channel are ignored.")
       this.emitChange()
-      return
+      return false
     }
     const fresh = messages
-      .filter((message) => typeof message.id === "string" && snowflakeAfter(message.id, config.lastMessageId))
+      .filter((message) => typeof message.id === "string" && snowflakeAfter(message.id, cursor))
       .reverse()
     for (const message of fresh) {
       for (const signal of parseDiscordContent(message.content ?? "")) {
         signal.source = "discord"
-        await this.ingest(signal, "discord")
+        await this.ingest(signal, "discord", { channelId, authorId: message.author?.id })
       }
     }
-    if (newest) this.db.setDiscordCursor(newest)
+    if (newest) this.db.setDiscordCursor(channelId, newest)
+    return false
   }
 
   async pollWatchOnce(id: string): Promise<void> {
@@ -426,7 +463,8 @@ export class AlertService {
       accounts: this.db.listAccounts(),
       checkouts: this.db.listCheckouts(),
       settings,
-      now: Date.now()
+      now: Date.now(),
+      profiles: this.db.listProfiles().map((profile) => ({ id: profile.id, last4: profile.last4 }))
     })
     if (!plan.ok) {
       this.log(source, signal, `${template.name}: ${plan.reason}`)
@@ -513,7 +551,7 @@ export class AlertService {
     if (this.discordTimer) clearTimeout(this.discordTimer)
     this.discordTimer = null
     const config = this.db.discordWatchConfig()
-    if (this.stopped || !config.enabled || !config.hasBot || !config.channelId) return
+    if (this.stopped || !config.enabled || !config.hasBot || !config.channelIds.length) return
     this.discordTimer = setTimeout(() => {
       void this.pollDiscordOnce().finally(() => {
         if (!this.stopped) this.armDiscord()

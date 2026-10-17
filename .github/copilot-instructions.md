@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.21-beta checks out Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct. Account tasks stay on that account's persistent Chromium profile and one sticky proxy.
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.22-beta checks out Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct. Account tasks stay on that account's persistent Chromium profile and one sticky proxy.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -134,6 +134,18 @@ Each account has one sticky proxy, not shared with another account. A checkout d
 Requests that share an account or a proxy share one polite clock per store. The gap is that task's rate limit, never under the store floor, plus that task's jitter. Optional warm-up, when Session Keeper is on, browses the store homepage and checks the sign-in in the days before a drop. It does not add to cart. Near-expiry sessions refresh across the last few minutes before the drop. Hidden session windows are capped (Settings, default 3) and the rest wait. The captcha phone handoff is unchanged.
 
 Residential proxies the user controls are the right pool. Datacenter addresses are challenged more often. TCGAIO does not hide TLS to compensate.
+
+## Drop operations
+
+The Drops page accepts Pokémon and One Piece release dates the user types, or a JSON array / ICS feed the user pastes. Other games are skipped. One click creates a task per selected account and a schedule. Each task uses that account's proxy group, not a shared group copied from another account.
+
+Discord-to-task uses the local restock webhook and the optional Discord bot. The bot token stays encrypted and is not returned to the renderer or the phone. The user lists the channel ids the bot may read. An allowlist of channel ids, user ids, or source names can limit which alerts start tasks. An empty allowlist keeps the saved channels and the authenticated webhook. The same store and SKU is ignored for the dedupe window. 0 turns dedupe off.
+
+Clone copies a task onto the accounts the user selects. Each copy keeps that account's sticky proxy group and browser profile. The payment profile stays. The source task's proxy group and monitor pool are not copied.
+
+A schedule can run a rehearsal N minutes before the drop. It checks the saved session, the sticky proxy, the address, and the card last four and expiry. It does not add to cart and does not place an order. Failures go out through the same Discord notice and phone notice as other drop messages.
+
+Shipping status is read from IMAP mail the user connected. The status page is one order at a time. The client does not send mail. Per-account daily spend, per-card daily spend, and per-card daily order count are Settings. 0 means off. `allowCheckout` refuses the order before place-order. Checkout rows store the last four only, never the full card number.
 
 Do not harvest other sites, share a session with another user, or forge cookies. `scripts/pack-extension.mjs` writes `release/TCGAIO-Session-Sync-<version>.zip` (manifest at the zip root) and a `.crx` around that zip. The private key is not written. Load unpacked is the install path. A `v*` tag publishes the zip next to the Windows installer and the release APK.
 

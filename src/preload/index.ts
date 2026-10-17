@@ -96,6 +96,13 @@ const api: AioApi = {
     save: (input) => ipcRenderer.invoke(channels.schedulesSave, input),
     delete: (id) => ipcRenderer.invoke(channels.schedulesDelete, id)
   },
+  calendar: {
+    list: () => ipcRenderer.invoke(channels.calendarList),
+    save: (input) => ipcRenderer.invoke(channels.calendarSave, input),
+    delete: (id) => ipcRenderer.invoke(channels.calendarDelete, id),
+    importFeed: (text) => ipcRenderer.invoke(channels.calendarImport, text),
+    create: (input) => ipcRenderer.invoke(channels.calendarCreate, input)
+  },
   analytics: {
     get: () => ipcRenderer.invoke(channels.analyticsGet),
     csv: () => ipcRenderer.invoke(channels.analyticsCsv)
@@ -104,6 +111,7 @@ const api: AioApi = {
     create: (input) => ipcRenderer.invoke(channels.tasksBulk, input),
     edit: (input) => ipcRenderer.invoke(channels.tasksBulkEdit, input),
     duplicate: (ids) => ipcRenderer.invoke(channels.tasksDuplicate, ids),
+    clone: (taskId, accountIds) => ipcRenderer.invoke(channels.tasksClone, taskId, accountIds),
     delete: (ids) => ipcRenderer.invoke(channels.tasksDeleteMany, ids)
   },
   updates: {
@@ -125,6 +133,10 @@ const api: AioApi = {
     orders: () => ipcRenderer.invoke(channels.ordersList),
     imap: () => ipcRenderer.invoke(channels.imapGet),
     saveImap: (input) => ipcRenderer.invoke(channels.imapSave, input)
+  },
+  shipments: {
+    list: () => ipcRenderer.invoke(channels.shipmentsList),
+    scan: () => ipcRenderer.invoke(channels.shipmentsScan)
   },
   mail: {
     list: () => ipcRenderer.invoke(channels.mailboxesGet),
