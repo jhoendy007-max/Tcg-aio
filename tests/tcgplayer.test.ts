@@ -78,6 +78,33 @@ function ctx(http: HttpClient, overrides: Partial<StoreRunContext> = {}): StoreR
   }
 }
 
+function tcgPage(inner: string): string {
+  return `<!doctype html><html><body>${inner}</body></html>`
+}
+
+function tcgCheckout(req: HttpRequest): HttpResponse {
+  const url = new URL(req.url)
+  if (url.hostname === "mp-search-api.tcgplayer.com") return catalog(req)
+  if (url.hostname !== "www.tcgplayer.com") return response(500, "off-host")
+  if (req.method === "GET" && url.pathname.startsWith("/product/")) {
+    return response(200, tcgPage(`<form action="https://www.tcgplayer.com/cart/add" method="post"><input type="hidden" name="csrf_token" value="csrf"><input type="hidden" name="listingId" value="11"><button type="submit">Add to Cart</button></form>`))
+  }
+  if (url.pathname === "/cart/add") {
+    return response(200, tcgPage(`<form action="https://www.tcgplayer.com/checkout/address" method="post"><input type="hidden" name="csrf_token" value="a"><input name="firstName"><input name="address1"><input name="city"><input name="state"><input name="postalCode"><button>Continue</button></form>`))
+  }
+  if (url.pathname === "/checkout/address") {
+    return response(200, tcgPage(`<form action="https://www.tcgplayer.com/checkout/shipping" method="post"><input type="hidden" name="csrf_token" value="s"><input type="radio" name="shippingMethod" value="ground"> Ground<button>Continue</button></form>`))
+  }
+  if (url.pathname === "/checkout/shipping") {
+    return response(200, tcgPage(`<form action="https://www.tcgplayer.com/checkout/payment" method="post"><input type="hidden" name="csrf_token" value="p"><input type="radio" name="savedCard" value="card-1"> Visa 4242<button>Continue</button></form>`))
+  }
+  if (url.pathname === "/checkout/payment") {
+    return response(200, tcgPage(`<form action="https://www.tcgplayer.com/checkout/place-order" method="post"><input type="hidden" name="csrf_token" value="o"><button>Place order</button></form>`))
+  }
+  if (url.pathname === "/checkout/place-order") return response(200, JSON.stringify({ orderId: "SHOULD-NOT-RUN" }))
+  return response(404, "unexpected")
+}
+
 function catalog(req: HttpRequest, listed: unknown = direct): HttpResponse {
   if (req.url.endsWith("/details")) return response(200, details)
   if (req.url.endsWith("/listings")) return response(200, listed)
@@ -123,12 +150,29 @@ describe("tcgplayer direct", () => {
     expect(posted?.body ?? "").not.toContain(pan)
   })
 
-  it("finishes test mode from the catalog and never calls place-order", async () => {
+  it("does not invent a cart request when the product page has no form", async () => {
     const fake = client((req) => catalog(req))
+    const result = await createTcgplayerModule().run(ctx(fake.http, { testMode: true }))
+    expect(result.outcome).toBe("paused")
+    if (result.outcome === "paused") expect(result.reason).toContain("did not add it to the cart")
+    expect(fake.calls.some((call) => isFinalSubmit("tcgplayer", call))).toBe(false)
+    expect(fake.calls.some((call) => call.url.includes("/checkout/place-order"))).toBe(false)
+    expect(fake.calls.filter((call) => call.method === "POST").every((call) => new URL(call.url).pathname.endsWith("/listings"))).toBe(true)
+  })
+
+  it("checks out a Direct listing from the www.tcgplayer.com form and stops before place order", async () => {
+    const fake = client((req) => tcgCheckout(req))
     const result = await createTcgplayerModule().run(ctx(fake.http, { testMode: true }))
     expect(result.outcome).toBe("tested")
     expect(fake.calls.some((call) => isFinalSubmit("tcgplayer", call))).toBe(false)
     expect(fake.calls.some((call) => call.url.includes("/checkout/place-order"))).toBe(false)
+    const shopPosts = fake.calls.filter((call) => call.method === "POST" && new URL(call.url).hostname === "www.tcgplayer.com")
+    expect(shopPosts.length).toBeGreaterThan(0)
+    expect(shopPosts.every((call) => new URL(call.url).hostname === "www.tcgplayer.com")).toBe(true)
+    expect(fake.calls.filter((call) => new URL(call.url).hostname === "mp-search-api.tcgplayer.com" && call.method === "POST").every((call) => call.url.endsWith("/listings"))).toBe(true)
+    expect(fake.calls.map((call) => call.body ?? "").join("\n")).not.toContain(pan)
+    const payment = fake.calls.find((call) => call.url.endsWith("/checkout/payment"))
+    expect(new URLSearchParams(payment?.body ?? "").get("savedCard")).toBe("card-1")
   })
 
   it("does not call a Direct-enrolled seller stock when Direct inventory is zero", async () => {

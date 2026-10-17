@@ -20,6 +20,11 @@ const PROBES: Record<StoreId, string> = {
   tcgplayer: "https://mp-search-api.tcgplayer.com/v1/product/509980/details"
 }
 
+/** The read-only URL used by the store health check. It is never a cart or checkout URL. */
+export function storeProbe(store: StoreId): string {
+  return PROBES[store]
+}
+
 /** Read-only GET for every store. No cart, checkout, or place-order request is sent. */
 export async function checkStoreHealth(http: HttpClient, proxies: ProxyEndpoint[] = []): Promise<StoreHealth[]> {
   const results: StoreHealth[] = []

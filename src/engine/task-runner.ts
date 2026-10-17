@@ -188,7 +188,22 @@ export class TaskService {
       let detectedAt = 0
       const guarded = testMode ? guardTestMode(task.store, http) : http
       const ctx = {
-        task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store },
+        task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store, maxPrice: task.maxPrice },
+        spendCheck: (price: number | null) => {
+          if (testMode) return { ok: true as const }
+          const fresh = this.db.getTask(id)
+          const cap = fresh.maxPrice
+          if (cap && price !== null && price > cap) return { ok: false as const, reason: `The price is above this checkout's max of $${cap.toFixed(2)}.` }
+          return allowCheckout(this.db.getSettings(), this.db.listCheckouts(), {
+            store: task.store,
+            sku: task.sku,
+            accountId: account.id,
+            quantity: task.quantity,
+            price,
+            now: Date.now(),
+            dropStart: activeDropStart(this.db.listSchedules(), Date.now())
+          })
+        },
         profile,
         account,
         settings,

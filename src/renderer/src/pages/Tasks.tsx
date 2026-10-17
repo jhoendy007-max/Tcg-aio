@@ -292,21 +292,21 @@ export function TasksPage() {
       ) : null}
       <div className="card">
         <div className="log-head">
-          <h2>Store health check</h2>
-          <span>Read-only monitor. No cart or checkout.</span>
+          <h2>{taskText(lang, "healthTitle")}</h2>
+          <span>{taskText(lang, "healthHint")}</span>
         </div>
         <div className="actions">
           <Select value={healthGroup} onChange={(event) => setHealthGroup(event.target.value)}>
-            <option value="">Direct connection</option>
+            <option value="">{taskText(lang, "direct")}</option>
             {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies.length})</option>)}
           </Select>
-          <button type="button" onClick={() => void runHealth()} disabled={busy}>Run health check</button>
+          <button type="button" onClick={() => void runHealth()} disabled={busy}>{taskText(lang, "healthRun")}</button>
         </div>
         {healthError ? <Banner tone="error">{healthError}</Banner> : null}
         {health ? (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Store</th><th>Proxy</th><th>Status</th><th>Block rate</th><th>Result</th></tr></thead>
+              <thead><tr><th>{taskText(lang, "healthStore")}</th><th>{taskText(lang, "healthProxy")}</th><th>{taskText(lang, "healthStatus")}</th><th>{taskText(lang, "healthBlock")}</th><th>{taskText(lang, "healthResult")}</th></tr></thead>
               <tbody>
                 {health.map((row) => (
                   <tr key={row.store}>

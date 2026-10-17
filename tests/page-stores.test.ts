@@ -159,11 +159,12 @@ describe("product page modules", () => {
     }
   })
 
-  it("finishes a preorder in test mode without a place-order request", async () => {
+  it("does not post when a preorder page has no cart form", async () => {
     for (const entry of modules) {
       const fake = client(() => json(200, productPage("Pokemon Day 2026", "https://schema.org/PreOrder")))
       const result = await entry.module.run(runCtx(entry.id, entry.sku, fake.http, { testMode: true }))
-      expect(result.outcome, entry.id).toBe("tested")
+      expect(result.outcome, entry.id).toBe("paused")
+      if (result.outcome === "paused") expect(result.reason, entry.id).toBe(pageHandoff("Pokemon Day 2026"))
       expect(fake.calls.every((call) => call.method === "GET"), entry.id).toBe(true)
       expect(fake.calls.some((call) => isFinalSubmit(entry.id, call)), entry.id).toBe(false)
       expect(new Set(fake.calls.map((call) => new URL(call.url).hostname)), entry.id).toEqual(new Set([entry.host]))

@@ -17,7 +17,9 @@ import type {
 export type TaskPhase = Extract<TaskStatus, "monitoring" | "in_stock" | "adding_to_cart" | "checking_out">
 
 export interface StoreRunContext {
-  task: { id: string; sku: string; quantity: number; store: StoreId }
+  task: { id: string; sku: string; quantity: number; store: StoreId; maxPrice?: number | null }
+  /** Spend and quantity limits. The runner sets this. Test mode does not ask. */
+  spendCheck?: (price: number | null) => { ok: true } | { ok: false; reason: string }
   profile: FullProfile
   account: FullAccount
   settings: Settings
