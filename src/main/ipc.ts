@@ -227,6 +227,15 @@ export function registerIpc(
   handle(channels.ordersList, () => db.listOrders())
   handle(channels.imapGet, () => db.imapView())
   handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
+  handle(channels.vaultList, () => db.listVault())
+  handle(channels.vaultUnlink, (deviceId: string, accountId: string) => {
+    db.unlinkVault(deviceId, accountId)
+    return db.listVault()
+  })
+  handle(channels.vaultTwoWay, (deviceId: string, accountId: string, twoWay: boolean) => {
+    db.setVaultTwoWay(deviceId, accountId, twoWay)
+    return db.listVault()
+  })
 }
 
 function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {

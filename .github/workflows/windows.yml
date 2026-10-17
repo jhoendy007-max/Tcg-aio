@@ -29,6 +29,22 @@ jobs:
         run: |
           npm ci
           npm run typecheck
+      - name: Pack Session Sync
+        run: node scripts/pack-extension.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TCGAIO-Session-Sync
+          path: |
+            release/TCGAIO-Session-Sync-*.zip
+            release/TCGAIO-Session-Sync-*.crx
+          if-no-files-found: error
+      - name: Publish the extension
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
+          files: release/TCGAIO-Session-Sync-*.zip
+          overwrite_files: true
 
   windows:
     runs-on: windows-latest

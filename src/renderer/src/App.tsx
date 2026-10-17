@@ -10,6 +10,7 @@ import { KeeperPage } from "./pages/Keeper"
 import { DropsPage } from "./pages/Drops"
 import { AnalyticsPage } from "./pages/Analytics"
 import { AutopilotPage } from "./pages/Autopilot"
+import { VaultPage } from "./pages/Vault"
 import { APP_VERSION } from "../../shared/version"
 import type { UpdateStatus } from "../../shared/types"
 import { errorText, unwrap } from "./lib"
@@ -17,6 +18,7 @@ import { errorText, unwrap } from "./lib"
 const PAGES = [
   { id: "tasks", label: "Tasks" },
   { id: "keeper", label: "Session Keeper" },
+  { id: "vault", label: "Session Sync" },
   { id: "drops", label: "Drops" },
   { id: "stats", label: "Analytics" },
   { id: "alerts", label: "Alerts" },
@@ -70,7 +72,7 @@ export function App() {
         </nav>
         <footer>
           <span>v{APP_VERSION}</span>
-          <span>Desktop + phone</span>
+          <span>Desktop, phone, browser</span>
         </footer>
       </aside>
       <main>
@@ -89,6 +91,7 @@ export function App() {
         ) : null}
         {page === "tasks" ? <TasksPage /> : null}
         {page === "keeper" ? <KeeperPage /> : null}
+        {page === "vault" ? <VaultPage /> : null}
         {page === "drops" ? <DropsPage /> : null}
         {page === "stats" ? <AnalyticsPage /> : null}
         {page === "alerts" ? <AlertsPage /> : null}

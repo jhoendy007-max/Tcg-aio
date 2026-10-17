@@ -65,5 +65,8 @@ export const channels = {
   templatesDelete: "templates:delete",
   ordersList: "orders:list",
   imapGet: "imap:get",
-  imapSave: "imap:save"
+  imapSave: "imap:save",
+  vaultList: "vault:list",
+  vaultUnlink: "vault:unlink",
+  vaultTwoWay: "vault:twoWay"
 } as const

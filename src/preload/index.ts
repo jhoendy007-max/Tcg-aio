@@ -121,6 +121,11 @@ const api: AioApi = {
     orders: () => ipcRenderer.invoke(channels.ordersList),
     imap: () => ipcRenderer.invoke(channels.imapGet),
     saveImap: (input) => ipcRenderer.invoke(channels.imapSave, input)
+  },
+  vault: {
+    list: () => ipcRenderer.invoke(channels.vaultList),
+    unlink: (deviceId: string, accountId: string) => ipcRenderer.invoke(channels.vaultUnlink, deviceId, accountId),
+    setTwoWay: (deviceId: string, accountId: string, twoWay: boolean) => ipcRenderer.invoke(channels.vaultTwoWay, deviceId, accountId, twoWay)
   }
 }
 

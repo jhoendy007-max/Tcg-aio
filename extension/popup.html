@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>TCGAIO Session Sync</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <strong>Session Sync</strong>
+      <span id="pc">Not paired</span>
+    </header>
+    <p id="error" hidden></p>
+    <section id="pair">
+      <p>On the TCGAIO Phone page, create a pairing code. Paste it here. It works once and expires in three minutes.</p>
+      <textarea id="code" rows="5" placeholder="Paste the pairing code"></textarea>
+      <button id="pair-btn" type="button">Pair this browser</button>
+    </section>
+    <section id="linked" hidden>
+      <p>Link each account before its cookies are read. Only the seven store sites in this extension can be used.</p>
+      <div class="row">
+        <button id="refresh" type="button">Refresh accounts</button>
+        <button id="disconnect" type="button">Disconnect</button>
+      </div>
+      <ul id="accounts"></ul>
+    </section>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

@@ -23,7 +23,9 @@ import { createUpdateController } from "./auto-update"
 import { planDrops } from "../engine/drops"
 import { HandsFree } from "../engine/hands-free"
 import { openImap } from "../engine/imap"
-import { shouldRelaunch } from "../engine/watchdog"
+import { reportZone, shouldRelaunch } from "../engine/watchdog"
+import { dayKey } from "../engine/limits"
+import { cookieForVault, vaultScan } from "../engine/vault"
 import { registerIpc } from "./ipc"
 import type { Settings } from "../shared/types"
 
@@ -105,6 +107,10 @@ if (gotLock) void app.whenReady().then(async () => {
   })
   await phone.start()
   const desktop = phone
+  db.onSessionSaved((accountId) => {
+    const cookie = cookieForVault(db.readAccount(accountId).session)
+    if (cookie) desktop.pushVaultSession(accountId, cookie)
+  })
   const publish = async (notice: Notice) => {
     desktop.publishNotice({
       kind: notice.kind,
@@ -166,11 +172,29 @@ if (gotLock) void app.whenReady().then(async () => {
   if (db.getSettings().resumeOnLaunch) hands.resumeInterrupted()
   applyBoot(db.getSettings())
   installCrashRelaunch(db)
+  const scanVault = () => {
+    const now = Date.now()
+    const day = dayKey(now, reportZone(db.getSettings()))
+    const plan = vaultScan(db.vaultLinks(), db.listAccounts(), now, day)
+    for (const id of plan.expireIds) db.markSession(id, "expired", false)
+    for (const notice of plan.notices) {
+      db.markVaultAlerted(notice.accountId, notice.deviceId, day, notice.loggedOut)
+      void publish({
+        kind: "session",
+        storeName: notice.storeName,
+        sku: notice.label,
+        profileName: "Session Sync",
+        detail: notice.detail
+      })
+    }
+  }
+  scanVault()
   handsTimer = setInterval(() => {
     void hands?.heal()
     void hands?.learned()
     void hands?.track()
     void hands?.maybeReport()
+    scanVault()
   }, 60_000)
   sessionTimer = setInterval(() => {
     void warmNext(db, publish)

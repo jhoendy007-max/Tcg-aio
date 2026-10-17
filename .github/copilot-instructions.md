@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.8 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.9 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -14,6 +14,7 @@ Retailer terms often restrict automated purchasing. Use only an account, proxy, 
 - `src/shared` — types, store catalog, clock, version, redaction. Safe for the phone bundle.
 - `src/phone` — AES-256-GCM protocol, desktop WebSocket server, optional ciphertext relay. Metro may bundle this folder.
 - `mobile/` — Expo app. Its own `package.json`. Imports `../src/phone` and `../src/shared` only.
+- `extension/` — Chrome and Edge Manifest V3 Session Sync. It pairs as another phone device. It does not import the engine.
 - `tests/` — Vitest. Fixtures live in `tests/fixtures`.
 
 `mobile/metro.config.js` watches only `../src/phone` and `../src/shared`. Do not import `src/engine` from the phone. The engine uses undici and Node. Countdown text lives in `src/shared/clock.ts`. `src/engine/time.ts` re-exports it for the desktop.
@@ -66,6 +67,16 @@ The daily report uses `healthReportTime` in `healthReportZone` (the host zone wh
 
 The phone can set autopilot and pause every running task. The desktop app stays Windows-only. Do not add a macOS disk image, macOS CI, or Mac signing. The phone keeps the TestFlight path in `mobile/eas.json`.
 
+## Session Sync
+
+`extension/` is a Manifest V3 extension named TCGAIO Session Sync. It pairs with the same one-time QR the Phone page already shows, over the local WebSocket, and keeps a per-device token. Revoke that device on the desktop and the token stops working.
+
+Host permissions are only the seven store sites. The user links each account explicitly. The extension reads cookies, and the allowlisted localStorage keys in `extension/policy.mjs`, only for a linked account. A push is stored with `updateSession(..., quiet)` so it does not echo back. Two-way is off until the user turns it on. A two-way pull or `vault.session` writes cookie pairs the desktop already saved. It does not invent cookie names.
+
+The desktop Session Sync page shows expiry, last used, and a flag. It does not show the cookie. A one-minute check uses the saved expiry. It does not open store login pages. Logged-out and expiring-soon notices go to Discord and the phone at most once per day. The cookie never goes in the phone snapshot or a broadcast to every device.
+
+Do not harvest other sites, share a session with another user, or forge cookies. `scripts/pack-extension.mjs` writes `release/TCGAIO-Session-Sync-<version>.zip` (manifest at the zip root) and a `.crx` around that zip. The private key is not written. Load unpacked is the install path. A `v*` tag publishes the zip next to the Windows installer and the release APK.
+
 ## Commands
 
 From the repo root, with Node 22:
@@ -85,11 +96,11 @@ Phone:
 
 Use the local binaries (`./node_modules/.bin/tsc`, `./node_modules/.bin/vitest`) from the repo root. Do not run `npx tsc` from another directory.
 
-CI is `.github/workflows/windows.yml`. Pushes to `main` and `cursor/**`, pull requests, and tags `v*` run test, then Windows and Android. The installer, `latest.yml`, blockmap, and APK publish only when the ref is a `v*` tag. Do not move an existing release tag to pick up docs.
+CI is `.github/workflows/windows.yml`. Pushes to `main` and `cursor/**`, pull requests, and tags `v*` run test, then Windows and Android. The installer, `latest.yml`, blockmap, APK, and Session Sync zip publish only when the ref is a `v*` tag. Do not move an existing release tag to pick up docs.
 
 The desktop app is Windows only. Do not add a macOS disk image, a `macos-latest` job, Mac signing, or notarization. The phone app keeps its iOS TestFlight path: `mobile/eas.json` production profile (`ios.distribution: store`), then `npx eas build -p ios --profile production` and `npx eas submit -p ios --profile production`. GitHub Actions does not build that iOS binary.
 
-Bump versions together when shipping a beta: root `package.json`, `mobile/package.json`, `mobile/app.json` (`version` and `android.versionCode`), `src/shared/version.ts`, `mobile/src/version.ts`, and the version fields in `mobile/package-lock.json`.
+Bump versions together when shipping a beta: root `package.json`, `mobile/package.json`, `mobile/app.json` (`version` and `android.versionCode`), `src/shared/version.ts`, `mobile/src/version.ts`, the version fields in `mobile/package-lock.json`, and `extension/manifest.json`.
 
 ## Conventions
 
@@ -97,7 +108,7 @@ Bump versions together when shipping a beta: root `package.json`, `mobile/packag
 - Comments explain a non-obvious constraint, not the next line.
 - Logs and Discord go through `redact` in `src/shared/redact.ts`. Do not log card numbers, CVV, passwords, proxy passwords, or tokens.
 - Card data, account passwords, sessions, the Discord bot token, and the GitHub token are encrypted at rest (Windows DPAPI via Electron `safeStorage`, or AES-256-GCM on the key file when DPAPI is unavailable).
-- The phone snapshot never includes the card number, CVV, account password, proxy password, or GitHub token. A challenge handoff may include the task cookie header only inside that challenge message.
+- The phone snapshot never includes the card number, CVV, account password, proxy password, GitHub token, or a store cookie. A challenge handoff may include the task cookie header only inside that challenge message. A Session Sync pull returns the cookie only on the encrypted result for the linked device.
 - Phone **Sign in on PC** only asks the desktop to open the account window.
 - Address and profile validation throw `AppError` with a sentence the UI can show.
 - Tests use a temp database and a fake HTTP client. Do not hit live checkout, login, or payment from tests.

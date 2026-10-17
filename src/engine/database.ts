@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { dirname } from "node:path"
 import type { Cipher } from "./cipher"
 import { parseSession } from "./session"
+import { cookieHeader } from "./challenge"
 import { parseKeywordQuery } from "./keywords"
 import { assertStore, cleanAddress, cleanCard, cleanEmail, cleanPhone, cleanSettings } from "./validate"
 import { AppError } from "../shared/errors"
@@ -12,6 +13,7 @@ import { isBlockStatus } from "./polite"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
 import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent } from "./monitor"
+import { vaultFlag } from "./vault"
 import { parseAstLocal } from "./time"
 import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
 import { redact } from "../shared/redact"
@@ -55,7 +57,9 @@ import type {
   OrderRecord,
   OrderStatus,
   ImapView,
-  ImapInput
+  ImapInput,
+  VaultLink,
+  PublicVault
 } from "../shared/types"
 
 interface ProfileRecord extends PublicProfile {
@@ -129,6 +133,7 @@ interface DbFile {
   learnedKeys?: string[]
   reportDay?: string
   imap?: { enabled: boolean; host: string; port: number; user: string; mailbox: string; passwordSecret?: string }
+  vault?: VaultLink[]
 }
 
 export class Database {
@@ -170,7 +175,8 @@ export class Database {
       heals: parsed.heals && typeof parsed.heals === "object" ? parsed.heals : {},
       learnedKeys: Array.isArray(parsed.learnedKeys) ? parsed.learnedKeys.slice(0, 200) : [],
       reportDay: typeof parsed.reportDay === "string" ? parsed.reportDay : "",
-      imap: normalizeImap(parsed.imap)
+      imap: normalizeImap(parsed.imap),
+      vault: Array.isArray(parsed.vault) ? parsed.vault : []
     }
     let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
     const interrupted: string[] = []
@@ -343,6 +349,7 @@ export class Database {
       throw new AppError("Delete or edit the tasks that use this account first.")
     }
     this.data.accounts = this.data.accounts.filter((account) => account.id !== id)
+    this.data.vault = (this.data.vault ?? []).filter((link) => link.accountId !== id)
     this.flush()
   }
 
@@ -359,11 +366,21 @@ export class Database {
     }
   }
 
-  updateSession(id: string, session: SessionCookies): void {
+  private sessionListeners = new Set<(accountId: string) => void>()
+
+  onSessionSaved(cb: (accountId: string) => void): () => void {
+    this.sessionListeners.add(cb)
+    return () => this.sessionListeners.delete(cb)
+  }
+
+  updateSession(id: string, session: SessionCookies, quiet = false): void {
     const record = this.requireAccount(id)
     record.sessionSecret = this.cipher.encrypt(JSON.stringify(session))
     record.sessionState = "saved"
     this.flush()
+    if (!quiet) {
+      for (const cb of this.sessionListeners) cb(id)
+    }
   }
 
   markSession(id: string, state: PublicAccount["sessionState"], warmed: boolean): void {
@@ -774,6 +791,7 @@ export class Database {
     const next = this.data.devices.filter((device) => device.id !== id)
     if (next.length === this.data.devices.length) throw new AppError("That phone is not paired.")
     this.data.devices = next
+    this.data.vault = (this.data.vault ?? []).filter((link) => link.deviceId !== id)
     this.flush()
   }
 
@@ -937,6 +955,102 @@ export class Database {
     if (log.length > 80) log.length = 80
     this.flush()
     return { ...saved }
+  }
+
+  listVault(now = Date.now()): PublicVault[] {
+    const devices = new Map(this.listDevices().map((device) => [device.id, device.name]))
+    return (this.data.vault ?? []).flatMap((link) => {
+      const account = this.data.accounts.find((item) => item.id === link.accountId)
+      if (!account) return []
+      const pub = toPublicAccount(account)
+      return [{
+        accountId: link.accountId,
+        store: pub.store,
+        label: pub.label,
+        sessionState: pub.sessionState,
+        deviceId: link.deviceId,
+        deviceName: devices.get(link.deviceId) ?? "Removed browser",
+        twoWay: link.twoWay === true,
+        lastUsedAt: link.lastUsedAt ?? null,
+        expiresAt: link.expiresAt ?? null,
+        loggedOut: link.loggedOut === true,
+        flag: vaultFlag(link, pub.sessionState, now)
+      }]
+    })
+  }
+
+  linkVault(deviceId: string, accountId: string, twoWay: boolean): VaultLink {
+    this.requireAccount(accountId)
+    if (!this.data.devices.some((device) => device.id === deviceId)) throw new AppError("That browser is not paired.")
+    const links = this.data.vault ?? []
+    const existing = links.find((link) => link.deviceId === deviceId && link.accountId === accountId)
+    const next: VaultLink = {
+      accountId,
+      deviceId,
+      twoWay,
+      linkedAt: existing?.linkedAt ?? Date.now(),
+      lastUsedAt: existing?.lastUsedAt ?? null,
+      expiresAt: existing?.expiresAt ?? null,
+      loggedOut: existing?.loggedOut === true,
+      alertedDay: existing?.alertedDay ?? ""
+    }
+    this.data.vault = existing ? links.map((link) => (link === existing ? next : link)) : [next, ...links]
+    this.flush()
+    return { ...next }
+  }
+
+  unlinkVault(deviceId: string, accountId: string): void {
+    this.data.vault = (this.data.vault ?? []).filter((link) => !(link.deviceId === deviceId && link.accountId === accountId))
+    this.flush()
+  }
+
+  vaultLinksFor(accountId: string, twoWayOnly = false): VaultLink[] {
+    return (this.data.vault ?? []).filter((link) => link.accountId === accountId && (!twoWayOnly || link.twoWay)).map((link) => ({ ...link }))
+  }
+
+  vaultLinks(): VaultLink[] {
+    return (this.data.vault ?? []).map((link) => ({ ...link }))
+  }
+
+  setVaultTwoWay(deviceId: string, accountId: string, twoWay: boolean): void {
+    const link = (this.data.vault ?? []).find((item) => item.deviceId === deviceId && item.accountId === accountId)
+    if (!link) throw new AppError("That browser is not linked to this account.")
+    link.twoWay = twoWay
+    this.flush()
+  }
+
+  pushVault(deviceId: string, accountId: string, cookie: string, expiresAt: number | null): void {
+    if (!this.data.devices.some((device) => device.id === deviceId)) throw new AppError("That browser was revoked. Pair it again.")
+    const link = (this.data.vault ?? []).find((item) => item.deviceId === deviceId && item.accountId === accountId)
+    if (!link) throw new AppError("Link this account in the extension before syncing it.")
+    const session = parseSession(cookie)
+    link.lastUsedAt = Date.now()
+    link.expiresAt = expiresAt
+    link.loggedOut = false
+    link.alertedDay = ""
+    this.updateSession(accountId, session, true)
+  }
+
+  pullVault(deviceId: string, accountId: string): string {
+    if (!this.data.devices.some((device) => device.id === deviceId)) throw new AppError("That browser was revoked. Pair it again.")
+    const link = (this.data.vault ?? []).find((item) => item.deviceId === deviceId && item.accountId === accountId)
+    if (!link) throw new AppError("Link this account in the extension before syncing it.")
+    if (!link.twoWay) throw new AppError("Two-way sync is off for this account.")
+    const session = this.readAccount(accountId).session
+    if (!session) throw new AppError("This account has no saved session.")
+    link.lastUsedAt = Date.now()
+    this.flush()
+    const header = cookieHeader(session)
+    if (!header) throw new AppError("This account has no saved session.")
+    return header
+  }
+
+  markVaultAlerted(accountId: string, deviceId: string, day: string, loggedOut: boolean): void {
+    const link = (this.data.vault ?? []).find((item) => item.deviceId === deviceId && item.accountId === accountId)
+    if (!link) return
+    link.alertedDay = day
+    if (loggedOut) link.loggedOut = true
+    this.flush()
   }
 
   takeInterrupted(): string[] {
@@ -1203,6 +1317,7 @@ function emptyDb(): DbFile {
     learnedKeys: [],
     reportDay: "",
     imap: { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" },
+    vault: [],
     updates: emptyUpdates()
   }
 }
