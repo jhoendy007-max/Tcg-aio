@@ -1,10 +1,11 @@
 import { attachSession } from "../../engine/block-recovery"
-import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
+import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
   asksForCard,
   asksForCvv,
@@ -19,6 +20,7 @@ import {
   pickupOnly,
   productUrl,
   readOrderId,
+  readOtpForm,
   readPlaceOrder,
   readStock,
   type StockReading
@@ -93,7 +95,8 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
   ctx.log("info", "Using the saved Amazon session. Checkout uses the address and payment already saved on the account.")
   note(ctx, "session", "pass", "Saved Amazon session loaded.")
   ctx.phase("monitoring")
-  ctx.log("info", `Watching ${asin} for an offer sold and shipped by Amazon.com.`)
+  const soldBy = ctx.module?.soldBy === "any" ? "any" : "retailer"
+  ctx.log("info", soldBy === "any" ? `Watching ${asin} for any buyable offer.` : `Watching ${asin} for an offer sold and shipped by Amazon.com.`)
   let waits = 0
 
   while (!ctx.signal.aborted) {
@@ -101,7 +104,7 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
       ctx.log("warn", stock.reason)
-      await ctx.sleep(ctx.settings.monitorDelayMs)
+      await ctx.sleep(retryWait(ctx))
       continue
     }
     if (stock.kind !== "ok") return asResult(stock)
@@ -118,6 +121,8 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
+    if (await holdMonitorOnly(ctx)) continue
+    await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, asin, reading)
     if (cart.kind === "oos") {
@@ -153,6 +158,18 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
 }
 
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Promise<Step<StockReading>> {
+  const soldBy = ctx.module?.soldBy === "any" ? "any" : "retailer"
+  if (ctx.module?.endpoint === "page") {
+    const page = await sharedValue(ctx, monitorKey("amazon", asin, "page", ctx.proxy), () => amazon(ctx, jar, { method: "GET", url: productUrl(asin), headers: pageHeaders(jar, "https://www.amazon.com/") }))
+    if (page.kind !== "ok") return page
+    if (page.value.status === 429 || page.value.status >= 500) {
+      return { kind: "retry", reason: `Monitor request returned HTTP ${page.value.status}. Retrying.` }
+    }
+    const reading = readStock(page.value.status === 200 ? page.value.body : "", "", asin, soldBy)
+    reading.imageUrl = productImage(page.value.body) || undefined
+    noteWatch(ctx, { ...reading, url: productUrl(asin) })
+    return { kind: "ok", value: reading }
+  }
   const offers = await sharedValue(ctx, monitorKey("amazon", asin, "offers", ctx.proxy), () => amazon(ctx, jar, {
     method: "GET",
     url: offersUrl(asin),
@@ -173,8 +190,9 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Pr
     }
     productHtml = page.value.body
   }
-  const reading = readStock(productHtml, offerHtml, asin)
-  noteWatch(ctx, reading)
+  const reading = readStock(productHtml, offerHtml, asin, soldBy)
+  reading.imageUrl = productImage(productHtml) || productImage(offerHtml) || undefined
+  noteWatch(ctx, { ...reading, url: productUrl(asin) })
   return { kind: "ok", value: reading }
 }
 
@@ -253,8 +271,15 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar): Promise<Step<st
 }
 
 async function amazon(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest, follow = false): Promise<Step<HttpResponse>> {
-  const response = await send(ctx, request)
+  let response = await send(ctx, request)
   jar.absorb(response)
+  if (isTwoFactor(response.body, header(response, "location"))) {
+    const posted = await submitOwnCode(ctx, jar, response.body)
+    if (posted) {
+      response = posted
+      jar.absorb(response)
+    }
+  }
   const stopped = classify(response)
   if (stopped) return stopped
   if (!follow || response.status < 300 || response.status >= 400) return { kind: "ok", value: response }
@@ -264,9 +289,42 @@ async function amazon(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest
   if (next.hostname !== HOST) return { kind: "failed", reason: `Amazon redirected to ${next.hostname}.` }
   const again = await send(ctx, { method: "GET", url: next.toString(), headers: pageHeaders(jar, request.url) })
   jar.absorb(again)
+  if (isTwoFactor(again.body, header(again, "location"))) {
+    const posted = await submitOwnCode(ctx, jar, again.body)
+    if (posted) {
+      jar.absorb(posted)
+      const postedStop = classify(posted)
+      if (postedStop) return postedStop
+      return { kind: "ok", value: posted }
+    }
+  }
   const againStopped = classify(again)
   if (againStopped) return againStopped
   return { kind: "ok", value: again }
+}
+
+async function submitOwnCode(ctx: StoreRunContext, jar: CookieJar, body: string): Promise<HttpResponse | null> {
+  const form = readOtpForm(body)
+  if (!form || !ctx.mailCode) return null
+  const code = await ctx.mailCode()
+  if (!code || !/^\d{4,8}$/.test(code)) return null
+  let action: URL
+  try {
+    action = new URL(form.action, "https://www.amazon.com/")
+  } catch {
+    return null
+  }
+  if (action.hostname !== HOST) return null
+  const fields = { ...form.fields, [form.field]: code }
+  const headers = pageHeaders(jar, "https://www.amazon.com/")
+  headers["content-type"] = "application/x-www-form-urlencoded"
+  ctx.log("info", "Filled the verification code from your mailbox.")
+  return send(ctx, {
+    method: "POST",
+    url: action.toString(),
+    headers,
+    body: new URLSearchParams(fields).toString()
+  })
 }
 
 function classify(response: HttpResponse): StepStop | undefined {

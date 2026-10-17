@@ -16,6 +16,7 @@ export interface StockReading {
   msrp?: number
   seller?: string
   reason: string
+  imageUrl?: string
 }
 
 const AVAILABLE = new Set(["IN_STOCK", "AVAILABLE", "LIMITED_STOCK"])

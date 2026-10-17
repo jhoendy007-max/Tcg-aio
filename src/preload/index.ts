@@ -9,6 +9,7 @@ const api: AioApi = {
     list: () => ipcRenderer.invoke(channels.tasksList),
     save: (input) => ipcRenderer.invoke(channels.tasksSave, input),
     delete: (id) => ipcRenderer.invoke(channels.tasksDelete, id),
+    reorder: (ids) => ipcRenderer.invoke(channels.tasksReorder, ids),
     start: (id) => ipcRenderer.invoke(channels.tasksStart, id),
     test: (id) => ipcRenderer.invoke(channels.tasksTest, id),
     stop: (id) => ipcRenderer.invoke(channels.tasksStop, id),
@@ -44,7 +45,10 @@ const api: AioApi = {
   settings: {
     get: () => ipcRenderer.invoke(channels.settingsGet),
     save: (input) => ipcRenderer.invoke(channels.settingsSave, input),
-    testWebhook: () => ipcRenderer.invoke(channels.settingsTest)
+    testWebhook: () => ipcRenderer.invoke(channels.settingsTest),
+    saveModule: (store, record) => ipcRenderer.invoke(channels.moduleSave, { store, record }),
+    resetModule: (store) => ipcRenderer.invoke(channels.moduleReset, store),
+    importModule: (text) => ipcRenderer.invoke(channels.moduleImport, text)
   },
   stores: {
     list: () => ipcRenderer.invoke(channels.storesList)
@@ -121,6 +125,38 @@ const api: AioApi = {
     orders: () => ipcRenderer.invoke(channels.ordersList),
     imap: () => ipcRenderer.invoke(channels.imapGet),
     saveImap: (input) => ipcRenderer.invoke(channels.imapSave, input)
+  },
+  mail: {
+    list: () => ipcRenderer.invoke(channels.mailboxesGet),
+    save: (input) => ipcRenderer.invoke(channels.mailboxSave, input),
+    delete: (id) => ipcRenderer.invoke(channels.mailboxDelete, id),
+    test: (id) => ipcRenderer.invoke(channels.mailboxTest, id),
+    signIn: (input) => ipcRenderer.invoke(channels.mailboxOAuth, input),
+    open: (url) => ipcRenderer.invoke(channels.mailOpen, url)
+  },
+  resale: {
+    quote: (input) => ipcRenderer.invoke(channels.resaleQuote, input)
+  },
+  inventory: {
+    get: () => ipcRenderer.invoke(channels.inventoryGet),
+    setValue: (id, value) => ipcRenderer.invoke(channels.inventoryValue, id, value),
+    csv: () => ipcRenderer.invoke(channels.inventoryCsv)
+  },
+  backup: {
+    exportFile: (passphrase) => ipcRenderer.invoke(channels.backupExport, passphrase),
+    restoreFile: (passphrase, file) => ipcRenderer.invoke(channels.backupRestore, passphrase, file),
+    saveToken: (input) => ipcRenderer.invoke(channels.backupToken, input),
+    upload: (passphrase) => ipcRenderer.invoke(channels.backupUpload, passphrase),
+    download: (passphrase) => ipcRenderer.invoke(channels.backupDownload, passphrase)
+  },
+  license: {
+    get: () => ipcRenderer.invoke(channels.licenseGet),
+    generate: () => ipcRenderer.invoke(channels.licenseIdentity),
+    saveAdmin: (input) => ipcRenderer.invoke(channels.licenseAdmin, input),
+    mint: (input) => ipcRenderer.invoke(channels.licenseMint, input),
+    revoke: (id) => ipcRenderer.invoke(channels.licenseRevoke, id),
+    activate: (key) => ipcRenderer.invoke(channels.licenseActivate, key),
+    serve: (input) => ipcRenderer.invoke(channels.licenseServe, input)
   },
   vault: {
     list: () => ipcRenderer.invoke(channels.vaultList),

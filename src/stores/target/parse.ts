@@ -4,6 +4,7 @@ export interface StockReading {
   inStock: boolean
   status: string
   title?: string
+  imageUrl?: string
 }
 
 export function parseStock(body: string): StockReading | null {

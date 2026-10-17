@@ -2,6 +2,12 @@ import { applySolvedCookies, challengePageUrl, classifyChallenge, cookieHeader }
 import type { ChallengeGate } from "./challenge-gate"
 import { isBlockStatus as blockStatus, sendWithRecovery, type SessionRefresher } from "./block-recovery"
 import { adaptiveDelay, detectChanges, MonitorHub, type WatchSnapshot } from "./monitor"
+import type { RequestTiming } from "./http"
+import { productImage } from "../shared/image"
+import { cleanImageUrl } from "./validate"
+import { postDiscord } from "./discord"
+import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../shared/module-settings"
+import { checkoutsToStart, triggerDecision } from "../shared/task-role"
 import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
 import { storeHome } from "./session-care"
 import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
@@ -12,7 +18,7 @@ import { isAbortError, sleep } from "./sleep"
 import type { Database } from "./database"
 import { defaultHttp, type HttpClient } from "./http"
 import type { StoreModule, StoreRunResult } from "../stores/module"
-import { isActiveStatus, type FullAccount, type LogLevel, type Notice, type ProxyEndpoint, type StoreId, type TaskEvent, type TaskStatus } from "../shared/types"
+import { isActiveStatus, type FullAccount, type FullProfile, type LogLevel, type Notice, type ProxyEndpoint, type PublicTask, type Settings, type StoreId, type TaskEvent, type TaskStatus } from "../shared/types"
 
 export class TaskService {
   private readonly inflight = new Map<string, Promise<void>>()
@@ -28,7 +34,8 @@ export class TaskService {
     private readonly notify: (notice: Notice) => Promise<boolean>,
     private readonly http: HttpClient = defaultHttp,
     private readonly challenges?: ChallengeGate,
-    private readonly sessionRefresh?: SessionRefresher
+    private readonly sessionRefresh?: SessionRefresher,
+    private readonly readCode?: (store: StoreId) => Promise<string | null>
   ) {}
 
   isRunning(id: string): boolean {
@@ -37,9 +44,10 @@ export class TaskService {
 
   start(id: string, options?: { test?: boolean }): void {
     if (this.inflight.has(id)) return
+    if (!this.db.licenseAllows()) throw new Error("This PC is not activated. Add a license key in Settings.")
     const task = this.db.getTask(id)
     const testMode = options?.test === true || task.testMode === true || this.db.getSettings().testMode === true
-    if (!testMode && !task.confirmPurchase) {
+    if (!testMode && !task.confirmPurchase && task.monitorOnly !== true && task.kind !== "monitor") {
       throw new Error("Confirm that this task may place a real shipping order before starting it.")
     }
     const controller = new AbortController()
@@ -83,6 +91,8 @@ export class TaskService {
     const errors: { id: string; error: string }[] = []
     for (const task of this.db.listTasks()) {
       if (this.isRunning(task.id) || isActiveStatus(task.status)) continue
+      const mode = task.startMode ?? "builtin"
+      if (mode === "monitor" || mode === "restock" || mode === "scheduled") continue
       try {
         this.start(task.id)
         started.push(task.id)
@@ -97,6 +107,7 @@ export class TaskService {
     const task = this.db.getTask(id)
     const module = this.modules.get(task.store)
     const profileName = () => {
+      if (!task.profileId) return "Monitor"
       try {
         return this.db.readProfile(task.profileId).name
       } catch {
@@ -127,15 +138,16 @@ export class TaskService {
     let proxy: ProxyEndpoint | undefined
     let proxies: ProxyEndpoint[] | undefined
     try {
-      const profile = this.db.readProfile(task.profileId)
-      let account = this.db.readAccount(task.accountId)
+      const profile = task.profileId ? this.db.readProfile(task.profileId) : blankProfile()
+      let account = task.accountId ? this.db.readAccount(task.accountId) : blankAccount(task.store)
+      const proxyOwner = account.id || task.id
       const separateMonitor = Boolean(task.monitorProxyGroupId && task.monitorProxyGroupId !== task.proxyGroupId)
       let monitorProxy: ProxyEndpoint | undefined
       let monitorProxies: ProxyEndpoint[] | undefined
       if (separateMonitor && task.monitorProxyGroupId) {
         const group = this.db.getProxyGroup(task.monitorProxyGroupId)
         monitorProxies = group.proxies
-        const choice = this.db.assignProxy(`${account.id}:monitor`, group.id, group.proxies)
+        const choice = this.db.assignProxy(`${proxyOwner}:monitor`, group.id, group.proxies)
         monitorProxy = choice.proxy
         const network = group.network === "residential" ? "residential" : "datacenter"
         const detail = !monitorProxy
@@ -146,7 +158,7 @@ export class TaskService {
       if (task.proxyGroupId) {
         const group = this.db.getProxyGroup(task.proxyGroupId)
         proxies = group.proxies
-        const choice = this.db.assignProxy(account.id, group.id, group.proxies)
+        const choice = this.db.assignProxy(proxyOwner, group.id, group.proxies)
         proxy = choice.proxy
         const network = group.network === "residential" ? "residential" : "datacenter"
         const samePool = !task.monitorProxyGroupId || task.monitorProxyGroupId === task.proxyGroupId
@@ -163,19 +175,24 @@ export class TaskService {
         monitorProxy = proxy
         monitorProxies = proxies
       }
-      const settings = this.db.getSettings()
+      const loaded = this.db.getSettings()
+      const pace = resolvedValues(resolveModule(task.store, moduleScope(loaded), task.overrides))
+      const settings = tuneSettings(loaded, task.store, pace)
+      this.polite.setFloor(task.store, pace.rateLimitMs)
       const http = this.polite.wrap(task.store, monitorProxy?.id, this.http, (proxyId, status) => {
         this.db.noteTraffic(task.store, proxyId, status)
       }, controller.signal)
       const checks: string[] = []
       if (testMode) update({ log: line("warn", "TEST MODE. The real flow runs through payment, then stops. The place-order request is not sent.") })
       let handoffs = 0
+      let detectedAt = 0
       const guarded = testMode ? guardTestMode(task.store, http) : http
       const ctx = {
         task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store },
         profile,
         account,
         settings,
+        module: pace,
         proxy: monitorProxy,
         proxies: monitorProxies,
         signal: controller.signal,
@@ -191,7 +208,11 @@ export class TaskService {
         checklistText: () => checks.join("\n"),
         log: (level: LogLevel, message: string) => update({ log: line(level, message) }),
         detail: (message: string) => update({ detail: redact(message).slice(0, 240) }),
+        monitorOnly: task.monitorOnly === true || task.kind === "monitor",
+        checkoutDelayMs: task.checkoutDelayMs ?? 0,
         phase: (status: "monitoring" | "in_stock" | "adding_to_cart" | "checking_out") => {
+          if (status === "in_stock") detectedAt = Date.now()
+          if (status === "adding_to_cart" && detectedAt) update({ detectToCartMs: Date.now() - detectedAt })
           update({ status })
           if (status === "monitoring") {
             ctx.proxy = monitorProxy
@@ -202,15 +223,16 @@ export class TaskService {
           }
         },
         sleep: (ms: number) => {
+          const fresh = this.refreshLive(id, settings, pace, ctx)
           const current = ctx.proxy
           const score = current ? this.db.proxyScores().find((item) => item.proxyId === current.id) : undefined
           const base = ms === settings.monitorDelayMs
-            ? adaptiveDelay(task.store, Date.now(), settings, this.db.listSchedules(), Math.random())
+            ? adaptiveDelay(fresh.store, Date.now(), settings, this.db.listSchedules(), Math.random())
             : jitterDelay(ms, settings.monitorJitterPct, Math.random())
-          return sleep(base + backoffDelay(score?.streak ?? 0, settings.monitorDelayMs), controller.signal)
+          return sleep(base + backoffDelay(score?.streak ?? 0, pace.blockBackoffMs), controller.signal)
         },
         onSession: async (session: FullAccount["session"]) => {
-          if (!session) return
+          if (!session || !account.id) return
           this.db.updateSession(account.id, session)
           account = this.db.readAccount(account.id)
           ctx.account = account
@@ -220,15 +242,66 @@ export class TaskService {
           const started = Date.now()
           const value = await load()
           const status = readStatus(value)
-          if (status !== null) this.db.recordMonitor({ store: task.store, ms: Date.now() - started, blocked: blockStatus(status), at: Date.now() })
+          const timing = readTiming(value)
+          const total = timing?.totalMs ?? Date.now() - started
+          if (status !== null) {
+            this.db.recordMonitor({
+              store: task.store,
+              ms: total,
+              dnsMs: timing?.dnsMs,
+              connectMs: timing?.connectMs,
+              ttfbMs: timing?.ttfbMs,
+              blocked: blockStatus(status),
+              at: Date.now(),
+              proxy: monitorProxy ? `${monitorProxy.host}:${monitorProxy.port}` : "direct"
+            })
+            update({ monitorMs: total })
+          }
+          const image = readBody(value)
+          if (image) {
+            const url = productImage(image)
+            if (url && !task.imageUrl) {
+              try {
+                update({ imageUrl: cleanImageUrl(url) })
+              } catch {
+                // A store image that is not https is ignored.
+              }
+            }
+          }
           return value
         }),
         observe: (snapshot: WatchSnapshot) => {
-          const key = `${task.store}:${task.sku}`
+          const fresh = this.refreshLive(id, settings, pace, ctx)
+          const key = `${fresh.store}:${fresh.sku}`
           const prev = this.watches.get(key) ?? null
           this.watches.set(key, snapshot)
           if (prev && !prev.purchasable && snapshot.purchasable) {
-            this.db.recordRestock({ store: task.store, sku: task.sku, at: Date.now(), price: snapshot.price, title: snapshot.title })
+            this.db.recordRestock({ store: fresh.store, sku: fresh.sku, at: Date.now(), price: snapshot.price, title: snapshot.title, kind: "restock", imageUrl: snapshot.imageUrl, url: snapshot.url })
+          } else if (prev && prev.purchasable && !snapshot.purchasable) {
+            this.db.recordRestock({ store: fresh.store, sku: fresh.sku, at: Date.now(), price: snapshot.price, title: snapshot.title, kind: "oos", imageUrl: snapshot.imageUrl, url: snapshot.url })
+          } else if (prev && prev.price !== null && snapshot.price !== null && prev.price !== snapshot.price) {
+            this.db.recordRestock({ store: fresh.store, sku: fresh.sku, at: Date.now(), price: snapshot.price, title: snapshot.title, kind: "price", imageUrl: snapshot.imageUrl, url: snapshot.url })
+          }
+          if (snapshot.imageUrl && !fresh.imageUrl) {
+            try {
+              update({ imageUrl: cleanImageUrl(snapshot.imageUrl) })
+            } catch {
+              // Ignore a non-https image.
+            }
+          }
+          const edge = snapshot.purchasable && (!prev || !prev.purchasable)
+          if (edge && (fresh.kind === "monitor" || fresh.monitorOnly)) {
+            const decision = triggerDecision({
+              keywords: fresh.keywords ?? "",
+              priceCap: fresh.priceCap ?? null,
+              activeHours: fresh.activeHours ?? "",
+              soldBy: fresh.overrides?.soldBy,
+              title: snapshot.title,
+              price: snapshot.price,
+              soldByRetailer: snapshot.soldByRetailer
+            })
+            if (decision.ok) this.startLinked(fresh)
+            else update({ log: line("info", decision.reason) })
           }
           const messages = detectChanges(prev, snapshot, {
             price: settings.alertPrice,
@@ -241,13 +314,18 @@ export class TaskService {
             void this.safeNotify(update, {
               kind: "alert",
               storeName: module.displayName,
-              sku: task.sku,
+              sku: fresh.sku,
               profileName: profile.name,
-              detail: message
-            })
+              detail: message,
+              price: snapshot.price,
+              url: snapshot.url,
+              imageUrl: snapshot.imageUrl,
+              inStock: snapshot.purchasable
+            }, fresh.webhook)
           }
         },
-        refreshSession: this.sessionRefresh
+        mailCode: this.readCode ? () => this.readCode!(task.store) : undefined,
+        refreshSession: this.sessionRefresh && account.id
           ? (input: { homeUrl: string; proxy?: ProxyEndpoint; signal: AbortSignal }) => this.sessionRefresh!({
             accountId: account.id,
             store: task.store,
@@ -255,7 +333,9 @@ export class TaskService {
             proxy: input.proxy,
             existing: account.session,
             signal: input.signal,
-            onChallenge: (message) => update({ log: line("warn", message) })
+            onChallenge: (message) => update({ log: line("warn", message) }),
+            lookupCode: this.readCode ? () => this.readCode!(task.store) : undefined,
+            onMailFilled: () => update({ log: line("info", "Filled the verification code from your mailbox.") })
           })
           : undefined
       }
@@ -264,6 +344,8 @@ export class TaskService {
           if (isFinalSubmit(task.store, input)) {
             if (!testMode) {
               const price = this.watches.get(`${task.store}:${task.sku}`)?.price ?? null
+              const cap = this.db.getTask(id).maxPrice
+              if (cap && price !== null && price > cap) throw new SpendLimitError(`The price is above this checkout's max of $${cap.toFixed(2)}.`)
               const decision = allowCheckout(this.db.getSettings(), this.db.listCheckouts(), {
                 store: task.store,
                 sku: task.sku,
@@ -487,8 +569,37 @@ export class TaskService {
     })
   }
 
-  private async safeNotify(update: (patch: Parameters<Database["patchTask"]>[1]) => void, notice: Notice): Promise<void> {
+  private startLinked(monitor: PublicTask): void {
+    const active = (status: PublicTask["status"]) => isActiveStatus(status)
+    for (const checkout of checkoutsToStart(monitor, this.db.listTasks(), active)) {
+      try {
+        this.start(checkout.id)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "The linked checkout did not start."
+        this.db.patchTask(monitor.id, { log: line("warn", message) })
+      }
+    }
+  }
+
+  private refreshLive(id: string, settings: Settings, pace: ModulePace, ctx: { checkoutDelayMs?: number }): PublicTask {
+    const fresh = this.db.getTask(id)
+    const loaded = this.db.getSettings()
+    const paceNow = resolvedValues(resolveModule(fresh.store, moduleScope(loaded), fresh.overrides))
+    const tuned = tuneSettings(loaded, fresh.store, paceNow)
+    if (typeof fresh.jitterPct === "number") tuned.monitorJitterPct = fresh.jitterPct
+    Object.assign(settings, tuned)
+    Object.assign(pace, paceNow)
+    ctx.checkoutDelayMs = fresh.checkoutDelayMs ?? 0
+    return fresh
+  }
+
+  private async safeNotify(update: (patch: Parameters<Database["patchTask"]>[1]) => void, notice: Notice, webhook = ""): Promise<void> {
     try {
+      if (webhook) {
+        await postDiscord(webhook, notice)
+        update({ log: line("info", "Discord notification sent.") })
+        return
+      }
       const delivered = await this.notify(notice)
       update({ log: line("info", delivered ? "Discord notification sent." : "Discord webhook is not set.") })
     } catch (err) {
@@ -512,6 +623,18 @@ function finish(
   })
 }
 
+function readTiming(value: unknown): RequestTiming | undefined {
+  if (!value || typeof value !== "object" || !("timing" in value)) return undefined
+  const timing = value.timing
+  if (!timing || typeof timing !== "object" || !("totalMs" in timing) || typeof timing.totalMs !== "number") return undefined
+  return timing as RequestTiming
+}
+
+function readBody(value: unknown): string {
+  if (!value || typeof value !== "object" || !("body" in value) || typeof value.body !== "string") return ""
+  return value.body
+}
+
 function readStatus(value: unknown): number | null {
   if (!value || typeof value !== "object") return null
   if ("status" in value && typeof value.status === "number") return value.status
@@ -519,6 +642,43 @@ function readStatus(value: unknown): number | null {
     return value.value.status
   }
   return null
+}
+
+function blankProfile(): FullProfile {
+  const address = { firstName: "", lastName: "", line1: "", line2: "", city: "", state: "", zip: "", country: "US" as const }
+  return {
+    id: "",
+    name: "Monitor",
+    email: "",
+    phone: "",
+    shipping: address,
+    billing: address,
+    cardName: "",
+    last4: "",
+    expMonth: "",
+    expYear: "",
+    card: { number: "", cvv: "", expMonth: "", expYear: "", name: "" }
+  }
+}
+
+function blankAccount(store: StoreId): FullAccount {
+  return { id: "", store, label: "Monitor", username: "" }
+}
+
+function tuneSettings(settings: Settings, store: StoreId, pace: ModulePace): Settings {
+  const next: Settings = {
+    ...settings,
+    monitorDelayMs: pace.monitorDelayMs,
+    blockRetries: pace.maxRetries,
+    sessionWarmupMin: Math.min(240, Math.max(10, pace.sessionRefreshMin))
+  }
+  const zip = pace.zips.split(",")[0]?.trim() ?? ""
+  const storeId = pace.storeIds.split(",")[0]?.trim() ?? ""
+  if (zip) next.monitorZips = pace.zips
+  if (storeId) next.monitorStoreIds = pace.storeIds
+  if (store === "target" && /^\d{5}/.test(zip)) next.targetZip = zip.slice(0, 5)
+  if (store === "target" && /^\d{3,6}$/.test(storeId)) next.targetStoreId = storeId
+  return next
 }
 
 function line(level: LogLevel, message: string) {

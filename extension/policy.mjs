@@ -6,7 +6,12 @@ export const STORE_SITES = {
   "pokemon-center": "pokemoncenter.com",
   amazon: "amazon.com",
   crunchyroll: "crunchyroll.com",
-  bandai: "p-bandai.com"
+  bandai: "p-bandai.com",
+  gamestop: "gamestop.com",
+  "barnes-noble": "barnesandnoble.com",
+  costco: "costco.com",
+  sams: "samsclub.com",
+  tcgplayer: "tcgplayer.com"
 }
 
 /** localStorage names the store itself writes. Anything else is ignored. */
@@ -17,7 +22,12 @@ export const STORAGE_KEYS = {
   "pokemon-center": [],
   amazon: [],
   crunchyroll: ["accessToken"],
-  bandai: []
+  bandai: [],
+  gamestop: [],
+  "barnes-noble": [],
+  costco: [],
+  sams: [],
+  tcgplayer: []
 }
 
 /** Same origins Session Keeper already opens. Two-way writes land only here. */
@@ -28,7 +38,12 @@ export const STORE_ORIGINS = {
   "pokemon-center": "https://www.pokemoncenter.com/",
   amazon: "https://www.amazon.com/",
   crunchyroll: "https://www.crunchyroll.com/",
-  bandai: "https://p-bandai.com/"
+  bandai: "https://p-bandai.com/",
+  gamestop: "https://www.gamestop.com/",
+  "barnes-noble": "https://www.barnesandnoble.com/",
+  costco: "https://www.costco.com/",
+  sams: "https://www.samsclub.com/",
+  tcgplayer: "https://www.tcgplayer.com/"
 }
 
 export const COOKIE_LIMIT = 8192

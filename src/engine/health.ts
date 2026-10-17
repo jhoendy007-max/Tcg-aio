@@ -12,7 +12,12 @@ const PROBES: Record<StoreId, string> = {
   "pokemon-center": "https://www.pokemoncenter.com/",
   amazon: "https://www.amazon.com/gp/product/ajax/aodAjaxMain/ref=dp_aod_NEW_mbc?asin=B0BSHF7WHW&pc=dp",
   crunchyroll: "https://www.crunchyroll.com/store",
-  bandai: "https://p-bandai.com/api/products/N2716225001"
+  bandai: "https://p-bandai.com/api/products/N2716225001",
+  gamestop: "https://www.gamestop.com/toys-games/trading-cards/products/pokemon-trading-card-game-pokemon-day-2026-collection/436435.html",
+  "barnes-noble": "https://www.barnesandnoble.com/",
+  costco: "https://www.costco.com/",
+  sams: "https://www.samsclub.com/",
+  tcgplayer: "https://mp-search-api.tcgplayer.com/v1/product/509980/details"
 }
 
 /** Read-only GET for every store. No cart, checkout, or place-order request is sent. */
@@ -85,6 +90,7 @@ function probeHeaders(store: StoreId): Record<string, string> {
     headers["x-g1-area-code"] = "us"
     headers["x-requested-with"] = "XMLHttpRequest"
   }
+  if (store === "tcgplayer") headers.accept = "application/json"
   return headers
 }
 

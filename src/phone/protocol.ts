@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2"
 import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils"
 import { redact } from "../shared/redact"
 import { isStoreId, storeName } from "../shared/stores"
-import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
+import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, ModuleRecord, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StartMode, StoreHealth, StoreId, StoreInfo, TaskKind, TaskOverrides, TaskStatus } from "../shared/types"
 
 export const PHONE_PROTOCOL = 1
 export const INVITE_TTL_MS = 3 * 60 * 1000
@@ -84,6 +84,23 @@ export interface PhoneTask {
   confirmPurchase: boolean
   testMode: boolean
   group: string
+  imageUrl?: string
+  monitorOnly?: boolean
+  kind?: TaskKind
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  linkedCheckoutIds?: string[]
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  startMode?: StartMode
+  linkedMonitorId?: string | null
+  jitterPct?: number | null
+  monitorProxyGroupId?: string | null
+  overrides?: TaskOverrides
+  monitorMs?: number
+  detectToCartMs?: number
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -116,6 +133,8 @@ export interface PhoneAnalytics {
   monitorBlocked?: number
   monitorBlockRate?: number
   monitorAvgMs?: number
+  monitorP50Ms?: number
+  monitorP95Ms?: number
 }
 
 export interface PhoneUpdates {
@@ -129,6 +148,58 @@ export interface PhoneKeeper {
   intervalMin: number
   saved: number
   expired: number
+}
+
+export interface PhoneMailbox {
+  id: string
+  name: string
+  user: string
+  provider: "gmail" | "outlook" | "icloud" | "yahoo" | "custom"
+  host: string
+  port: number
+  secure: boolean
+  mailbox: string
+  enabled: boolean
+  auth: "password" | "xoauth2"
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+  lastError: string
+}
+
+export interface PhoneMailDraft {
+  id?: string
+  user: string
+  provider: PhoneMailbox["provider"]
+  host: string
+  port: number
+  secure: boolean
+  mailbox: string
+  password: string
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+}
+
+export interface PhoneImap {
+  accounts: number
+  enabled: number
+  ready: number
+  lastError: string
+  mailboxes?: PhoneMailbox[]
+  googleSignIn?: boolean
+  microsoftSignIn?: boolean
+}
+
+export interface PhoneModuleGlobals {
+  monitorDelayMs: number
+  sessionWarmupMin: number
+  blockRetries: number
+  testMode: boolean
+  monitorZips: string
+  monitorStoreIds: string
+  targetZip: string
+  targetStoreId: string
 }
 
 export interface PhoneSnapshot {
@@ -145,7 +216,12 @@ export interface PhoneSnapshot {
   analytics: PhoneAnalytics
   updates: PhoneUpdates
   keeper: PhoneKeeper
+  imap?: PhoneImap
+  language?: "en" | "es"
+  modules?: Partial<Record<StoreId, ModuleRecord>>
+  moduleGlobals?: PhoneModuleGlobals
   autopilot?: boolean
+  brand?: { appName: string; theme: "dark" | "light"; accent: "gold" | "blue" | "green" | "rose"; successSound: boolean }
 }
 
 /** Challenge handoff for the paired phone. The cookie is only on this message. */
@@ -160,6 +236,10 @@ export interface PhoneNotice {
   profileName: string
   detail: string
   orderId?: string
+  price?: number | null
+  url?: string
+  imageUrl?: string
+  inStock?: boolean
   ts: number
 }
 
@@ -212,6 +292,19 @@ export interface PhoneTaskDraft {
   confirmPurchase: boolean
   testMode?: boolean
   group?: string
+  kind?: TaskKind
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  linkedCheckoutIds?: string[]
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  startMode?: StartMode
+  linkedMonitorId?: string | null
+  jitterPct?: number | null
+  monitorProxyGroupId?: string | null
+  overrides?: TaskOverrides
 }
 
 export type ClientMessage =
@@ -226,6 +319,13 @@ export type ClientMessage =
   | { type: "task.stopAll"; req: string; conn: string }
   | { type: "task.pauseAll"; req: string; conn: string }
   | { type: "autopilot.set"; req: string; conn: string; enabled: boolean }
+  | { type: "language.set"; req: string; conn: string; language: "en" | "es" }
+  | { type: "mail.save"; req: string; conn: string; mailbox: PhoneMailDraft }
+  | { type: "mail.delete"; req: string; conn: string; id: string }
+  | { type: "mail.oauth"; req: string; conn: string; provider: "gmail" | "outlook"; user: string }
+  | { type: "module.save"; req: string; conn: string; store: StoreId; record: ModuleRecord }
+  | { type: "module.reset"; req: string; conn: string; store: StoreId }
+  | { type: "module.import"; req: string; conn: string; text: string }
   | { type: "task.save"; req: string; conn: string; task: PhoneTaskDraft }
   | { type: "task.delete"; req: string; conn: string; taskId: string }
   | { type: "rule.save"; req: string; conn: string; rule: RestockRuleInput }
@@ -417,6 +517,23 @@ export function projectTask(task: PublicTask, profiles: PublicProfile[], account
     confirmPurchase: task.confirmPurchase,
     testMode: task.testMode === true,
     group: task.group ?? "",
+    imageUrl: task.imageUrl || undefined,
+    monitorOnly: task.monitorOnly === true || task.kind === "monitor",
+    kind: task.kind === "monitor" || task.monitorOnly ? "monitor" : "checkout",
+    keywords: task.keywords ?? "",
+    priceCap: task.priceCap ?? null,
+    webhook: task.webhook ?? "",
+    activeHours: task.activeHours ?? "",
+    linkedCheckoutIds: task.linkedCheckoutIds ?? [],
+    checkoutDelayMs: task.checkoutDelayMs ?? null,
+    maxPrice: task.maxPrice ?? null,
+    startMode: task.startMode ?? (task.kind === "monitor" || task.monitorOnly ? "manual" : "builtin"),
+    linkedMonitorId: task.linkedMonitorId ?? null,
+    jitterPct: task.jitterPct ?? null,
+    monitorProxyGroupId: task.monitorProxyGroupId,
+    overrides: task.overrides,
+    monitorMs: task.monitorMs,
+    detectToCartMs: task.detectToCartMs,
     status: task.status,
     detail: redact(task.detail).slice(0, 240),
     logs: task.logs.slice(-LOG_LIMIT).map((line) => ({ ...line, message: redact(line.message).slice(0, 500) })),
@@ -428,24 +545,54 @@ export function parseTaskDraft(value: unknown): PhoneTaskDraft {
   if (!value || typeof value !== "object") throw new Error("Task is invalid.")
   const input = value as Record<string, unknown>
   if (typeof input.store !== "string" || !isStoreId(input.store)) throw new Error("Choose a store.")
-  if (typeof input.sku !== "string" || !input.sku.trim()) throw new Error("Product SKU or URL is required.")
+  const kind: TaskKind = input.kind === "monitor" ? "monitor" : "checkout"
+  const keywords = typeof input.keywords === "string" ? input.keywords.trim().slice(0, 200) : ""
+  const sku = typeof input.sku === "string" ? input.sku.trim() : ""
+  if (!sku && !keywords) throw new Error("Product SKU or URL is required.")
   const quantity = Math.round(Number(input.quantity))
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new Error("Quantity must be from 1 to 12.")
-  if (typeof input.profileId !== "string" || !input.profileId) throw new Error("Choose a profile.")
-  if (typeof input.accountId !== "string" || !input.accountId) throw new Error("Choose an account.")
+  const profileId = typeof input.profileId === "string" ? input.profileId : ""
+  const accountId = typeof input.accountId === "string" ? input.accountId : ""
+  if (kind !== "monitor") {
+    if (!profileId) throw new Error("Choose a profile.")
+    if (!accountId) throw new Error("Choose an account.")
+  }
   const proxyGroupId = typeof input.proxyGroupId === "string" && input.proxyGroupId ? input.proxyGroupId : null
+  const monitorProxyGroupId = typeof input.monitorProxyGroupId === "string" && input.monitorProxyGroupId ? input.monitorProxyGroupId : null
+  const modes: StartMode[] = ["manual", "scheduled", "monitor", "restock", "builtin"]
+  const startMode = modes.includes(input.startMode as StartMode) ? input.startMode as StartMode : undefined
   return {
     id: typeof input.id === "string" && input.id ? input.id : undefined,
     store: input.store,
-    sku: input.sku.trim(),
+    sku,
     quantity,
-    profileId: input.profileId,
-    accountId: input.accountId,
-    proxyGroupId,
-    confirmPurchase: input.confirmPurchase === true,
+    profileId,
+    accountId,
+    proxyGroupId: kind === "monitor" ? null : proxyGroupId,
+    confirmPurchase: kind === "monitor" ? false : input.confirmPurchase === true,
     testMode: input.testMode === true,
-    group: typeof input.group === "string" ? input.group.trim().slice(0, 40) : ""
+    group: typeof input.group === "string" ? input.group.trim().slice(0, 40) : "",
+    kind,
+    keywords,
+    priceCap: optionalMoney(input.priceCap),
+    webhook: typeof input.webhook === "string" ? input.webhook.trim().slice(0, 300) : "",
+    activeHours: typeof input.activeHours === "string" ? input.activeHours.slice(0, 400) : "",
+    linkedCheckoutIds: Array.isArray(input.linkedCheckoutIds) ? input.linkedCheckoutIds.filter((id): id is string => typeof id === "string").slice(0, 20) : [],
+    checkoutDelayMs: optionalMoney(input.checkoutDelayMs),
+    maxPrice: optionalMoney(input.maxPrice),
+    startMode,
+    linkedMonitorId: typeof input.linkedMonitorId === "string" && input.linkedMonitorId ? input.linkedMonitorId.slice(0, 80) : null,
+    jitterPct: optionalMoney(input.jitterPct),
+    monitorProxyGroupId,
+    overrides: input.overrides && typeof input.overrides === "object" ? input.overrides as TaskOverrides : undefined
   }
+}
+
+function optionalMoney(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null || value === "") return null
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : null
 }
 
 export function asClientMessage(value: unknown): ClientMessage {
@@ -462,6 +609,28 @@ export function asClientMessage(value: unknown): ClientMessage {
   }
   if (message.type === "task.startAll" || message.type === "task.stopAll" || message.type === "task.pauseAll") return { type: message.type, req: message.req, conn: message.conn }
   if (message.type === "autopilot.set") return { type: "autopilot.set", req: message.req, conn: message.conn, enabled: message.enabled === true }
+  if (message.type === "language.set") return { type: "language.set", req: message.req, conn: message.conn, language: message.language === "es" ? "es" : "en" }
+  if (message.type === "mail.delete") {
+    if (typeof message.id !== "string" || !message.id) throw new Error("Choose a mailbox.")
+    return { type: "mail.delete", req: message.req, conn: message.conn, id: message.id }
+  }
+  if (message.type === "mail.oauth") {
+    if (message.provider !== "gmail" && message.provider !== "outlook") throw new Error("Choose Google or Microsoft.")
+    return { type: "mail.oauth", req: message.req, conn: message.conn, provider: message.provider, user: typeof message.user === "string" ? message.user.slice(0, 180) : "" }
+  }
+  if (message.type === "mail.save") return { type: "mail.save", req: message.req, conn: message.conn, mailbox: parseMailDraft(message.mailbox) }
+  if (message.type === "module.save") {
+    if (typeof message.store !== "string" || !isStoreId(message.store)) throw new Error("Choose a store.")
+    return { type: "module.save", req: message.req, conn: message.conn, store: message.store, record: message.record && typeof message.record === "object" ? message.record : {} }
+  }
+  if (message.type === "module.reset") {
+    if (typeof message.store !== "string" || !isStoreId(message.store)) throw new Error("Choose a store.")
+    return { type: "module.reset", req: message.req, conn: message.conn, store: message.store }
+  }
+  if (message.type === "module.import") {
+    if (typeof message.text !== "string" || !message.text.trim()) throw new Error("Paste a store preset.")
+    return { type: "module.import", req: message.req, conn: message.conn, text: message.text.slice(0, 20_000) }
+  }
   if (message.type === "health.check") {
     const proxyGroupId = "proxyGroupId" in message && typeof message.proxyGroupId === "string" && message.proxyGroupId ? message.proxyGroupId : null
     return { type: "health.check", req: message.req, conn: message.conn, proxyGroupId }
@@ -546,6 +715,28 @@ export function asClientMessage(value: unknown): ClientMessage {
     }
   }
   throw new Error("Unknown phone request.")
+}
+
+export function parseMailDraft(value: unknown): PhoneMailDraft {
+  if (!value || typeof value !== "object") throw new Error("Mailbox is invalid.")
+  const input = value as Record<string, unknown>
+  const user = typeof input.user === "string" ? input.user.trim().slice(0, 180) : ""
+  if (!user.includes("@")) throw new Error("Enter an email address.")
+  const provider = input.provider === "gmail" || input.provider === "outlook" || input.provider === "icloud" || input.provider === "yahoo" || input.provider === "custom" ? input.provider : "custom"
+  const port = Math.round(Number(input.port))
+  return {
+    id: typeof input.id === "string" && input.id ? input.id : undefined,
+    user,
+    provider,
+    host: typeof input.host === "string" ? input.host.trim().slice(0, 253) : "",
+    port: Number.isInteger(port) ? port : 993,
+    secure: input.secure !== false,
+    mailbox: typeof input.mailbox === "string" && input.mailbox.trim() ? input.mailbox.trim().slice(0, 80) : "INBOX",
+    password: typeof input.password === "string" ? input.password.slice(0, 200) : "",
+    orders: input.orders !== false,
+    alerts: input.alerts === true,
+    codes: input.codes !== false
+  }
 }
 
 export function parseRuleInput(value: unknown): RestockRuleInput {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { AlertsView, DiscordWatchInput, KeywordWatch, KeywordWatchInput, ProxyGroup, PublicAccount, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StoreInfo } from "../../../shared/types"
+import { STORE_IDS, type AlertsView, type DiscordWatchInput, type KeywordWatch, type KeywordWatchInput, type ProxyGroup, type PublicAccount, type PublicProfile, type PublicTask, type RestockRule, type RestockRuleInput, type StoreId, type StoreInfo } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
@@ -102,6 +102,26 @@ export function AlertsPage() {
     }
   }
 
+  async function quickMonitor(store: string, sku: string, profileId: string, accountId: string, proxyGroupId: string | null, quantity: number) {
+    if (!STORE_IDS.includes(store as StoreId)) throw new Error("This alert does not name one store.")
+    if (!sku.trim()) throw new Error("This alert does not name a SKU.")
+    const profile = profileId || profiles[0]?.id || ""
+    const account = accountId || accounts.find((item) => item.store === store)?.id || ""
+    if (!profile || !account) throw new Error("Save a profile and an account for this store first.")
+    await unwrap(window.aio.tasks.save({
+      store: store as StoreId,
+      sku: sku.trim(),
+      quantity: quantity || 1,
+      profileId: profile,
+      accountId: account,
+      proxyGroupId,
+      confirmPurchase: false,
+      testMode: true,
+      monitorOnly: true,
+      group: "Alert"
+    }))
+  }
+
   const ruleAccounts = accounts.filter((account) => !rule?.store || account.store === rule.store)
   const watchAccounts = accounts.filter((account) => account.store === watch?.store)
 
@@ -202,6 +222,7 @@ export function AlertsPage() {
             </div>
             <span>{item.store || "Any store"} · {item.sku || item.keywords || "No match"} · cap {item.maxQuantity} · {item.maxPrice === null ? "no price cap" : `$${item.maxPrice}`} · {item.cooldownSec}s</span>
             <div className="row-actions">
+              <button type="button" disabled={!item.store || !item.sku} onClick={() => void run(async () => { await quickMonitor(item.store, item.sku, item.profileId, item.accountId, item.proxyGroupId, item.quantity) }, "Monitor-only task created. It does not add to cart.")}>Quick task</button>
               <button type="button" onClick={() => setRule(ruleInput(item))}>Edit</button>
               <button type="button" onClick={() => void run(async () => { await unwrap(window.aio.alerts.saveRule({ ...ruleInput(item), enabled: !item.enabled })) }, item.enabled ? "Rule off." : "Rule on.")}>{item.enabled ? "Turn off" : "Turn on"}</button>
               <button type="button" className="danger" onClick={() => void run(async () => { await unwrap(window.aio.alerts.deleteRule(item.id)) }, "Rule deleted.")}>Delete</button>
@@ -270,6 +291,10 @@ export function AlertsPage() {
             <div key={entry.id} className="log-line">
               <time>{new Date(entry.ts).toLocaleTimeString()}</time>
               <span>{entry.source} · {entry.store} {entry.sku} · {entry.result}</span>
+              <button type="button" disabled={!entry.sku || !STORE_IDS.includes(entry.store as StoreId)} onClick={() => {
+                const matched = view?.rules.find((rule) => (!rule.store || rule.store === entry.store) && (!rule.sku || rule.sku === entry.sku))
+                void run(async () => { await quickMonitor(entry.store, entry.sku, matched?.profileId ?? "", matched?.accountId ?? "", matched?.proxyGroupId ?? null, matched?.quantity ?? 1) }, "Monitor-only task created from the alert.")
+              }}>Quick task</button>
             </div>
           )) : <p className="empty">No restock or keyword events yet.</p>}
         </div>

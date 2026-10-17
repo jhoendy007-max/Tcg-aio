@@ -1,19 +1,32 @@
 import { StatusBar } from "expo-status-bar"
-import { useEffect, useRef, useState } from "react"
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
 import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from "../src/phone/client"
 import type { PhoneChallenge, PhoneSnapshot, PhoneTask, PhoneTaskDraft } from "../src/phone/protocol"
 import { ChallengeCard } from "./src/ChallengeCard"
 import type { KeywordWatchInput, RestockRuleInput } from "../src/shared/types"
 import { ensureNotificationPermission, notify } from "./src/notify"
-import { clearLink, loadLink, saveLink } from "./src/storage"
+import { activeLink } from "../src/phone/links"
+import { clearLink, forgetPcLink, loadBook, loadLink, saveLink, selectPc } from "./src/storage"
 import type { StoreHealth } from "../src/shared/types"
-import { colors, isActive, STATUS_LABEL } from "./src/theme"
+import { SwipeTask } from "./src/SwipeTask"
+import { MailPanel } from "./src/MailPanel"
+import { ModulePanel } from "./src/ModulePanel"
+import { mailText } from "../src/shared/mail-text"
+import { moduleText } from "../src/shared/module-settings"
+import { taskText } from "../src/shared/task-role"
+import { updateWidget } from "./src/widget"
+import { colors, isActive, palette, STATUS_LABEL } from "./src/theme"
 import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
 
-type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats"
+type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats" | "mail" | "stores"
+type Bag = { colors: typeof colors; styles: ReturnType<typeof createStyles> }
+const ThemeContext = createContext<Bag>({ colors, styles: createStyles(colors) })
+function useTheme() { return useContext(ThemeContext) }
+
+const LETTER: Record<string, string> = { target: "T", walmart: "W", bestbuy: "B", "pokemon-center": "P", amazon: "A", crunchyroll: "C", bandai: "N", gamestop: "G", "barnes-noble": "BN", costco: "Co", sams: "S", tcgplayer: "D" }
 
 const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
   store: snap?.stores[0]?.id ?? "target",
@@ -23,8 +36,46 @@ const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
   accountId: "",
   proxyGroupId: null,
   confirmPurchase: false,
-  testMode: false
+  testMode: false,
+  kind: "checkout",
+  keywords: "",
+  priceCap: null,
+  webhook: "",
+  activeHours: "",
+  linkedCheckoutIds: [],
+  checkoutDelayMs: null,
+  maxPrice: null,
+  startMode: "builtin",
+  jitterPct: null
 })
+
+function draftFrom(item: PhoneTask): PhoneTaskDraft {
+  return {
+    id: item.id,
+    store: item.store,
+    sku: item.sku,
+    quantity: item.quantity,
+    profileId: item.profileId,
+    accountId: item.accountId,
+    proxyGroupId: item.proxyGroupId,
+    confirmPurchase: item.confirmPurchase,
+    testMode: item.testMode,
+    group: item.group,
+    kind: item.kind === "monitor" || item.monitorOnly ? "monitor" : "checkout",
+    keywords: item.keywords ?? "",
+    priceCap: item.priceCap ?? null,
+    webhook: item.webhook ?? "",
+    activeHours: item.activeHours ?? "",
+    linkedCheckoutIds: item.linkedCheckoutIds ?? [],
+    checkoutDelayMs: item.checkoutDelayMs ?? null,
+    maxPrice: item.maxPrice ?? null,
+    startMode: item.startMode ?? (item.kind === "monitor" ? "manual" : "builtin"),
+    linkedMonitorId: item.linkedMonitorId ?? null,
+    jitterPct: item.jitterPct ?? null,
+    monitorProxyGroupId: item.monitorProxyGroupId ?? null,
+    overrides: item.overrides
+  }
+}
 
 export default function App() {
   const session = useRef<PhoneSession | null>(null)
@@ -41,12 +92,18 @@ export default function App() {
   const [deviceName, setDeviceName] = useState("My phone")
   const [paste, setPaste] = useState("")
   const [scanning, setScanning] = useState(false)
+  const [banner, setBanner] = useState("")
+  const [noticeImage, setNoticeImage] = useState("")
+  const [links, setLinks] = useState<SavedPhoneLink[]>([])
+  const seen = useRef(new Map<string, string>())
   const [permission, requestPermission] = useCameraPermissions()
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function applySnapshot(next: PhoneSnapshot) {
     setSnap(next)
-    setPcName(next.pcName)
+    setPcName(next.brand?.appName || next.pcName)
+    const active = next.tasks.filter((task) => isActive(task.status)).length
+    updateWidget(next.analytics?.success ?? 0, active)
   }
 
   function bind(next: PhoneSession) {
@@ -54,6 +111,11 @@ export default function App() {
     next.onOnline(setOnline)
     next.onSnapshot(applySnapshot)
     next.onTask((task) => {
+      const before = seen.current.get(task.id)
+      seen.current.set(task.id, task.status)
+      if (before && before !== task.status && (task.status === "success" || task.status === "tested")) {
+        setBanner(task.status === "tested" ? `${task.storeName} test finished. Place order was not sent.` : `${task.storeName} checkout confirmed. ${task.sku}`)
+      }
       setSnap((current) => current ? { ...current, tasks: upsert(current.tasks, task) } : current)
     })
     next.onDeleted((id) => {
@@ -62,6 +124,9 @@ export default function App() {
     })
     next.onNotice((notice) => {
       void notify(notice)
+      const price = typeof notice.price === "number" ? ` · $${notice.price.toFixed(2)}` : ""
+      setBanner(`${notice.storeName} · ${notice.sku}${price}\n${notice.detail}`)
+      setNoticeImage(notice.imageUrl?.startsWith("https://") ? notice.imageUrl : "")
     })
     next.onAlerts((alerts) => {
       setSnap((current) => current ? { ...current, alerts } : current)
@@ -81,9 +146,16 @@ export default function App() {
       await ensureNotificationPermission()
     } catch (err) {
       if (err instanceof PhoneRevoked) {
-        await clearLink()
-        setScreen("pair")
+        const book = await forgetPcLink(link.pcId)
+        setLinks(book.links)
+        const next = activeLink(book)
         setError(err.message)
+        if (next) {
+          setPcName(next.pcName)
+          void connect(next)
+          return
+        }
+        setScreen("pair")
         return
       }
       setOnline(false)
@@ -103,7 +175,9 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    void loadLink().then((link) => {
+    void loadBook().then((book) => {
+      setLinks(book.links)
+      const link = activeLink(book)
       if (!link) {
         setScreen("pair")
         return
@@ -128,7 +202,8 @@ export default function App() {
       const next = new PhoneSession()
       bind(next)
       const link = await next.pair(payload, deviceName)
-      await saveLink(link)
+      const book = await saveLink(link)
+      setLinks(book.links)
       setPcName(link.pcName)
       setScreen("dash")
       setScanning(false)
@@ -141,10 +216,28 @@ export default function App() {
   async function forget() {
     if (retry.current) clearTimeout(retry.current)
     session.current?.close()
-    await clearLink()
+    const book = await clearLink()
+    setLinks(book.links)
+    const next = activeLink(book)
     setSnap(null)
     setOnline(false)
+    if (next) {
+      setPcName(next.pcName)
+      void connect(next)
+      return
+    }
     setScreen("pair")
+  }
+
+  async function switchPc(pcId: string) {
+    if (retry.current) clearTimeout(retry.current)
+    const book = await selectPc(pcId)
+    setLinks(book.links)
+    const next = activeLink(book)
+    if (!next) return
+    setPcName(next.pcName)
+    setSnap(null)
+    void connect(next)
   }
 
   async function run(action: () => Promise<{ ok: boolean; error?: string; errors?: { id: string; error: string }[]; csv?: string; created?: number }>) {
@@ -160,12 +253,15 @@ export default function App() {
     }
   }
 
-  const storeAccounts = snap?.accounts.filter((account) => account.store === draft?.store) ?? []
+  const theme = useMemo(() => palette(snap?.brand), [snap?.brand?.theme, snap?.brand?.accent])
+  const styles = useMemo(() => createStyles(theme), [theme])
+  const activeCount = (snap?.tasks ?? []).filter((task) => isActive(task.status)).length
 
   return (
+    <ThemeContext.Provider value={{ colors: theme, styles }}>
     <View style={styles.root}>
-      <StatusBar style="light" />
-      {screen === "boot" ? <ActivityIndicator color={colors.accent} style={styles.boot} /> : null}
+      <StatusBar style={theme.bg === colors.bg ? "light" : "dark"} />
+      {screen === "boot" ? <ActivityIndicator color={theme.accent} style={styles.boot} /> : null}
       {screen === "pair" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <Text style={styles.brand}>TCGAIO</Text>
@@ -173,13 +269,17 @@ export default function App() {
           <Text style={styles.p}>On the PC, open Phone and choose Pair device. Scan that QR code. The PC keeps the card and passwords.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
           <Text style={styles.label}>Name on the PC</Text>
-          <TextInput style={styles.input} value={deviceName} onChangeText={setDeviceName} placeholder="My phone" placeholderTextColor={colors.muted} />
+          <TextInput style={styles.input} value={deviceName} onChangeText={setDeviceName} placeholder="My phone" placeholderTextColor={theme.muted} />
           <Pressable style={styles.primary} onPress={() => { void requestPermission().then(() => setScanning(true)) }}>
             <Text style={styles.primaryText}>Scan QR code</Text>
           </Pressable>
           <Text style={styles.label}>Or paste the pairing code</Text>
-          <TextInput style={[styles.input, styles.paste]} value={paste} onChangeText={setPaste} multiline autoCapitalize="none" placeholder='{"v":1,...}' placeholderTextColor={colors.muted} />
+          <TextInput style={[styles.input, styles.paste]} value={paste} onChangeText={setPaste} multiline autoCapitalize="none" placeholder='{"v":1,...}' placeholderTextColor={theme.muted} />
           <Pressable style={styles.secondary} onPress={() => void pairFrom(paste)}><Text style={styles.secondaryText}>Pair</Text></Pressable>
+          {links.length ? <Text style={styles.label}>Saved PCs</Text> : null}
+          {links.map((item) => (
+            <Pressable key={item.pcId} onPress={() => void switchPc(item.pcId)}><Text style={styles.link}>{item.pcName}</Text></Pressable>
+          ))}
           {scanning ? (
             <View style={styles.cameraBox}>
               {permission?.granted ? (
@@ -197,104 +297,62 @@ export default function App() {
           ) : null}
         </ScrollView>
       ) : null}
-      {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" ? (
+      {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" || screen === "mail" || screen === "stores" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <View style={styles.row}>
             <View>
-              <Text style={styles.brand}>TCGAIO</Text>
+              <Text style={styles.brand}>{snap?.brand?.appName || "TCGAIO"}</Text>
               <Text style={styles.h1}>{pcName}</Text>
             </View>
             <Text style={[styles.pill, online ? styles.pillOn : styles.pillOff]}>{online ? "PC online" : "PC offline"}</Text>
           </View>
           <Text style={styles.p}>Tasks run on the PC. This phone starts, stops, and watches them.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
+          {banner ? (
+            <View style={styles.banner}>
+              {noticeImage ? <Image source={{ uri: noticeImage }} style={styles.photo} accessibilityIgnoresInvertColors /> : null}
+              <Text accessibilityLiveRegion="polite" style={styles.p}>{banner}</Text>
+            </View>
+          ) : null}
           {challenge && screen !== "alerts" ? (
             <ChallengeCard challenge={challenge} now={now} session={session.current} onRun={run} />
           ) : null}
-          {screen === "alerts" ? (
+          {screen === "mail" ? (
+            <MailPanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
+          ) : screen === "stores" ? (
+            <ModulePanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
+          ) : screen === "alerts" ? (
             <AlertsPanel snap={snap} onRun={run} session={session.current} onBack={() => setScreen("dash")} />
           ) : screen === "drops" ? (
             <DropsPanel snap={snap} now={now} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
           ) : screen === "stats" ? (
             <StatsPanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />
           ) : screen === "edit" && draft ? (
-            <View style={styles.card}>
-              <Text style={styles.h2}>{draft.id ? "Edit task" : "New task"}</Text>
-              <Text style={styles.label}>Store</Text>
-              <View style={styles.choices}>
-                {(snap?.stores ?? []).map((store) => (
-                  <Pressable key={store.id} style={[styles.choice, draft.store === store.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, store: store.id, accountId: "" })}>
-                    <Text style={styles.choiceText}>{store.name}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.label}>SKU or URL</Text>
-              <TextInput style={styles.input} value={draft.sku} onChangeText={(sku) => setDraft({ ...draft, sku })} autoCapitalize="none" placeholderTextColor={colors.muted} />
-              <Text style={styles.label}>Quantity</Text>
-              <TextInput style={styles.input} value={String(draft.quantity)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, quantity: Number(value) || 1 })} />
-              <Text style={styles.label}>Profile</Text>
-              <View style={styles.choices}>
-                {(snap?.profiles ?? []).map((profile) => (
-                  <Pressable key={profile.id} style={[styles.choice, draft.profileId === profile.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, profileId: profile.id })}>
-                    <Text style={styles.choiceText}>{profile.name} · {profile.last4}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.label}>Account</Text>
-              <View style={styles.choices}>
-                {storeAccounts.map((account) => (
-                  <Pressable key={account.id} style={[styles.choice, draft.accountId === account.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, accountId: account.id })}>
-                    <Text style={styles.choiceText}>{account.label} · {account.usernameMasked}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.label}>Proxy group</Text>
-              <View style={styles.choices}>
-                <Pressable style={[styles.choice, draft.proxyGroupId === null && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: null })}>
-                  <Text style={styles.choiceText}>Direct</Text>
-                </Pressable>
-                {(snap?.proxyGroups ?? []).map((group) => (
-                  <Pressable key={group.id} style={[styles.choice, draft.proxyGroupId === group.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: group.id })}>
-                    <Text style={styles.choiceText}>{group.name} ({group.count})</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <View style={styles.switchRow}>
-                <Text style={styles.p}>Test mode. Runs the real flow and stops before place order.</Text>
-                <Switch value={draft.testMode === true} onValueChange={(testMode) => setDraft({ ...draft, testMode })} trackColor={{ true: colors.accent, false: colors.line }} />
-              </View>
-              <View style={styles.switchRow}>
-                <Text style={styles.p}>This task may place a real shipping order. Ignored while test mode is on.</Text>
-                <Switch value={draft.confirmPurchase} onValueChange={(confirmPurchase) => setDraft({ ...draft, confirmPurchase })} trackColor={{ true: colors.accent, false: colors.line }} />
-              </View>
-              <View style={styles.row}>
-                <Pressable style={styles.primary} onPress={() => void run(async () => {
-                  const result = await session.current!.saveTask(draft)
-                  if (result.ok) {
-                    setScreen("dash")
-                    setDraft(null)
-                    if (result.task) setSelected(result.task.id)
-                  }
-                  return result
-                })}><Text style={styles.primaryText}>Save</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={() => { setScreen("dash"); setDraft(null) }}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
-              </View>
-            </View>
+            <TaskEditor draft={draft} snap={snap} setDraft={setDraft} session={session.current} run={run} onSaved={(id) => { setScreen("dash"); setDraft(null); if (id) setSelected(id) }} onCancel={() => { setScreen("dash"); setDraft(null) }} />
           ) : (
             <>
               {snap?.testMode ? <Text style={styles.p}>Global test mode is on. Every task stops before place order.</Text> : null}
+              <View style={styles.metrics}>
+                <View style={styles.metric}><Text style={styles.metricNum}>{activeCount}</Text><Text style={styles.p}>Active</Text></View>
+                <View style={styles.metric}><Text style={styles.metricNum}>{snap?.analytics?.success ?? 0}</Text><Text style={styles.p}>Wins</Text></View>
+                <View style={styles.metric}><Text style={styles.metricNum}>${(snap?.analytics?.spend ?? 0).toFixed(0)}</Text><Text style={styles.p}>Spend</Text></View>
+                <View style={styles.metric}><Text style={styles.metricNum}>{Math.round((snap?.analytics?.winRate ?? 0) * 100)}%</Text><Text style={styles.p}>Win rate</Text></View>
+              </View>
               <View style={styles.switchRow}>
                 <Text style={styles.p}>Autopilot. Restock alerts, keyword hits, and learned restock hours can start a saved template.</Text>
-                <Switch value={snap?.autopilot === true} onValueChange={(enabled) => void run(() => session.current!.setAutopilot(enabled))} trackColor={{ true: colors.accent, false: colors.line }} />
+                <Switch value={snap?.autopilot === true} onValueChange={(enabled) => void run(() => session.current!.setAutopilot(enabled))} trackColor={{ true: theme.accent, false: theme.line }} />
               </View>
               {snap && isNewer(snap.updates?.phoneVersion ?? null, PHONE_VERSION) ? <Text style={styles.p}>Phone {snap.updates.phoneVersion} is on the PC's GitHub release. Install that APK over this {PHONE_VERSION} build. The download stays on the PC.</Text> : null}
               {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
+              {snap?.imap ? <Text style={styles.p}>{snap.imap.accounts === 0 ? mailText(snap.language === "es" ? "es" : "en", "statusOff") : `${mailText(snap.language === "es" ? "es" : "en", "statusOn")} ${snap.imap.enabled} · ${snap.imap.ready}${snap.imap.lastError ? ` · ${snap.imap.lastError}` : ""}`}</Text> : null}
               {nextDrop(snap, now) ? <Text style={styles.p}>Next drop {nextDrop(snap, now)}</Text> : null}
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.pauseAll())}><Text style={styles.secondaryText}>Pause all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => setScreen("mail")}><Text style={styles.secondaryText}>{mailText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => setScreen("stores")}><Text style={styles.secondaryText}>{moduleText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("alerts")}><Text style={styles.secondaryText}>Alerts</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("drops")}><Text style={styles.secondaryText}>Drops</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("stats")}><Text style={styles.secondaryText}>Stats</Text></Pressable>
@@ -308,37 +366,196 @@ export default function App() {
                 <Text key={row.store} style={styles.p}>{row.storeName} · {row.proxy} · {row.verdict} · {row.detail}</Text>
               )) : null}
               {(snap?.tasks ?? []).map((item) => (
-                <Pressable key={item.id} style={[styles.card, selected === item.id && styles.cardOn]} onPress={() => setSelected(item.id)}>
+                <SwipeTask key={item.id} active={isActive(item.status)} onPrimary={() => void run(() => isActive(item.status) ? session.current!.stop(item.id) : session.current!.start(item.id))} onTest={() => void run(() => session.current!.runTest(item.id))}>
+                <Pressable style={[styles.card, selected === item.id && styles.cardOn]} onPress={() => setSelected(item.id)} accessibilityHint="Swipe right to start or stop. Swipe left to run a test. Buttons below do the same.">
                   <View style={styles.row}>
+                    <View style={[styles.mark, { backgroundColor: theme.accent }]}><Text style={styles.markText}>{LETTER[item.store] ?? "S"}</Text></View>
+                    {item.imageUrl?.startsWith("https://") ? <Image source={{ uri: item.imageUrl }} style={styles.photo} accessibilityIgnoresInvertColors /> : null}
                     <Text style={styles.h2}>{item.storeName}</Text>
+                    {item.kind === "monitor" || item.monitorOnly ? <Text style={styles.pill}>MONITOR</Text> : null}
                     {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
                     <Text style={styles.pill}>{STATUS_LABEL[item.status] ?? item.status}</Text>
                   </View>
                   <Text style={styles.sku}>{item.sku}</Text>
                   <Text style={styles.p}>Qty {item.quantity} · {item.profileName} · {item.accountLabel} · {item.proxyGroupName ?? "Direct"}</Text>
+                  {typeof item.monitorMs === "number" ? <Text style={styles.p}>{item.monitorMs} ms{typeof item.detectToCartMs === "number" ? ` · ${item.detectToCartMs} ms to cart` : ""}</Text> : null}
                   {item.detail ? <Text style={styles.p}>{item.detail}</Text> : null}
-                  {selected === item.id ? <TaskDetail task={item} onRun={run} session={session.current} onEdit={() => {
-                    setDraft({
-                      id: item.id,
-                      store: item.store,
-                      sku: item.sku,
-                      quantity: item.quantity,
-                      profileId: item.profileId,
-                      accountId: item.accountId,
-                      proxyGroupId: item.proxyGroupId,
-                      confirmPurchase: item.confirmPurchase,
-                      testMode: item.testMode
-                    })
-                    setScreen("edit")
-                  }} /> : null}
+                  {selected === item.id ? <TaskDetail task={item} onRun={run} session={session.current} onEdit={() => { setDraft(draftFrom(item)); setScreen("edit") }} /> : null}
                 </Pressable>
+                </SwipeTask>
               ))}
               {snap && snap.tasks.length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
+              {links.length > 1 ? (
+                <View style={styles.row}>
+                  {links.map((item) => (
+                    <Pressable key={item.pcId} onPress={() => void switchPc(item.pcId)}><Text style={styles.pill}>{item.pcName}</Text></Pressable>
+                  ))}
+                </View>
+              ) : null}
               <Pressable onPress={() => void forget()}><Text style={styles.link}>Forget this PC</Text></Pressable>
             </>
           )}
         </ScrollView>
       ) : null}
+    </View>
+    </ThemeContext.Provider>
+  )
+}
+
+function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: {
+  draft: PhoneTaskDraft
+  snap: PhoneSnapshot | null
+  setDraft: (next: PhoneTaskDraft) => void
+  session: PhoneSession | null
+  run: (action: () => Promise<{ ok: boolean; error?: string; task?: PhoneTask }>) => Promise<{ ok: boolean; task?: PhoneTask } | undefined>
+  onSaved: (id?: string) => void
+  onCancel: () => void
+}) {
+  const { styles, colors: theme } = useTheme()
+  const lang = snap?.language === "es" ? "es" : "en"
+  const monitor = draft.kind === "monitor"
+  const live = Boolean(draft.id && isActive(snap?.tasks.find((task) => task.id === draft.id)?.status ?? "idle"))
+  const accounts = (snap?.accounts ?? []).filter((account) => account.store === draft.store)
+  const checkouts = (snap?.tasks ?? []).filter((task) => task.kind !== "monitor" && task.id !== draft.id)
+  const modes = ["manual", "scheduled", "monitor", "restock", "builtin"] as const
+  return (
+    <View style={styles.card}>
+      <Text style={styles.h2}>{draft.id ? (lang === "es" ? "Editar tarea" : "Edit task") : (lang === "es" ? "Nueva tarea" : "New task")}</Text>
+      <Text style={styles.p}>{monitor ? taskText(lang, "hintMonitor") : taskText(lang, "hintCheckout")}</Text>
+      {live ? <Text style={styles.p}>{taskText(lang, "live")}</Text> : null}
+      <Text style={styles.label}>{taskText(lang, "kind")}</Text>
+      <View style={styles.choices}>
+        {(["monitor", "checkout"] as const).map((kind) => (
+          <Pressable key={kind} disabled={live} style={[styles.choice, draft.kind === kind && styles.choiceOn]} onPress={() => setDraft({ ...draft, kind, confirmPurchase: kind === "monitor" ? false : draft.confirmPurchase, startMode: kind === "monitor" ? "manual" : draft.startMode ?? "builtin" })}>
+            <Text style={styles.choiceText}>{taskText(lang, kind)}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.label}>{taskText(lang, "store")}</Text>
+      <View style={styles.choices}>
+        {(snap?.stores ?? []).map((store) => (
+          <Pressable key={store.id} disabled={live} style={[styles.choice, draft.store === store.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, store: store.id, accountId: "" })}>
+            <Text style={styles.choiceText}>{store.name}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.label}>{taskText(lang, "sku")}</Text>
+      <TextInput style={styles.input} editable={!live} value={draft.sku} onChangeText={(sku) => setDraft({ ...draft, sku })} autoCapitalize="none" placeholderTextColor={theme.muted} />
+      <Text style={styles.label}>{taskText(lang, "keywords")}</Text>
+      <TextInput style={styles.input} value={draft.keywords ?? ""} onChangeText={(keywords) => setDraft({ ...draft, keywords })} autoCapitalize="none" placeholderTextColor={theme.muted} />
+      {monitor ? (
+        <>
+          <Text style={styles.label}>{taskText(lang, "proxy")}</Text>
+          <View style={styles.choices}>
+            <Pressable disabled={live} style={[styles.choice, !draft.monitorProxyGroupId && styles.choiceOn]} onPress={() => setDraft({ ...draft, monitorProxyGroupId: null, proxyGroupId: null })}>
+              <Text style={styles.choiceText}>{taskText(lang, "direct")}</Text>
+            </Pressable>
+            {(snap?.proxyGroups ?? []).map((group) => (
+              <Pressable key={group.id} disabled={live} style={[styles.choice, draft.monitorProxyGroupId === group.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, monitorProxyGroupId: group.id, proxyGroupId: null })}>
+                <Text style={styles.choiceText}>{group.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>{taskText(lang, "priceCap")}</Text>
+          <TextInput style={styles.input} value={draft.priceCap == null ? "" : String(draft.priceCap)} keyboardType="decimal-pad" onChangeText={(value) => setDraft({ ...draft, priceCap: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "webhook")}</Text>
+          <TextInput style={styles.input} value={draft.webhook ?? ""} onChangeText={(webhook) => setDraft({ ...draft, webhook })} autoCapitalize="none" placeholder="https://discord.com/api/webhooks/" placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "hours")}</Text>
+          <TextInput style={styles.input} value={draft.activeHours ?? ""} onChangeText={(activeHours) => setDraft({ ...draft, activeHours })} autoCapitalize="none" placeholder="09:00-09:30" placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "links")}</Text>
+          <View style={styles.choices}>
+            {checkouts.map((task) => {
+              const on = (draft.linkedCheckoutIds ?? []).includes(task.id)
+              return (
+                <Pressable key={task.id} style={[styles.choice, on && styles.choiceOn]} onPress={() => {
+                  const ids = new Set(draft.linkedCheckoutIds ?? [])
+                  if (on) ids.delete(task.id)
+                  else ids.add(task.id)
+                  setDraft({ ...draft, linkedCheckoutIds: [...ids] })
+                }}>
+                  <Text style={styles.choiceText}>{task.sku}</Text>
+                </Pressable>
+              )
+            })}
+          </View>
+        </>
+      ) : (
+        <>
+          <Text style={styles.label}>{taskText(lang, "quantity")}</Text>
+          <TextInput style={styles.input} editable={!live} value={String(draft.quantity)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, quantity: Number(value) || 1 })} placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "profile")}</Text>
+          <View style={styles.choices}>
+            {(snap?.profiles ?? []).map((profile) => (
+              <Pressable key={profile.id} disabled={live} style={[styles.choice, draft.profileId === profile.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, profileId: profile.id })}>
+                <Text style={styles.choiceText}>{profile.name} · {profile.last4}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>{taskText(lang, "account")}</Text>
+          <View style={styles.choices}>
+            {accounts.map((account) => (
+              <Pressable key={account.id} disabled={live} style={[styles.choice, draft.accountId === account.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, accountId: account.id })}>
+                <Text style={styles.choiceText}>{account.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>{taskText(lang, "checkoutProxy")}</Text>
+          <View style={styles.choices}>
+            <Pressable disabled={live} style={[styles.choice, draft.proxyGroupId === null && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: null })}>
+              <Text style={styles.choiceText}>{taskText(lang, "direct")}</Text>
+            </Pressable>
+            {(snap?.proxyGroups ?? []).map((group) => (
+              <Pressable key={group.id} disabled={live} style={[styles.choice, draft.proxyGroupId === group.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: group.id })}>
+                <Text style={styles.choiceText}>{group.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>{taskText(lang, "checkoutDelay")}</Text>
+          <TextInput style={styles.input} value={draft.checkoutDelayMs == null ? "" : String(draft.checkoutDelayMs)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, checkoutDelayMs: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "maxPrice")}</Text>
+          <TextInput style={styles.input} value={draft.maxPrice == null ? "" : String(draft.maxPrice)} keyboardType="decimal-pad" onChangeText={(value) => setDraft({ ...draft, maxPrice: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
+          <Text style={styles.label}>{taskText(lang, "startMode")}</Text>
+          <View style={styles.choices}>
+            {modes.map((mode) => (
+              <Pressable key={mode} disabled={live} style={[styles.choice, (draft.startMode ?? "builtin") === mode && styles.choiceOn]} onPress={() => setDraft({ ...draft, startMode: mode })}>
+                <Text style={styles.choiceText}>{taskText(lang, mode === "monitor" ? "monitorStart" : mode)}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.switchRow}>
+            <Text style={styles.p}>{taskText(lang, "testMode")}</Text>
+            <Switch value={draft.testMode === true} disabled={live && draft.testMode === true} onValueChange={(testMode) => setDraft({ ...draft, testMode })} trackColor={{ true: theme.accent, false: theme.line }} />
+          </View>
+          <View style={styles.switchRow}>
+            <Text style={styles.p}>{taskText(lang, "confirm")}</Text>
+            <Switch value={draft.confirmPurchase} disabled={live && !draft.confirmPurchase} onValueChange={(confirmPurchase) => setDraft({ ...draft, confirmPurchase })} trackColor={{ true: theme.accent, false: theme.line }} />
+          </View>
+        </>
+      )}
+      <Text style={styles.label}>{taskText(lang, "monitorDelay")}</Text>
+      <TextInput style={styles.input} value={draft.overrides?.monitorDelayMs == null ? "" : String(draft.overrides.monitorDelayMs)} keyboardType="number-pad" onChangeText={(value) => {
+        const overrides = { ...draft.overrides }
+        if (!value.trim()) delete overrides.monitorDelayMs
+        else overrides.monitorDelayMs = Math.round(Number(value))
+        setDraft({ ...draft, overrides })
+      }} placeholder={taskText(lang, "inherit")} placeholderTextColor={theme.muted} />
+      <Text style={styles.label}>{taskText(lang, "retryDelay")}</Text>
+      <TextInput style={styles.input} value={draft.overrides?.retryDelayMs == null ? "" : String(draft.overrides.retryDelayMs)} keyboardType="number-pad" onChangeText={(value) => {
+        const overrides = { ...draft.overrides }
+        if (!value.trim()) delete overrides.retryDelayMs
+        else overrides.retryDelayMs = Math.round(Number(value))
+        setDraft({ ...draft, overrides })
+      }} placeholder={taskText(lang, "inherit")} placeholderTextColor={theme.muted} />
+      <Text style={styles.label}>{taskText(lang, "jitter")}</Text>
+      <TextInput style={styles.input} value={draft.jitterPct == null ? "" : String(draft.jitterPct)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, jitterPct: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
+      <View style={styles.row}>
+        <Pressable style={styles.primary} onPress={() => void run(async () => {
+          const result = await session!.saveTask(draft)
+          if (result.ok) onSaved(result.task?.id)
+          return result
+        })}><Text style={styles.primaryText}>{lang === "es" ? "Guardar" : "Save"}</Text></Pressable>
+        <Pressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{lang === "es" ? "Cancelar" : "Cancel"}</Text></Pressable>
+      </View>
     </View>
   )
 }
@@ -363,6 +580,7 @@ function DropsPanel({ snap, now, session, onRun, onBack }: {
   const [warmupMin, setWarmupMin] = useState("10")
   const [group, setGroup] = useState("")
   const [text, setText] = useState("")
+  const { styles, colors } = useTheme()
   const account = snap?.accounts[0]
   const profile = snap?.profiles[0]
   return (
@@ -402,13 +620,14 @@ function StatsPanel({ snap, session, onRun, onBack }: {
   onRun: (action: () => Promise<{ ok: boolean; error?: string; csv?: string }>) => Promise<{ ok: boolean; csv?: string } | undefined>
   onBack: () => void
 }) {
+  const { styles } = useTheme()
   const [csv, setCsv] = useState("")
   const stats = snap?.analytics
   return (
     <View style={styles.card}>
       <Text style={styles.h2}>Analytics</Text>
       <Text style={styles.p}>Win rate {Math.round((stats?.winRate ?? 0) * 100)}% · spend ${ (stats?.spend ?? 0).toFixed(2) } · {stats?.success ?? 0} success · {stats?.failure ?? 0} failed · {stats?.paused ?? 0} paused · {stats?.tested ?? 0} tested</Text>
-      <Text style={styles.p}>Monitor {stats?.monitorSamples ?? 0} reads · avg {stats?.monitorAvgMs ?? 0} ms · block rate {Math.round((stats?.monitorBlockRate ?? 0) * 100)}%</Text>
+      <Text style={styles.p}>Monitor {stats?.monitorSamples ?? 0} reads · avg {stats?.monitorAvgMs ?? 0} ms · p50 {stats?.monitorP50Ms ?? 0} ms · p95 {stats?.monitorP95Ms ?? 0} ms · block rate {Math.round((stats?.monitorBlockRate ?? 0) * 100)}%</Text>
       {(stats?.byStore ?? []).map((row) => (
         <Text key={row.store} style={styles.p}>{row.storeName} · {row.success} won · {row.failure} failed · ${row.spend.toFixed(2)}</Text>
       ))}
@@ -432,6 +651,7 @@ function TaskDetail({ task, onRun, session, onEdit }: {
   onRun: (action: () => Promise<{ ok: boolean; error?: string }>) => Promise<unknown>
   onEdit: () => void
 }) {
+  const { styles } = useTheme()
   return (
     <View>
       <View style={styles.row}>
@@ -461,6 +681,7 @@ function AlertsPanel({ snap, onRun, session, onBack }: {
   onRun: (action: () => Promise<{ ok: boolean; error?: string; alerts?: PhoneSnapshot["alerts"] }>) => Promise<unknown>
   onBack: () => void
 }) {
+  const { styles, colors } = useTheme()
   const alerts = snap?.alerts
   const [rule, setRule] = useState<RestockRuleInput | null>(null)
   const [watch, setWatch] = useState<KeywordWatchInput | null>(null)
@@ -586,37 +807,46 @@ function upsert(tasks: PhoneTask[], task: PhoneTask): PhoneTask[] {
   return next
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  boot: { marginTop: 80 },
-  pad: { padding: 20, paddingTop: 56, gap: 12 },
-  brand: { color: colors.accent, letterSpacing: 2, fontSize: 12, fontWeight: "700" },
-  h1: { color: colors.text, fontSize: 28, fontWeight: "700" },
-  h2: { color: colors.text, fontSize: 16, fontWeight: "700" },
-  p: { color: colors.muted, fontSize: 14, flexShrink: 1 },
-  err: { color: "#ffd0d0", backgroundColor: "#3a1d1d", padding: 10, borderRadius: 8 },
-  label: { color: colors.muted, fontSize: 12, marginTop: 8 },
-  input: { backgroundColor: colors.card2, color: colors.text, borderColor: colors.line, borderWidth: 1, borderRadius: 8, padding: 10 },
-  area: { minHeight: 90, textAlignVertical: "top" },
-  paste: { minHeight: 80, textAlignVertical: "top" },
-  primary: { backgroundColor: colors.accent, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
-  primaryText: { color: colors.accentInk, fontWeight: "700" },
-  secondary: { borderColor: colors.line, borderWidth: 1, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
-  secondaryText: { color: colors.text },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  card: { backgroundColor: colors.card, borderRadius: 10, padding: 14, gap: 8, borderWidth: 1, borderColor: colors.line },
-  cardOn: { borderColor: colors.accent },
-  sku: { color: colors.text, fontSize: 15 },
-  pill: { color: colors.text, backgroundColor: "#2a303b", borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3, overflow: "hidden", fontSize: 12 },
-  pillOn: { backgroundColor: "#16362b", color: "#b7f0d6" },
-  pillOff: { backgroundColor: "#3d3118", color: "#ffe1a8" },
-  choices: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  choice: { borderColor: colors.line, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
-  choiceOn: { borderColor: colors.accent, backgroundColor: "#2a2418" },
-  choiceText: { color: colors.text, fontSize: 13 },
-  switchRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8 },
-  log: { color: colors.muted, fontFamily: "monospace", fontSize: 12 },
-  link: { color: colors.accent, marginTop: 12 },
-  cameraBox: { gap: 8 },
-  camera: { height: 280, borderRadius: 12, overflow: "hidden" }
-})
+function createStyles(c: typeof colors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.bg },
+    boot: { marginTop: 80 },
+    pad: { padding: 20, paddingTop: 56, gap: 12 },
+    brand: { color: c.accent, letterSpacing: 2, fontSize: 12, fontWeight: "700" },
+    h1: { color: c.text, fontSize: 28, fontWeight: "700" },
+    h2: { color: c.text, fontSize: 16, fontWeight: "700" },
+    p: { color: c.muted, fontSize: 14, flexShrink: 1 },
+    err: { color: "#ffd0d0", backgroundColor: "#3a1d1d", padding: 10, borderRadius: 8 },
+    banner: { color: c.text, backgroundColor: c.card, borderColor: c.accent, borderWidth: 1, padding: 10, borderRadius: 8 },
+    label: { color: c.muted, fontSize: 12, marginTop: 8 },
+    input: { backgroundColor: c.card2, color: c.text, borderColor: c.line, borderWidth: 1, borderRadius: 8, padding: 10 },
+    area: { minHeight: 90, textAlignVertical: "top" },
+    paste: { minHeight: 80, textAlignVertical: "top" },
+    primary: { backgroundColor: c.accent, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
+    primaryText: { color: c.accentInk, fontWeight: "700" },
+    secondary: { borderColor: c.line, borderWidth: 1, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
+    secondaryText: { color: c.text },
+    row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" },
+    card: { backgroundColor: c.card, borderRadius: 10, padding: 14, gap: 8, borderWidth: 1, borderColor: c.line },
+    cardOn: { borderColor: c.accent },
+    sku: { color: c.text, fontSize: 15 },
+    pill: { color: c.text, backgroundColor: "#2a303b", borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3, overflow: "hidden", fontSize: 12 },
+    pillOn: { backgroundColor: "#16362b", color: "#b7f0d6" },
+    pillOff: { backgroundColor: "#3d3118", color: "#ffe1a8" },
+    choices: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    choice: { borderColor: c.line, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
+    choiceOn: { borderColor: c.accent, backgroundColor: c.wash },
+    choiceText: { color: c.text, fontSize: 13 },
+    switchRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8 },
+    log: { color: c.muted, fontFamily: "monospace", fontSize: 12 },
+    link: { color: c.accent, marginTop: 12 },
+    cameraBox: { gap: 8 },
+    camera: { height: 280, borderRadius: 12, overflow: "hidden" },
+    metrics: { flexDirection: "row", gap: 8 },
+    metric: { flex: 1, backgroundColor: c.card, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: c.line },
+    metricNum: { color: c.text, fontSize: 18, fontWeight: "700" },
+    mark: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+    markText: { color: c.accentInk, fontWeight: "700" },
+    photo: { width: 36, height: 36, borderRadius: 8 }
+  })
+}

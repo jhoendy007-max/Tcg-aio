@@ -117,7 +117,7 @@ export function AccountsPage() {
               <TextInput type="password" autoComplete="new-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
             </Field>
           </div>
-          <Field label="Browser session" hint="Target: accessToken, visitorId, and refreshToken. Walmart: auth and CID. Best Buy: the www.bestbuy.com cookie header, including at. Pokémon Center: the full www.pokemoncenter.com cookie header. Crunchyroll: the www.crunchyroll.com cookie header or the shopper access token. Premium Bandai: the p-bandai.com cookie header. Amazon: the www.amazon.com cookie header, including at-main. Cookie strings or the same fields as JSON. Leave blank to keep a saved session.">
+          <Field label="Browser session" hint="Target: accessToken, visitorId, and refreshToken. Walmart: auth and CID. Best Buy: the www.bestbuy.com cookie header, including at. Pokémon Center: the full www.pokemoncenter.com cookie header. Crunchyroll: the www.crunchyroll.com cookie header or the shopper access token. Premium Bandai: the p-bandai.com cookie header. Amazon: the www.amazon.com cookie header, including at-main. GameStop, Barnes & Noble, Costco, and Sam's Club: that store's cookie header. TCGplayer catalog reads work without a session. Cookie strings or the same fields as JSON. Leave blank to keep a saved session.">
             <textarea value={form.session} onChange={(event) => setForm({ ...form, session: event.target.value, clearSession: false })} rows={5} spellCheck={false} placeholder="accessToken=...; visitorId=...   or   auth=...; CID=...   or   at=...; vt=..." />
           </Field>
           {form.id ? (

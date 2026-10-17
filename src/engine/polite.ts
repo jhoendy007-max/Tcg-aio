@@ -2,15 +2,20 @@ import type { HttpClient, HttpRequest } from "./http"
 import type { StoreId } from "../shared/types"
 import { sleep } from "./sleep"
 
-/** Minimum gap between this app's requests to one store. This slows the app down on purpose. */
+/** Minimum gap between this app's requests to one store. The configured delay can be longer. */
 export const STORE_GAP_MS: Record<StoreId, number> = {
-  target: 3000,
-  walmart: 4000,
-  bestbuy: 3000,
-  "pokemon-center": 4000,
-  amazon: 4000,
-  crunchyroll: 3000,
-  bandai: 4000
+  target: 250,
+  walmart: 400,
+  bestbuy: 250,
+  "pokemon-center": 400,
+  amazon: 400,
+  crunchyroll: 250,
+  bandai: 400,
+  gamestop: 400,
+  "barnes-noble": 400,
+  costco: 400,
+  sams: 400,
+  tcgplayer: 400
 }
 
 export const BLOCK_STATUSES = new Set([403, 412, 429, 435])
@@ -40,14 +45,21 @@ export function backoffDelay(streak: number, baseMs: number): number {
  */
 export class PoliteLimiter {
   private readonly nextAt = new Map<StoreId, number>()
+  private readonly floors = new Map<StoreId, number>()
 
   constructor(
     private readonly now: () => number = Date.now,
     private readonly wait: (ms: number, signal?: AbortSignal) => Promise<void> = (ms, signal) => sleep(ms, signal ?? new AbortController().signal)
   ) {}
 
+  /** A store page can slow requests down. It cannot go under the built-in gap. */
+  setFloor(store: StoreId, ms: number): void {
+    const floor = STORE_GAP_MS[store] ?? 1000
+    this.floors.set(store, Math.max(floor, Math.round(ms)))
+  }
+
   async before(store: StoreId, signal?: AbortSignal): Promise<void> {
-    const gap = STORE_GAP_MS[store]
+    const gap = this.floors.get(store) ?? STORE_GAP_MS[store] ?? 1000
     const delay = Math.max(0, (this.nextAt.get(store) ?? 0) - this.now())
     if (delay > 0) await this.wait(delay, signal)
     this.nextAt.set(store, this.now() + gap)

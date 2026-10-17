@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto"
 import { attachSession } from "../../engine/block-recovery"
-import { monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
+import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
+import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import { encryptBestBuyPan } from "./card"
 import {
   decodeQueueSeconds,
@@ -101,7 +102,7 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
       ctx.log("warn", stock.reason)
-      await ctx.sleep(ctx.settings.monitorDelayMs)
+      await ctx.sleep(retryWait(ctx))
       continue
     }
     if (stock.kind !== "ok") return asResult(stock)
@@ -118,6 +119,8 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
+    if (await holdMonitorOnly(ctx)) continue
+    await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, sku, pageUrl)
     if (cart.kind === "oos") {
@@ -190,7 +193,8 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
   if (response.status === 429 || response.status >= 500) return { kind: "retry", reason: `Monitor request returned HTTP ${response.status}. Retrying.` }
   const reading = readStock(response.body, sku)
   if (reading) {
-    noteWatch(ctx, reading)
+    reading.imageUrl = productImage(response.body) || undefined
+    noteWatch(ctx, { ...reading, url: pageUrl })
     return { kind: "ok", value: reading }
   }
   if (response.status === 404) return { kind: "ok", value: { inStock: false, status: "NOT_FOUND", sku, reason: "SKU was not found." } }

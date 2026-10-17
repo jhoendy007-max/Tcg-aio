@@ -18,7 +18,12 @@ const final: Record<StoreId, HttpRequest> = {
   "pokemon-center": { method: "POST", url: "https://www.pokemoncenter.com/tpci-ecommweb-api/order?format=nodatalinks", body: "{}" },
   amazon: { method: "POST", url: "https://www.amazon.com/checkout/p/spc/place-order", body: "place=1" },
   crunchyroll: { method: "POST", url: "https://www.crunchyroll.com/mobify/proxy/api/checkout/shopper-orders/v1/organizations/org/orders?siteId=CrunchyrollUS", body: "{\"basketId\":\"b\"}" },
-  bandai: { method: "POST", url: "https://p-bandai.com/api/checkout/42/preComplete", body: "{\"globaleOrder\":{}}" }
+  bandai: { method: "POST", url: "https://p-bandai.com/api/checkout/42/preComplete", body: "{\"globaleOrder\":{}}" },
+  gamestop: { method: "POST", url: "https://www.gamestop.com/on/demandware.store/Sites-gamestop-us-Site/default/CheckoutServices-PlaceOrder", body: "{}" },
+  "barnes-noble": { method: "POST", url: "https://www.barnesandnoble.com/checkout/api/place-order", body: "{}" },
+  costco: { method: "POST", url: "https://www.costco.com/ebusiness/order/v1/orders/place", body: "{}" },
+  sams: { method: "POST", url: "https://www.samsclub.com/checkout/placeorder", body: "{}" },
+  tcgplayer: { method: "POST", url: "https://www.tcgplayer.com/checkout/place-order", body: "{}" }
 }
 
 const allowed: Record<StoreId, HttpRequest> = {
@@ -28,7 +33,12 @@ const allowed: Record<StoreId, HttpRequest> = {
   "pokemon-center": { method: "POST", url: "https://flex.cybersource.com/flex/v2/tokens", body: "jwe" },
   amazon: { method: "GET", url: "https://www.amazon.com/checkout/entry/cart?proceedToCheckout=1" },
   crunchyroll: { method: "POST", url: "https://api.stripe.com/v1/payment_methods", body: "card[number]=4242" },
-  bandai: { method: "POST", url: "https://p-bandai.com/api/cart/cart-1/checkout", body: "{\"merchantCartToken\":\"t\",\"items\":[]}" }
+  bandai: { method: "POST", url: "https://p-bandai.com/api/cart/cart-1/checkout", body: "{\"merchantCartToken\":\"t\",\"items\":[]}" },
+  gamestop: { method: "GET", url: "https://www.gamestop.com/toys-games/trading-cards/products/pokemon-trading-card-game-pokemon-day-2026-collection/436435.html" },
+  "barnes-noble": { method: "GET", url: "https://www.barnesandnoble.com/w/pokemon/9781465481234" },
+  costco: { method: "GET", url: "https://www.costco.com/.product.100000001.html" },
+  sams: { method: "GET", url: "https://www.samsclub.com/ip/980000001" },
+  tcgplayer: { method: "GET", url: "https://mp-search-api.tcgplayer.com/v1/product/509980/details" }
 }
 
 describe("place-order gate", () => {

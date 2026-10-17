@@ -5,6 +5,8 @@ import { parseAsin, productUrl as amazonProductUrl } from "../stores/amazon/pars
 import { monitorUrl, parseSku as parseBestBuySku } from "../stores/bestbuy/parse"
 import { parseSku as parseCrunchyrollSku, productPageUrl } from "../stores/crunchyroll/parse"
 import { parseSku as parseBandaiSku, productPageUrl as bandaiProductUrl } from "../stores/bandai/parse"
+import { BARNES_NOBLE, COSTCO, GAMESTOP, SAMS, parsePageTarget, type PageSpec } from "../stores/page/parse"
+import { parseProductId, productPageUrl as tcgProductUrl } from "../stores/tcgplayer/parse"
 import { productUrl as pokemonProductUrl } from "../stores/pokemon-center/parse"
 import { parseItemId } from "../stores/walmart/parse"
 
@@ -17,7 +19,12 @@ const HOSTS: Record<StoreId, string> = {
   "pokemon-center": "www.pokemoncenter.com",
   amazon: "www.amazon.com",
   crunchyroll: "www.crunchyroll.com",
-  bandai: "p-bandai.com"
+  bandai: "p-bandai.com",
+  gamestop: "www.gamestop.com",
+  "barnes-noble": "www.barnesandnoble.com",
+  costco: "www.costco.com",
+  sams: "www.samsclub.com",
+  tcgplayer: "www.tcgplayer.com"
 }
 
 /**
@@ -59,8 +66,24 @@ export function challengePageUrl(store: StoreId, sku: string): string {
     const crunchy = parseCrunchyrollSku(sku)
     return crunchy ? productPageUrl(crunchy) : fallback
   }
-  const code = parseBandaiSku(sku)
-  return code ? bandaiProductUrl(code) : "https://p-bandai.com/us"
+  if (store === "bandai") {
+    const code = parseBandaiSku(sku)
+    return code ? bandaiProductUrl(code) : "https://p-bandai.com/us"
+  }
+  if (store === "gamestop") return pageUrl(GAMESTOP, sku)
+  if (store === "barnes-noble") return pageUrl(BARNES_NOBLE, sku)
+  if (store === "costco") return pageUrl(COSTCO, sku)
+  if (store === "sams") return pageUrl(SAMS, sku)
+  if (store === "tcgplayer") {
+    const id = parseProductId(sku)
+    return id ? tcgProductUrl(id) : fallback
+  }
+  const _exhaustive: never = store
+  return _exhaustive
+}
+
+function pageUrl(spec: PageSpec, sku: string): string {
+  return parsePageTarget(spec, sku)?.url ?? spec.home
 }
 
 export function splitCookieHeader(header: string): { name: string; value: string }[] {

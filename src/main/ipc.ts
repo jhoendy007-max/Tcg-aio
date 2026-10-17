@@ -1,4 +1,4 @@
-import { ipcMain, type BrowserWindow } from "electron"
+import { ipcMain, shell, type BrowserWindow } from "electron"
 import QRCode from "qrcode"
 import { relayRestockUrl, type AlertService } from "../engine/alerts"
 import type { ChallengeController } from "./challenge-window"
@@ -8,13 +8,24 @@ import type { SessionBrowser } from "./session-window"
 import type { UpdateController } from "./auto-update"
 import { parseBulkTasks } from "../engine/bulk"
 import { defaultHttp } from "../engine/http"
+import { lookupResale } from "../engine/resale"
+import { inventoryCsv, inventoryReport } from "../engine/inventory"
+import { getBackup, putBackup } from "../engine/backup"
+import { activateRemote, listenLicense, type LicenseStore } from "../engine/license"
+import { APP_VERSION } from "../shared/version"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
 import type { PhoneServer } from "../phone/server"
 import { encodePairingPayload } from "../phone/protocol"
 import { channels } from "../shared/ipc"
-import type { ImapInput, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
+import { openMailbox, testMailbox } from "../engine/imap"
+import { completeMailSignIn } from "../engine/mail-oauth"
+import { imapCredential } from "../engine/mail-read"
+import { explainMailFailure, isMailHelpUrl } from "../shared/mail"
+import { AppError } from "../shared/errors"
+import type { ImapInput, MailboxInput, ResaleQuery, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
+import { isStoreId } from "../shared/stores"
 import { listStores } from "../stores/registry"
 import type { StoreId } from "../shared/types"
 import type { StoreModule } from "../stores/module"
@@ -47,6 +58,7 @@ export function registerIpc(
   }
   handle(channels.tasksList, () => db.listTasks())
   handle(channels.tasksSave, (input) => db.saveTask(input))
+  handle(channels.tasksReorder, (ids: string[]) => db.reorderTasks(Array.isArray(ids) ? ids : []))
   handle(channels.tasksDelete, (id: string) => {
     if (runner.isRunning(id)) throw new Error("Stop the task before deleting it.")
     db.deleteTask(id)
@@ -101,6 +113,23 @@ export function registerIpc(
   handle(channels.settingsGet, () => ({ settings: db.getSettings(), security: db.security() }))
   handle(channels.settingsSave, (input: Settings) => {
     const settings = db.saveSettings(input)
+    onSettings?.(settings)
+    return { settings, security: db.security() }
+  })
+  handle(channels.moduleSave, (input: { store: StoreId; record: unknown }) => {
+    if (!input || !isStoreId(input.store)) throw new AppError("Choose a store.")
+    const settings = db.saveModule(input.store, input.record)
+    onSettings?.(settings)
+    return { settings, security: db.security() }
+  })
+  handle(channels.moduleReset, (store: StoreId) => {
+    if (!isStoreId(store)) throw new AppError("Choose a store.")
+    const settings = db.resetModule(store)
+    onSettings?.(settings)
+    return { settings, security: db.security() }
+  })
+  handle(channels.moduleImport, (text: string) => {
+    const settings = db.importModule(text)
     onSettings?.(settings)
     return { settings, security: db.security() }
   })
@@ -225,8 +254,119 @@ export function registerIpc(
     return { id }
   })
   handle(channels.ordersList, () => db.listOrders())
+  handle(channels.resaleQuote, (input: ResaleQuery) => {
+    if (!input || typeof input.title !== "string" || !input.title.trim()) throw new AppError("Enter the product name from the win.")
+    return lookupResale(defaultHttp, {
+      title: input.title,
+      cost: typeof input.cost === "number" ? input.cost : null,
+      quantity: typeof input.quantity === "number" ? input.quantity : 1,
+      feePct: typeof input.feePct === "number" ? input.feePct : 0,
+      tcgProductId: typeof input.tcgProductId === "string" ? input.tcgProductId : ""
+    })
+  })
+  handle(channels.inventoryGet, () => inventoryReport(db.listCheckouts()))
+  handle(channels.inventoryValue, (id: string, value: number | null) => {
+    if (typeof id !== "string" || !id) throw new AppError("That purchase was not found.")
+    db.setCheckoutValue(id, typeof value === "number" ? value : null)
+    return inventoryReport(db.listCheckouts())
+  })
+  handle(channels.inventoryCsv, () => ({ csv: inventoryCsv(db.listCheckouts()) }))
+  handle(channels.backupExport, (passphrase: string) => ({ file: db.backupFile(passphrase) }))
+  handle(channels.backupRestore, (passphrase: string, file: string) => {
+    db.restoreFile(file, passphrase)
+    onSettings?.(db.getSettings())
+    return { restored: true as const }
+  })
+  handle(channels.backupToken, (input: { action: "keep" | "replace" | "clear"; token: string }) => {
+    db.setBackupToken(input?.action ?? "keep", input?.token ?? "")
+    return { hasToken: db.hasBackupToken() }
+  })
+  handle(channels.backupUpload, async (passphrase: string) => {
+    const settings = db.getSettings()
+    await putBackup(defaultHttp, settings.backupUrl, db.backupToken(), db.backupFile(passphrase))
+    return { uploaded: true as const }
+  })
+  handle(channels.backupDownload, async (passphrase: string) => {
+    const settings = db.getSettings()
+    const file = await getBackup(defaultHttp, settings.backupUrl, db.backupToken())
+    db.restoreFile(file, passphrase)
+    onSettings?.(db.getSettings())
+    return { restored: true as const }
+  })
+  handle(channels.licenseGet, () => db.licenseView())
+  handle(channels.licenseIdentity, () => {
+    db.generateLicenseIdentity()
+    onSettings?.(db.getSettings())
+    return db.licenseView()
+  })
+  handle(channels.licenseAdmin, (input: { action: "keep" | "replace" | "clear"; token: string }) => {
+    db.setLicenseAdmin(input?.action ?? "keep", input?.token ?? "")
+    return db.licenseView()
+  })
+  handle(channels.licenseMint, (input: { holder: string; seats: number; expiresAt: number | null }) => {
+    const minted = db.mintLicense({ holder: input?.holder ?? "", seats: Number(input?.seats), expiresAt: input?.expiresAt ?? null })
+    return { ...db.licenseView(), key: minted.key }
+  })
+  handle(channels.licenseRevoke, (id: string) => {
+    db.revokeLicense(id)
+    return db.licenseView()
+  })
+  handle(channels.licenseActivate, async (key: string) => {
+    const settings = db.getSettings()
+    if (settings.licenseServerUrl) {
+      const status = await activateRemote(defaultHttp, settings.licenseServerUrl, key, db.pcId(), APP_VERSION)
+      db.saveRemoteActivation(key, status)
+    } else {
+      db.activateLicense(key)
+    }
+    return db.licenseView()
+  })
+  handle(channels.licenseServe, async (input: { action: "start" | "stop"; port?: number }) => {
+    if (input?.action === "stop") {
+      await stopLicense()
+      return { url: "" }
+    }
+    const url = await startLicense(db, Math.round(Number(input?.port ?? 8756)))
+    return { url }
+  })
   handle(channels.imapGet, () => db.imapView())
   handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
+  handle(channels.mailboxesGet, () => db.listMailboxes())
+  handle(channels.mailboxSave, (input: MailboxInput) => db.saveMailbox(input))
+  handle(channels.mailboxDelete, (id: string) => {
+    db.deleteMailbox(id)
+    return { id }
+  })
+  handle(channels.mailboxTest, async (id: string) => {
+    const login = db.mailboxSecret(id)
+    const lang = db.getSettings().language
+    if (!login) throw new AppError(lang === "es" ? "Guarda el buzón y una contraseña de aplicación, o inicia sesión, antes de probar." : "Save the mailbox and an app password, or sign in, before testing.")
+    try {
+      const cred = await imapCredential(db, login)
+      const socket = await openMailbox({ host: login.host, port: login.port, secure: login.secure })
+      const folders = await testMailbox(socket, cred)
+      db.noteMailbox(id, { ok: true, error: "", folders })
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "The connection failed."
+      const error = explainMailFailure(raw, login.provider, lang)
+      db.noteMailbox(id, { ok: false, error })
+      throw new AppError(error)
+    }
+    const view = db.listMailboxes().find((row) => row.id === id)
+    if (!view) throw new AppError("Mailbox not found.")
+    return view
+  })
+  handle(channels.mailboxOAuth, (input: { provider: "gmail" | "outlook"; user: string }) => {
+    if (input?.provider !== "gmail" && input?.provider !== "outlook") throw new AppError("Choose Google or Microsoft.")
+    return completeMailSignIn(db, { provider: input.provider, user: input?.user ?? "" }, {
+      open: (url) => shell.openExternal(url)
+    })
+  })
+  handle(channels.mailOpen, async (url: string) => {
+    if (!isMailHelpUrl(url)) throw new AppError(db.getSettings().language === "es" ? "Ese enlace no es una página de configuración del correo." : "That link is not a mail setup page.")
+    await shell.openExternal(url)
+    return { opened: true as const }
+  })
   handle(channels.vaultList, () => db.listVault())
   handle(channels.vaultUnlink, (deviceId: string, accountId: string) => {
     db.unlinkVault(deviceId, accountId)
@@ -236,6 +376,38 @@ export function registerIpc(
     db.setVaultTwoWay(deviceId, accountId, twoWay)
     return db.listVault()
   })
+}
+
+let licenseServer: { url: string; close(): Promise<void> } | null = null
+
+function licenseStore(db: Database): LicenseStore {
+  return {
+    publicKey: () => db.licensePublicKey(),
+    adminOk: (token) => Boolean(token) && token === db.licenseAdminToken(),
+    findToken: (key) => db.findLicenseToken(key),
+    remember: (record, key) => db.rememberLicense(record, key),
+    list: () => db.licenseView().issued,
+    mint: (input) => {
+      const minted = db.mintLicense(input)
+      const record = db.licenseView().issued.find((row) => row.id === minted.id)
+      if (!record) throw new Error("License was not stored.")
+      return { token: minted.key, record }
+    },
+    revoke: (id) => db.revokeLicense(id)
+  }
+}
+
+async function startLicense(db: Database, port: number): Promise<string> {
+  await stopLicense()
+  licenseServer = await listenLicense(port, licenseStore(db))
+  return licenseServer.url
+}
+
+async function stopLicense(): Promise<void> {
+  if (!licenseServer) return
+  const current = licenseServer
+  licenseServer = null
+  await current.close()
 }
 
 function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {

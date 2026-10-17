@@ -24,6 +24,7 @@ export interface StockReading {
   csrf?: string
   seller?: string
   reason: string
+  imageUrl?: string
 }
 
 export interface PlaceOrderForm {
@@ -82,7 +83,7 @@ export function isSignIn(body: string, location = ""): boolean {
   return false
 }
 
-export function readStock(productHtml: string, offersHtml: string, asin: string): StockReading {
+export function readStock(productHtml: string, offersHtml: string, asin: string, soldBy: "retailer" | "any" = "retailer"): StockReading {
   const title = readTitle(productHtml)
   const listPrice = readListPrice(productHtml)
   const missing = isNotFound(productHtml) && !/aod-offer-soldBy/i.test(offersHtml)
@@ -93,8 +94,11 @@ export function readStock(productHtml: string, offersHtml: string, asin: string)
     if (box) offers = [box]
   }
   const label = title ?? `ASIN ${asin}`
-  const amazon = offers.filter((offer) => offer.amazonRetail && offer.buyable && offer.price !== undefined && offer.offerListingId)
+  const amazon = offers.filter((offer) => (soldBy === "any" || offer.amazonRetail) && offer.buyable && offer.price !== undefined && offer.offerListingId)
   if (!amazon.length) {
+    if (soldBy === "any") {
+      return { inStock: false, status: "OUT_OF_STOCK", title, asin, listPrice, reason: `${label} has no buyable offer.` }
+    }
     const waiting = offers.find((offer) => offer.amazonRetail)
     if (waiting) {
       return {
@@ -141,8 +145,10 @@ export function readStock(productHtml: string, offersHtml: string, asin: string)
     listPrice,
     offerListingId: choice.offerListingId,
     csrf: choice.csrf,
-    seller: "Amazon.com",
-    reason: `${label} is sold and shipped by Amazon.com at $${choice.price!.toFixed(2)}.`
+    seller: soldBy === "any" ? (choice.seller || "the seller") : "Amazon.com",
+    reason: soldBy === "any"
+      ? `${label} is $${choice.price!.toFixed(2)} from ${choice.seller || "the seller"}.`
+      : `${label} is sold and shipped by Amazon.com at $${choice.price!.toFixed(2)}.`
   }
 }
 
@@ -214,6 +220,45 @@ export function pickupOnly(body: string): boolean {
   const pickup = lower.includes("amazon locker") || lower.includes("amazon hub counter") || lower.includes("pickup location")
   const shipping = lower.includes("shipping address") || lower.includes("ship to") || lower.includes("deliver to")
   return pickup && !shipping
+}
+
+export interface OtpForm {
+  action: string
+  field: string
+  fields: Record<string, string>
+}
+
+/** An OTP form the store already rendered. A captcha form is not an OTP form. */
+export function readOtpForm(body: string): OtpForm | undefined {
+  const forms = [...body.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)]
+  for (const form of forms) {
+    const attrs = form[1] ?? ""
+    const inner = form[2] ?? ""
+    const action = decode(attrs.match(/action="([^"]+)"/i)?.[1] ?? "")
+    if (!action || /captcha|validatecaptcha/i.test(`${action}\n${inner}`)) continue
+    const fields: Record<string, string> = {}
+    let field = ""
+    for (const input of inner.matchAll(/<input\b([^>]*)>/gi)) {
+      const tag = input[1] ?? ""
+      const name = decode(tag.match(/name="([^"]+)"/i)?.[1] ?? "")
+      if (!name) continue
+      const type = (tag.match(/type="([^"]+)"/i)?.[1] ?? "text").toLowerCase()
+      if (type === "submit" || type === "button" || type === "image") continue
+      const value = decode(tag.match(/value="([^"]*)"/i)?.[1] ?? "")
+      if (type === "hidden") {
+        fields[name] = value
+        continue
+      }
+      const auto = tag.match(/autocomplete="([^"]+)"/i)?.[1] ?? ""
+      if (/one-time-code/i.test(auto) || /otp/i.test(name) || /^(code|mfacode|verificationcode)$/i.test(name)) {
+        field = name
+        fields[name] = ""
+      }
+    }
+    if (!field) continue
+    return { action, field, fields }
+  }
+  return undefined
 }
 
 export function readPlaceOrder(body: string): PlaceOrderForm | undefined {

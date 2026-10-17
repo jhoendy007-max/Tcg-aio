@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
-import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type StoreHealth, type StoreInfo, type TaskInput } from "../../../shared/types"
+import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type Settings, type StartMode, type StoreHealth, type StoreInfo, type TaskInput, type TaskKind, type TaskStatus } from "../../../shared/types"
+import { moduleScope, moduleText, resolveModule, sourceLabel } from "../../../shared/module-settings"
+import { taskText } from "../../../shared/task-role"
+import { storeName } from "../../../shared/stores"
+import { ProductVisual } from "../components/marks"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { TasksBulk } from "./TasksBulk"
 import { errorText, formatTime, STATUS_LABEL, unwrap } from "../lib"
@@ -14,7 +18,19 @@ const emptyForm = (): TaskInput => ({
   monitorProxyGroupId: null,
   confirmPurchase: false,
   testMode: false,
-  group: ""
+  group: "",
+  imageUrl: "",
+  monitorOnly: false,
+  kind: "checkout",
+  keywords: "",
+  priceCap: null,
+  webhook: "",
+  activeHours: "",
+  linkedCheckoutIds: [],
+  checkoutDelayMs: null,
+  maxPrice: null,
+  startMode: "builtin",
+  jitterPct: null
 })
 
 export function TasksPage() {
@@ -33,6 +49,13 @@ export function TasksPage() {
   const [busy, setBusy] = useState(false)
   const [challenge, setChallenge] = useState<PublicChallenge | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [query, setQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("")
+  const [storeFilter, setStoreFilter] = useState("")
+  const [kindFilter, setKindFilter] = useState<TaskKind | "">("")
+  const [grouped, setGrouped] = useState(true)
+  const [dragId, setDragId] = useState<string | null>(null)
 
   async function reload() {
     const [nextTasks, nextProfiles, nextAccounts, nextGroups, nextStores, settings] = await Promise.all([
@@ -44,6 +67,7 @@ export function TasksPage() {
       unwrap(window.aio.settings.get())
     ])
     setGlobalTest(settings.settings.testMode)
+    setSettings(settings.settings)
     setTasks(nextTasks)
     setProfiles(nextProfiles)
     setAccounts(nextAccounts)
@@ -63,10 +87,9 @@ export function TasksPage() {
       }
       setTasks((current) => {
         const index = current.findIndex((task) => task.id === event.task.id)
-        if (index < 0) return [event.task, ...current]
-        const next = current.slice()
-        next[index] = event.task
-        return next
+        const next = index < 0 ? [event.task, ...current] : current.slice()
+        if (index >= 0) next[index] = event.task
+        return next.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || b.createdAt - a.createdAt)
       })
     })
     const stopChallenge = window.aio.challenge.onEvent(setChallenge)
@@ -82,9 +105,74 @@ export function TasksPage() {
     return () => window.clearInterval(timer)
   }, [challenge])
 
+  const taskView = settings?.taskView ?? "detailed"
+  const lang = settings?.language === "es" ? "es" : "en"
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return tasks.filter((task) => {
+      if (statusFilter && task.status !== statusFilter) return false
+      if (storeFilter && task.store !== storeFilter) return false
+      if (kindFilter === "monitor" && task.kind !== "monitor") return false
+      if (kindFilter === "checkout" && task.kind === "monitor") return false
+      if (!needle) return true
+      const hay = [task.sku, task.group, task.detail, storeName(task.store), STATUS_LABEL[task.status]].join(" ").toLowerCase()
+      return hay.includes(needle)
+    })
+  }, [tasks, query, statusFilter, storeFilter, kindFilter])
+  const sections = useMemo(() => {
+    if (!grouped) return [{ label: "", rows: filtered }]
+    const buckets = new Map<string, PublicTask[]>()
+    for (const task of filtered) {
+      const label = task.group?.trim() || "Ungrouped"
+      const rows = buckets.get(label) ?? []
+      rows.push(task)
+      buckets.set(label, rows)
+    }
+    return [...buckets.entries()].map(([label, rows]) => ({ label, rows }))
+  }, [filtered, grouped])
+
+  async function commitOrder(ids: string[]) {
+    setError("")
+    try {
+      setTasks(await unwrap(window.aio.tasks.reorder(ids)))
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
+  function place(fromId: string, toId: string, after: boolean) {
+    if (fromId === toId) return
+    const next = tasks.map((task) => task.id).filter((id) => id !== fromId)
+    let index = next.indexOf(toId)
+    if (index < 0) return
+    if (after) index += 1
+    next.splice(index, 0, fromId)
+    void commitOrder(next)
+  }
+
+  function moveVisible(id: string, delta: number) {
+    const visible = filtered.map((task) => task.id)
+    const index = visible.indexOf(id)
+    const target = visible[index + delta]
+    if (!target) return
+    place(id, target, delta > 0)
+  }
+
+  async function setView(taskView: Settings["taskView"]) {
+    if (!settings) return
+    const next = { ...settings, taskView }
+    setSettings(next)
+    try {
+      const saved = await unwrap(window.aio.settings.save(next))
+      setSettings(saved.settings)
+      window.dispatchEvent(new CustomEvent("tcgaio-settings", { detail: saved.settings }))
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
   const selected = tasks.find((task) => task.id === selectedId) ?? null
   const storeAccounts = accounts.filter((account) => account.store === form?.store)
-  const selectedStore = stores.find((store) => store.id === form?.store)
 
   const names = useMemo(() => ({
     profile: new Map(profiles.map((profile) => [profile.id, profile.name])),
@@ -168,7 +256,7 @@ export function TasksPage() {
           <h1>Tasks</h1>
           <p>Monitor a drop, add it to cart, and place a ship-to-home order with your own account.</p>
         </div>
-        <button type="button" className="primary" onClick={() => { setForm(emptyForm()); setError("") }}>New task</button>
+        <button type="button" className="primary" onClick={() => { setForm(freshTask(settings)); setError("") }}>New task</button>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {globalTest ? <Banner tone="info">Global test mode is on. Every task stops before place order. Nothing is charged.</Banner> : null}
@@ -186,63 +274,21 @@ export function TasksPage() {
         </div>
       ) : null}
       {form ? (
-        <form className="card form-grid" onSubmit={save}>
-          <Field label="Store">
-            <Select value={form.store} onChange={(event) => setForm({ ...form, store: event.target.value as TaskInput["store"], accountId: "" })}>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>{store.name}{store.implemented ? "" : " (stub)"}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Product SKU or URL" hint={selectedStore?.skuHint}>
-            <TextInput value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} placeholder="88897904 or a product URL" required />
-          </Field>
-          <Field label="Quantity">
-            <TextInput type="number" min={1} max={12} value={form.quantity} onChange={(event) => setForm({ ...form, quantity: Number(event.target.value) })} required />
-          </Field>
-          <Field label="Profile">
-            <Select value={form.profileId} onChange={(event) => setForm({ ...form, profileId: event.target.value })} required>
-              <option value="">Choose a profile</option>
-              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.last4}</option>)}
-            </Select>
-          </Field>
-          <Field label="Account">
-            <Select value={form.accountId} onChange={(event) => setForm({ ...form, accountId: event.target.value })} required>
-              <option value="">Choose an account</option>
-              {storeAccounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
-            </Select>
-          </Field>
-          <Field label="Group" hint="Optional. A drop can start every task with this label.">
-            <TextInput value={form.group ?? ""} onChange={(event) => setForm({ ...form, group: event.target.value })} placeholder="ETB" />
-          </Field>
-          <Field label="Monitor proxy group" hint="Stock checks use this pool. Leave it blank to use the checkout proxy group.">
-            <Select value={form.monitorProxyGroupId ?? ""} onChange={(event) => setForm({ ...form, monitorProxyGroupId: event.target.value || null })}>
-              <option value="">Same as checkout</option>
-              {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-            </Select>
-          </Field>
-          <Field label="Checkout proxy group">
-            <Select value={form.proxyGroupId ?? ""} onChange={(event) => setForm({ ...form, proxyGroupId: event.target.value || null })}>
-              <option value="">Direct connection</option>
-              {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies.length})</option>)}
-            </Select>
-          </Field>
-          {selectedStore && !selectedStore.implemented ? (
-            <Banner tone="info">{selectedStore.name} is registered, and starting a task records that checkout is not implemented yet.</Banner>
-          ) : null}
-          <label className="check span-2">
-            <input type="checkbox" checked={form.testMode === true} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
-            <span>Test mode for this task. Runs the real flow and stops before place order, even if the global test setting is off.</span>
-          </label>
-          <label className="check span-2">
-            <input type="checkbox" checked={form.confirmPurchase} onChange={(event) => setForm({ ...form, confirmPurchase: event.target.checked })} />
-            <span>This task may place a real shipping order and charge the saved card when the item is in stock. Ignored while test mode is on.</span>
-          </label>
-          <div className="actions span-2">
-            <button className="primary" type="submit" disabled={busy}>{form.id ? "Save task" : "Create task"}</button>
-            <button type="button" onClick={() => setForm(null)}>Cancel</button>
-          </div>
-        </form>
+        <TaskEditor
+          form={form}
+          tasks={tasks}
+          settings={settings}
+          stores={stores}
+          profiles={profiles}
+          accounts={storeAccounts}
+          groups={groups}
+          busy={busy}
+          lang={lang}
+          live={Boolean(form.id && isActiveStatus(tasks.find((task) => task.id === form.id)?.status ?? "idle"))}
+          onChange={setForm}
+          onCancel={() => setForm(null)}
+          onSubmit={save}
+        />
       ) : null}
       <div className="card">
         <div className="log-head">
@@ -276,51 +322,78 @@ export function TasksPage() {
           </div>
         ) : null}
       </div>
-      <TasksBulk tasks={tasks} profiles={profiles} accounts={accounts} groups={groups} stores={stores} onChanged={() => reload()} />
+      <TasksBulk tasks={tasks} profiles={profiles} accounts={accounts} groups={groups} stores={stores} lang={lang} onChanged={() => reload()} />
+      <div className="card toolbar">
+        <Field label="Search">
+          <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SKU, store, or group" aria-label="Search tasks" />
+        </Field>
+        <Field label="Status">
+          <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "")} aria-label="Filter by status">
+            <option value="">All statuses</option>
+            {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((status) => <option key={status} value={status}>{STATUS_LABEL[status]}</option>)}
+          </Select>
+        </Field>
+        <Field label="Store">
+          <Select value={storeFilter} onChange={(event) => setStoreFilter(event.target.value)} aria-label="Filter by store">
+            <option value="">All stores</option>
+            {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+          </Select>
+        </Field>
+        <Field label={taskText(lang, "kind")}>
+          <Select value={kindFilter} onChange={(event) => setKindFilter(event.target.value as TaskKind | "")} aria-label={taskText(lang, "kind")}>
+            <option value="">All</option>
+            <option value="monitor">{taskText(lang, "monitor")}</option>
+            <option value="checkout">{taskText(lang, "checkout")}</option>
+          </Select>
+        </Field>
+        <label className="check">
+          <input type="checkbox" checked={grouped} onChange={(event) => setGrouped(event.target.checked)} />
+          <span>Group by drop</span>
+        </label>
+        <div className="actions">
+          <button type="button" aria-pressed={taskView === "compact"} onClick={() => void setView("compact")}>Compact</button>
+          <button type="button" aria-pressed={taskView === "detailed"} onClick={() => void setView("detailed")}>Detailed</button>
+        </div>
+      </div>
       <div className="table-wrap card">
         <table>
           <thead>
             <tr>
-              <th>Store</th>
+              <th>Order</th>
               <th>Product</th>
-              <th>Qty</th>
-              <th>Profile</th>
-              <th>Account</th>
-              <th>Proxy</th>
+              {taskView === "detailed" ? <th>Qty</th> : null}
+              {taskView === "detailed" ? <th>Profile</th> : null}
+              {taskView === "detailed" ? <th>Account</th> : null}
+              {taskView === "detailed" ? <th>Proxy</th> : null}
               <th>Status</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {tasks.length === 0 ? (
-              <tr><td colSpan={8} className="empty">No tasks yet. Create one when the profile and account are saved.</td></tr>
-            ) : tasks.map((task) => (
-              <tr key={task.id} className={task.id === selectedId ? "selected" : ""} onClick={() => setSelectedId(task.id)}>
-                <td>{names.store.get(task.store) ?? task.store}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</td>
-                <td className="sku">{task.sku}</td>
-                <td>{task.quantity}</td>
-                <td>{names.profile.get(task.profileId) ?? "Missing"}</td>
-                <td>{names.account.get(task.accountId) ?? "Missing"}</td>
-                <td>{task.proxyGroupId ? names.group.get(task.proxyGroupId) ?? "Missing" : "Direct"}</td>
-                <td>
-                  <span className={`pill ${task.status}`}>{STATUS_LABEL[task.status]}</span>
-                  {task.detail ? <div className="detail">{task.detail}</div> : null}
-                </td>
-                <td className="row-actions">
-                  {isActiveStatus(task.status) ? (
-                    <button type="button" onClick={(event) => { event.stopPropagation(); void stop(task.id) }}>Stop</button>
-                  ) : (
-                    <button type="button" className="primary" disabled={!task.confirmPurchase && !task.testMode} onClick={(event) => { event.stopPropagation(); void start(task.id) }}>
-                      {task.status === "paused" ? "Resume" : "Start"}
-                    </button>
-                  )}
-                  {!isActiveStatus(task.status) ? (
-                    <button type="button" onClick={(event) => { event.stopPropagation(); void runTest(task.id) }}>Run test</button>
-                  ) : null}
-                  <button type="button" onClick={(event) => { event.stopPropagation(); setForm(toInput(task)); setError("") }} disabled={isActiveStatus(task.status)}>Edit</button>
-                  <button type="button" className="danger" onClick={(event) => { event.stopPropagation(); void remove(task.id) }} disabled={isActiveStatus(task.status)}>Delete</button>
-                </td>
-              </tr>
+              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty">No tasks yet. Create one when the profile and account are saved.</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty">No tasks match this search.</td></tr>
+            ) : sections.map((section) => (
+              <SectionRows
+                key={section.label || "all"}
+                section={section}
+                grouped={grouped}
+                taskView={taskView}
+                selectedId={selectedId}
+                globalTest={globalTest}
+                dragId={dragId}
+                names={names}
+                onSelect={setSelectedId}
+                onDrag={setDragId}
+                onDrop={(target) => { if (dragId) place(dragId, target, false); setDragId(null) }}
+                onMove={moveVisible}
+                onStart={start}
+                onStop={stop}
+                onTest={runTest}
+                onEdit={(task) => { setForm(toInput(task)); setError("") }}
+                onDelete={remove}
+              />
             ))}
           </tbody>
         </table>
@@ -343,6 +416,79 @@ export function TasksPage() {
   )
 }
 
+function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
+  section: { label: string; rows: PublicTask[] }
+  grouped: boolean
+  taskView: "compact" | "detailed"
+  selectedId: string | null
+  globalTest: boolean
+  dragId: string | null
+  names: { profile: Map<string, string>; account: Map<string, string>; group: Map<string, string> }
+  onSelect: (id: string) => void
+  onDrag: (id: string | null) => void
+  onDrop: (id: string) => void
+  onMove: (id: string, delta: number) => void
+  onStart: (id: string) => void
+  onStop: (id: string) => void
+  onTest: (id: string) => void
+  onEdit: (task: PublicTask) => void
+  onDelete: (id: string) => void
+}) {
+  const cols = taskView === "detailed" ? 8 : 4
+  return (
+    <>
+      {grouped ? <tr className="group-row"><td colSpan={cols}>{section.label}</td></tr> : null}
+      {section.rows.map((task) => (
+        <tr
+          key={task.id}
+          className={`${task.id === selectedId ? "selected" : ""} ${dragId === task.id ? "dragging" : ""}`.trim()}
+          onClick={() => onSelect(task.id)}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => { event.preventDefault(); onDrop(task.id) }}
+        >
+          <td className="row-actions">
+            <button type="button" className="drag-handle" draggable aria-label={`Drag ${task.sku}`} onDragStart={(event) => { event.dataTransfer.setData("text/plain", task.id); event.dataTransfer.effectAllowed = "move"; onDrag(task.id) }} onDragEnd={() => onDrag(null)}>Move</button>
+            <button type="button" aria-label={`Move ${task.sku} up`} onClick={(event) => { event.stopPropagation(); onMove(task.id, -1) }}>Up</button>
+            <button type="button" aria-label={`Move ${task.sku} down`} onClick={(event) => { event.stopPropagation(); onMove(task.id, 1) }}>Down</button>
+          </td>
+          <td>
+            <div className="product-cell">
+              <ProductVisual store={task.store} name={storeName(task.store)} sku={task.sku} imageUrl={task.imageUrl} />
+              <div>
+                <div>{storeName(task.store)}{task.kind === "monitor" ? <span className="pill">MONITOR</span> : null}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
+                <div className="sku">{task.sku}</div>
+                {typeof task.monitorMs === "number" ? <div className="detail">{task.monitorMs} ms last read{typeof task.detectToCartMs === "number" ? ` · ${task.detectToCartMs} ms to cart` : ""}</div> : null}
+              </div>
+            </div>
+          </td>
+          {taskView === "detailed" ? <td>{task.quantity}</td> : null}
+          {taskView === "detailed" ? <td>{names.profile.get(task.profileId) ?? "Missing"}</td> : null}
+          {taskView === "detailed" ? <td>{names.account.get(task.accountId) ?? "Missing"}</td> : null}
+          {taskView === "detailed" ? <td>{task.proxyGroupId ? names.group.get(task.proxyGroupId) ?? "Missing" : "Direct"}</td> : null}
+          <td>
+            <span className={`pill ${task.status}`}>{STATUS_LABEL[task.status]}</span>
+            {task.detail ? <div className="detail">{task.detail}</div> : null}
+          </td>
+          <td className="row-actions">
+            {isActiveStatus(task.status) ? (
+              <button type="button" onClick={(event) => { event.stopPropagation(); void onStop(task.id) }}>Stop</button>
+            ) : (
+              <button type="button" className="primary" disabled={!task.confirmPurchase && !task.testMode && task.kind !== "monitor" && !globalTest} onClick={(event) => { event.stopPropagation(); void onStart(task.id) }}>
+                {task.status === "paused" ? "Resume" : "Start"}
+              </button>
+            )}
+            {!isActiveStatus(task.status) ? (
+              <button type="button" onClick={(event) => { event.stopPropagation(); void onTest(task.id) }}>Run test</button>
+            ) : null}
+            <button type="button" onClick={(event) => { event.stopPropagation(); onEdit(task) }}>Edit</button>
+            <button type="button" className="danger" onClick={(event) => { event.stopPropagation(); void onDelete(task.id) }} disabled={isActiveStatus(task.status)}>Delete</button>
+          </td>
+        </tr>
+      ))}
+    </>
+  )
+}
+
 function toInput(task: PublicTask): TaskInput {
   return {
     id: task.id,
@@ -355,6 +501,230 @@ function toInput(task: PublicTask): TaskInput {
     monitorProxyGroupId: task.monitorProxyGroupId,
     confirmPurchase: task.confirmPurchase,
     testMode: task.testMode,
-    group: task.group ?? ""
+    group: task.group ?? "",
+    imageUrl: task.imageUrl ?? "",
+    monitorOnly: task.kind === "monitor",
+    kind: task.kind === "monitor" ? "monitor" : "checkout",
+    keywords: task.keywords ?? "",
+    priceCap: task.priceCap ?? null,
+    webhook: task.webhook ?? "",
+    activeHours: task.activeHours ?? "",
+    linkedCheckoutIds: task.linkedCheckoutIds ?? [],
+    checkoutDelayMs: task.checkoutDelayMs ?? null,
+    maxPrice: task.maxPrice ?? null,
+    startMode: task.startMode ?? (task.kind === "monitor" ? "manual" : "builtin"),
+    linkedMonitorId: task.linkedMonitorId ?? null,
+    jitterPct: task.jitterPct ?? null,
+    overrides: task.overrides
   }
+}
+
+function TaskEditor({ form, tasks, settings, stores, profiles, accounts, groups, busy, lang, live, onChange, onCancel, onSubmit }: {
+  form: TaskInput
+  tasks: PublicTask[]
+  settings: Settings | null
+  stores: StoreInfo[]
+  profiles: PublicProfile[]
+  accounts: PublicAccount[]
+  groups: ProxyGroup[]
+  busy: boolean
+  lang: "en" | "es"
+  live: boolean
+  onChange: (next: TaskInput) => void
+  onCancel: () => void
+  onSubmit: (event: React.FormEvent) => void
+}) {
+  const monitor = form.kind === "monitor"
+  const selectedStore = stores.find((store) => store.id === form.store)
+  const checkouts = tasks.filter((task) => task.kind !== "monitor" && task.id !== form.id)
+  const modes: StartMode[] = ["manual", "scheduled", "monitor", "restock", "builtin"]
+  return (
+    <form className="card form-grid" onSubmit={onSubmit}>
+      <Field label={taskText(lang, "kind")}>
+        <Select value={form.kind ?? "checkout"} disabled={live} onChange={(event) => {
+          const kind = event.target.value as TaskKind
+          onChange({ ...form, kind, monitorOnly: kind === "monitor", confirmPurchase: kind === "monitor" ? false : form.confirmPurchase, startMode: kind === "monitor" ? "manual" : form.startMode ?? "builtin" })
+        }}>
+          <option value="monitor">{taskText(lang, "monitor")}</option>
+          <option value="checkout">{taskText(lang, "checkout")}</option>
+        </Select>
+      </Field>
+      <p className="span-2 hint">{monitor ? taskText(lang, "hintMonitor") : taskText(lang, "hintCheckout")} {live ? taskText(lang, "live") : ""}</p>
+      <Field label={taskText(lang, "store")}>
+        <Select value={form.store} disabled={live} onChange={(event) => {
+          const store = event.target.value as TaskInput["store"]
+          const testMode = form.id ? form.testMode : settings ? resolveModule(store, moduleScope(settings)).testMode.value : false
+          onChange({ ...form, store, accountId: "", testMode })
+        }}>
+          {stores.map((store) => (
+            <option key={store.id} value={store.id}>{store.name}{store.implemented ? "" : " (stub)"}</option>
+          ))}
+        </Select>
+      </Field>
+      <Field label={taskText(lang, "sku")} hint={selectedStore?.skuHint}>
+        <TextInput value={form.sku} disabled={live} onChange={(event) => onChange({ ...form, sku: event.target.value })} placeholder="88897904" required={!form.keywords?.trim()} />
+      </Field>
+      <Field label={taskText(lang, "keywords")} hint={taskText(lang, "inherit")}>
+        <TextInput value={form.keywords ?? ""} onChange={(event) => onChange({ ...form, keywords: event.target.value })} />
+      </Field>
+      <Field label={taskText(lang, "group")}>
+        <TextInput value={form.group ?? ""} onChange={(event) => onChange({ ...form, group: event.target.value })} placeholder="ETB" />
+      </Field>
+      {monitor ? (
+        <>
+          <Field label={taskText(lang, "proxy")}>
+            <Select value={form.monitorProxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, monitorProxyGroupId: event.target.value || null, proxyGroupId: null })}>
+              <option value="">{taskText(lang, "direct")}</option>
+              {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </Select>
+          </Field>
+          <Field label={taskText(lang, "priceCap")}>
+            <TextInput type="number" min={0} step="0.01" value={form.priceCap ?? ""} onChange={(event) => onChange({ ...form, priceCap: event.target.value === "" ? null : Number(event.target.value) })} />
+          </Field>
+          <Field className="span-2" label={taskText(lang, "webhook")}>
+            <TextInput value={form.webhook ?? ""} onChange={(event) => onChange({ ...form, webhook: event.target.value })} placeholder="https://discord.com/api/webhooks/" inputMode="url" />
+          </Field>
+          <Field className="span-2" label={taskText(lang, "hours")} hint={taskText(lang, "hoursHint")}>
+            <textarea value={form.activeHours ?? ""} onChange={(event) => onChange({ ...form, activeHours: event.target.value })} rows={3} />
+          </Field>
+          <Field className="span-2" label={taskText(lang, "links")}>
+            <Select multiple value={form.linkedCheckoutIds ?? []} onChange={(event) => onChange({ ...form, linkedCheckoutIds: [...event.target.selectedOptions].map((option) => option.value) })}>
+              {checkouts.map((task) => <option key={task.id} value={task.id}>{storeName(task.store)} · {task.sku}</option>)}
+            </Select>
+          </Field>
+        </>
+      ) : (
+        <>
+          <Field label={taskText(lang, "quantity")}>
+            <TextInput type="number" min={1} max={12} value={form.quantity} disabled={live} onChange={(event) => onChange({ ...form, quantity: Number(event.target.value) })} required />
+          </Field>
+          <Field label={taskText(lang, "profile")}>
+            <Select value={form.profileId} disabled={live} onChange={(event) => onChange({ ...form, profileId: event.target.value })} required>
+              <option value="">—</option>
+              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.last4}</option>)}
+            </Select>
+          </Field>
+          <Field label={taskText(lang, "account")}>
+            <Select value={form.accountId} disabled={live} onChange={(event) => onChange({ ...form, accountId: event.target.value })} required>
+              <option value="">—</option>
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
+            </Select>
+          </Field>
+          <Field label={taskText(lang, "proxy")}>
+            <Select value={form.monitorProxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, monitorProxyGroupId: event.target.value || null })}>
+              <option value="">{taskText(lang, "sameProxy")}</option>
+              {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </Select>
+          </Field>
+          <Field label={taskText(lang, "checkoutProxy")}>
+            <Select value={form.proxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, proxyGroupId: event.target.value || null })}>
+              <option value="">{taskText(lang, "direct")}</option>
+              {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies.length})</option>)}
+            </Select>
+          </Field>
+          <Field label={taskText(lang, "checkoutDelay")}>
+            <TextInput type="number" min={0} value={form.checkoutDelayMs ?? ""} onChange={(event) => onChange({ ...form, checkoutDelayMs: event.target.value === "" ? null : Number(event.target.value) })} />
+          </Field>
+          <Field label={taskText(lang, "maxPrice")}>
+            <TextInput type="number" min={0} step="0.01" value={form.maxPrice ?? ""} onChange={(event) => onChange({ ...form, maxPrice: event.target.value === "" ? null : Number(event.target.value) })} />
+          </Field>
+          <Field label={taskText(lang, "startMode")}>
+            <Select value={form.startMode ?? "builtin"} disabled={live} onChange={(event) => onChange({ ...form, startMode: event.target.value as StartMode })}>
+              {modes.map((mode) => <option key={mode} value={mode}>{taskText(lang, mode === "monitor" ? "monitorStart" : mode === "builtin" ? "builtin" : mode)}</option>)}
+            </Select>
+          </Field>
+          <label className="check span-2">
+            <input type="checkbox" checked={form.testMode === true} disabled={live && form.testMode === true} onChange={(event) => onChange({ ...form, testMode: event.target.checked })} />
+            <span>{taskText(lang, "testMode")}</span>
+          </label>
+          <label className="check span-2">
+            <input type="checkbox" checked={form.confirmPurchase} disabled={live && !form.confirmPurchase} onChange={(event) => onChange({ ...form, confirmPurchase: event.target.checked })} />
+            <span>{taskText(lang, "confirm")}</span>
+          </label>
+        </>
+      )}
+      {selectedStore && !selectedStore.implemented ? (
+        <Banner tone="info">{selectedStore.name} is registered, and starting a task records that checkout is not implemented yet.</Banner>
+      ) : null}
+      {settings ? <TaskOverrides form={form} settings={settings} onChange={onChange} /> : null}
+      <div className="actions span-2">
+        <button className="primary" type="submit" disabled={busy}>{form.id ? "Save task" : "Create task"}</button>
+        <button type="button" onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
+  )
+}
+
+function freshTask(settings: Settings | null): TaskInput {
+  const form = emptyForm()
+  if (!settings) return form
+  return { ...form, testMode: resolveModule(form.store, moduleScope(settings)).testMode.value }
+}
+
+function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings: Settings; onChange: (next: TaskInput) => void }) {
+  const lang = settings.language === "es" ? "es" : "en"
+  const resolved = resolveModule(form.store, moduleScope(settings), form.overrides)
+  function setNumber(key: "monitorDelayMs" | "retryDelayMs" | "maxRetries" | "blockBackoffMs", raw: string) {
+    const overrides = { ...form.overrides }
+    if (!raw.trim()) delete overrides[key]
+    else overrides[key] = Math.round(Number(raw))
+    onChange({ ...form, overrides })
+  }
+  return (
+    <div className="span-2">
+      <h2>{moduleText(lang, "overrides")}</h2>
+      <p>{moduleText(lang, "overrideHint")} {moduleText(lang, "monitorDelayMs")}: {resolved.monitorDelayMs.value} ms · {sourceLabel(lang, resolved.monitorDelayMs.source)}. {moduleText(lang, "maxRetries")}: {resolved.maxRetries.value} · {sourceLabel(lang, resolved.maxRetries.source)}.</p>
+      <div className="form-grid">
+        <Field label={moduleText(lang, "monitorDelayMs")}>
+          <TextInput value={form.overrides?.monitorDelayMs ?? ""} placeholder={String(resolved.monitorDelayMs.value)} onChange={(event) => setNumber("monitorDelayMs", event.target.value)} />
+        </Field>
+        <Field label={moduleText(lang, "retryDelayMs")}>
+          <TextInput value={form.overrides?.retryDelayMs ?? ""} placeholder={String(resolved.retryDelayMs.value)} onChange={(event) => setNumber("retryDelayMs", event.target.value)} />
+        </Field>
+        <Field label={moduleText(lang, "maxRetries")}>
+          <TextInput value={form.overrides?.maxRetries ?? ""} placeholder={String(resolved.maxRetries.value)} onChange={(event) => setNumber("maxRetries", event.target.value)} />
+        </Field>
+        <Field label={moduleText(lang, "blockBackoffMs")}>
+          <TextInput value={form.overrides?.blockBackoffMs ?? ""} placeholder={String(resolved.blockBackoffMs.value)} onChange={(event) => setNumber("blockBackoffMs", event.target.value)} />
+        </Field>
+        <Field label={taskText(lang, "jitter")}>
+          <TextInput type="number" min={0} max={40} value={form.jitterPct ?? ""} placeholder={String(settings.monitorJitterPct)} onChange={(event) => onChange({ ...form, jitterPct: event.target.value === "" ? null : Number(event.target.value) })} />
+        </Field>
+        <Field label={taskText(lang, "zip")}>
+          <TextInput value={form.overrides?.zips ?? ""} placeholder={resolved.zips.value || taskText(lang, "inherit")} onChange={(event) => {
+            const overrides = { ...form.overrides }
+            if (!event.target.value.trim()) delete overrides.zips
+            else overrides.zips = event.target.value
+            onChange({ ...form, overrides })
+          }} />
+        </Field>
+        <Field label={taskText(lang, "soldBy")}>
+          <Select value={form.overrides?.soldBy ?? ""} onChange={(event) => {
+            const overrides = { ...form.overrides }
+            if (!event.target.value) delete overrides.soldBy
+            else overrides.soldBy = event.target.value as "retailer" | "any"
+            onChange({ ...form, overrides })
+          }}>
+            <option value="">{taskText(lang, "inherit")} · {resolved.soldBy.value}</option>
+            <option value="retailer">{taskText(lang, "retailer")}</option>
+            <option value="any">{taskText(lang, "anySeller")}</option>
+          </Select>
+        </Field>
+        {form.kind !== "monitor" ? (
+          <Field label={taskText(lang, "atc")}>
+            <Select value={form.overrides?.atcMode ?? ""} onChange={(event) => {
+              const overrides = { ...form.overrides }
+              if (!event.target.value) delete overrides.atcMode
+              else overrides.atcMode = event.target.value as "fast" | "standard"
+              onChange({ ...form, overrides })
+            }}>
+              <option value="">{taskText(lang, "inherit")} · {resolved.atcMode.value}</option>
+              <option value="fast">Fast</option>
+              <option value="standard">Standard</option>
+            </Select>
+          </Field>
+        ) : null}
+      </div>
+    </div>
+  )
 }

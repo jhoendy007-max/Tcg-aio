@@ -1,12 +1,13 @@
-import { app, BrowserWindow, safeStorage, session } from "electron"
+import { app, BrowserWindow, safeStorage, session, shell } from "electron"
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
 import { Database } from "../engine/database"
 import { AlertService, relayRestockUrl as relayUrl } from "../engine/alerts"
+import { warmTaskMonitors } from "../engine/bench"
 import { defaultHttp } from "../engine/http"
 import { refreshStoreSession } from "../engine/store-browser"
-import { postDiscord } from "../engine/discord"
+import { postDiscord, postGroupDiscord } from "../engine/discord"
 import { ChallengeGate } from "../engine/challenge-gate"
 import { TaskService } from "../engine/task-runner"
 import { channels } from "../shared/ipc"
@@ -16,13 +17,15 @@ import { projectTask } from "../phone/protocol"
 import { PhoneServer } from "../phone/server"
 import { createRegistry } from "../stores/registry"
 import { warmupDue } from "../engine/session-care"
+import { moduleScope, resolveModule } from "../shared/module-settings"
 import { storeName } from "../shared/stores"
 import { createChallengeController } from "./challenge-window"
 import { createSessionBrowser, type SessionBrowser } from "./session-window"
 import { createUpdateController } from "./auto-update"
 import { planDrops } from "../engine/drops"
 import { HandsFree } from "../engine/hands-free"
-import { openImap } from "../engine/imap"
+import { openMailbox } from "../engine/imap"
+import { readStoreCode } from "../engine/mail-read"
 import { reportZone, shouldRelaunch } from "../engine/watchdog"
 import { dayKey } from "../engine/limits"
 import { cookieForVault, vaultScan } from "../engine/vault"
@@ -100,7 +103,7 @@ if (gotLock) void app.whenReady().then(async () => {
     current: () => challenge.current()
   }, {
     open: (id) => sessions!.open(id)
-  }), {
+  }, (url) => shell.openExternal(url)), {
     onDevices: () => {
       if (phone) window?.webContents.send(channels.phoneEvent, phone.status())
     }
@@ -119,12 +122,20 @@ if (gotLock) void app.whenReady().then(async () => {
       profileName: notice.profileName,
       detail: notice.detail,
       orderId: notice.orderId,
+      price: notice.price,
+      url: notice.url,
+      imageUrl: notice.imageUrl,
+      inStock: notice.inStock,
       ts: Date.now()
     })
-    const webhook = db.getSettings().discordWebhook
-    if (!webhook) return false
-    await postDiscord(webhook, notice)
-    return true
+    const settings = db.getSettings()
+    let delivered = false
+    if (settings.discordWebhook) {
+      await postDiscord(settings.discordWebhook, notice)
+      delivered = true
+    }
+    await postGroupDiscord(settings, notice)
+    return delivered
   }
   runner = new TaskService(
     db,
@@ -137,7 +148,8 @@ if (gotLock) void app.whenReady().then(async () => {
     publish,
     defaultHttp,
     gate,
-    refreshStoreSession
+    refreshStoreSession,
+    (store) => readStoreCode(db, openMailbox, store)
   )
   alerts = new AlertService(db, () => runner, publish, defaultHttp)
   desktop.setRestock((authorization, alternate, body) => alerts!.ingestHttp(authorization, alternate, body))
@@ -168,7 +180,7 @@ if (gotLock) void app.whenReady().then(async () => {
     window?.webContents.send(channels.updatesEvent, status)
   })
   registerIpc(db, runner, registry, () => window, desktop, alerts, challenge, sessions, updates, applyBoot)
-  hands = new HandsFree(db, runner, (id) => sessions!.warm(id), publish, defaultHttp, openImap)
+  hands = new HandsFree(db, runner, (id) => sessions!.warm(id), publish, defaultHttp, (input) => openMailbox(input))
   if (db.getSettings().resumeOnLaunch) hands.resumeInterrupted()
   applyBoot(db.getSettings())
   installCrashRelaunch(db)
@@ -193,6 +205,7 @@ if (gotLock) void app.whenReady().then(async () => {
     void hands?.heal()
     void hands?.learned()
     void hands?.track()
+    void hands?.watchMail()
     void hands?.maybeReport()
     scanVault()
   }, 60_000)
@@ -294,6 +307,8 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
             // A page that fails to load does not erase the saved session.
           }
         }
+        const matched = db.listTasks().filter((task) => plan.taskIds.includes(task.id))
+        await warmTaskMonitors(defaultHttp, matched, db.listProxyGroups()).catch(() => undefined)
         await publish({ kind: "drop", storeName: "Session Keeper", sku: plan.name, profileName: "Drop", detail: "Session Keeper opened the store pages before the drop." })
       }
       if (plan.action === "start") {
@@ -328,7 +343,11 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
 async function warmNext(db: Database, publish: (notice: Notice) => Promise<boolean>): Promise<void> {
   const settings = db.getSettings()
   if (!settings.sessionWarmup || !sessions) return
-  const due = db.listAccounts().find((account) => account.hasSession && account.sessionState !== "expired" && warmupDue(account.lastWarmAt, settings.sessionWarmupMin, Date.now()))
+  const due = db.listAccounts().find((account) => {
+    if (!account.hasSession || account.sessionState === "expired") return false
+    const minutes = resolveModule(account.store, moduleScope(settings)).sessionRefreshMin.value
+    return warmupDue(account.lastWarmAt, minutes, Date.now())
+  })
   if (!due) return
   try {
     const result = await sessions.warm(due.id)

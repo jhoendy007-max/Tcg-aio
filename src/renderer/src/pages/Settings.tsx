@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
-import { DEFAULT_SETTINGS, type Settings, type SettingsPayload } from "../../../shared/types"
-import { Banner, Field, TextInput } from "../components/ui"
+import { DEFAULT_SETTINGS, type LicenseView, type Settings, type SettingsPayload } from "../../../shared/types"
+import { Banner, Field, Select, TextInput } from "../components/ui"
+import { MailSettings } from "./MailSettings"
+import { applyTheme } from "../theme"
 import { errorText, unwrap } from "../lib"
 
 export function SettingsPage() {
@@ -11,6 +13,15 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false)
   const [token, setToken] = useState("")
   const [hasToken, setHasToken] = useState(false)
+  const [passphrase, setPassphrase] = useState("")
+  const [backupToken, setBackupToken] = useState("")
+  const [hasBackupToken, setHasBackupToken] = useState(false)
+  const [license, setLicense] = useState<LicenseView | null>(null)
+  const [licenseKey, setLicenseKey] = useState("")
+  const [adminToken, setAdminToken] = useState("")
+  const [holder, setHolder] = useState("")
+  const [seats, setSeats] = useState(1)
+  const [minted, setMinted] = useState("")
 
   useEffect(() => {
     void unwrap(window.aio.settings.get())
@@ -20,6 +31,8 @@ export function SettingsPage() {
       })
       .catch((err) => setError(errorText(err)))
     void unwrap(window.aio.updates.get()).then((status) => setHasToken(status.hasToken)).catch(() => undefined)
+    void unwrap(window.aio.backup.saveToken({ action: "keep", token: "" })).then((status) => setHasBackupToken(status.hasToken)).catch(() => undefined)
+    void unwrap(window.aio.license.get()).then(setLicense).catch(() => undefined)
   }, [])
 
   async function save(event: React.FormEvent) {
@@ -31,12 +44,32 @@ export function SettingsPage() {
       const next = await unwrap(window.aio.settings.save(form))
       setPayload(next)
       setForm(next.settings)
+      applyTheme(next.settings)
+      window.dispatchEvent(new CustomEvent("tcgaio-settings", { detail: next.settings }))
       setMessage("Settings saved.")
     } catch (err) {
       setError(errorText(err))
     } finally {
       setBusy(false)
     }
+  }
+
+  async function readLogo(file: File | undefined) {
+    setError("")
+    if (!file) return
+    if (file.size > 90_000) {
+      setError("The logo image is too large. Use a file under about 80 KB.")
+      return
+    }
+    const mime = file.type === "image/png" || file.type === "image/jpeg" || file.type === "image/webp" ? file.type : ""
+    if (!mime) {
+      setError("The logo has to be a PNG, JPEG, or WebP image.")
+      return
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    let binary = ""
+    for (const byte of bytes) binary += String.fromCharCode(byte)
+    setForm((current) => ({ ...current, logoDataUrl: `data:${mime};base64,${btoa(binary)}` }))
   }
 
   async function testWebhook() {
@@ -66,8 +99,54 @@ export function SettingsPage() {
       {message ? <Banner tone="info">{message}</Banner> : null}
       {payload ? <div className="card security">{payload.security.description}</div> : null}
       <form className="card form-grid" onSubmit={save}>
+        <div className="span-2">
+          <h2>Appearance</h2>
+          <p className="hint">Theme, accent, and the name in the sidebar. The logo stays on this PC.</p>
+        </div>
+        <Field label="Theme">
+          <Select value={form.theme} onChange={(event) => { const theme: Settings["theme"] = event.target.value === "light" ? "light" : "dark"; const next = { ...form, theme }; setForm(next); applyTheme(next) }}>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </Select>
+        </Field>
+        <Field label="Task table">
+          <Select value={form.taskView} onChange={(event) => setForm({ ...form, taskView: event.target.value === "compact" ? "compact" : "detailed" })}>
+            <option value="detailed">Detailed</option>
+            <option value="compact">Compact</option>
+          </Select>
+        </Field>
+        <fieldset className="span-2">
+          <legend>Accent</legend>
+          <div className="swatches">
+            {(["gold", "blue", "green", "rose"] as const).map((accent) => (
+              <label key={accent} className="swatch">
+                <input type="radio" name="accent" value={accent} checked={form.accent === accent} onChange={() => { const next = { ...form, accent }; setForm(next); applyTheme(next) }} />
+                <span>{accent}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <Field label="App name" hint="Shown in the sidebar. Up to 24 characters.">
+          <TextInput value={form.appName} maxLength={24} onChange={(event) => setForm({ ...form, appName: event.target.value })} />
+        </Field>
+        <Field label="Logo" hint="PNG, JPEG, or WebP under about 80 KB. Leave it empty to keep the mark.">
+          <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void readLogo(event.target.files?.[0])} />
+        </Field>
+        {form.logoDataUrl ? <img className="brand-logo" src={form.logoDataUrl} alt="Current logo" /> : null}
+        {form.logoDataUrl ? <button type="button" onClick={() => setForm({ ...form, logoDataUrl: "" })}>Remove logo</button> : null}
+        <label className="check span-2">
+          <input type="checkbox" checked={form.successSound} onChange={(event) => setForm({ ...form, successSound: event.target.checked })} />
+          <span>Play a short sound when a checkout succeeds. This stays off until you turn it on.</span>
+        </label>
         <Field className="span-2" label="Discord webhook" hint="https://discord.com/api/webhooks/… Success, failure, and challenge pauses are posted here. Card data is not.">
           <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
+        </Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.groupDiscord} onChange={(event) => setForm({ ...form, groupDiscord: event.target.checked })} />
+          <span>Also post restocks and successful checkouts to a shared group webhook. This stays off until you turn it on. The group post leaves out profile, email, card, and proxy details.</span>
+        </label>
+        <Field className="span-2" label="Group webhook" hint="A different https://discord.com/api/webhooks/… URL. Nothing is sent here while the switch above is off.">
+          <TextInput value={form.groupWebhook} onChange={(event) => setForm({ ...form, groupWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
         </Field>
         <label className="check span-2">
           <input type="checkbox" checked={form.testMode} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
@@ -170,6 +249,19 @@ export function SettingsPage() {
         <Field label="Target store ID"><TextInput value={form.targetStoreId} onChange={(event) => setForm({ ...form, targetStoreId: event.target.value })} required /></Field>
         <Field label="Target ZIP"><TextInput value={form.targetZip} onChange={(event) => setForm({ ...form, targetZip: event.target.value })} required /></Field>
         <Field label="Target state"><TextInput value={form.targetState} maxLength={2} onChange={(event) => setForm({ ...form, targetState: event.target.value })} required /></Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.licenseRequired} onChange={(event) => setForm({ ...form, licenseRequired: event.target.checked })} />
+          <span>Require a license before tasks start. Leave this off for personal use. The license server never receives card, password, or session data.</span>
+        </label>
+        <Field className="span-2" label="License server" hint="Optional https URL, or http://127.0.0.1 when the server is this PC. No token in the URL.">
+          <TextInput value={form.licenseServerUrl} onChange={(event) => setForm({ ...form, licenseServerUrl: event.target.value })} placeholder="https://licenses.example.com" autoComplete="off" />
+        </Field>
+        <Field className="span-2" label="License public key" hint="The seller's public key. Not a secret. The private key stays on the PC that mints keys.">
+          <TextInput value={form.licensePublicKey} onChange={(event) => setForm({ ...form, licensePublicKey: event.target.value })} autoComplete="off" />
+        </Field>
+        <Field className="span-2" label="Backup URL" hint="Optional https link you control. The file stored there is ciphertext. Do not put the token in the URL.">
+          <TextInput value={form.backupUrl} onChange={(event) => setForm({ ...form, backupUrl: event.target.value })} placeholder="https://example.com/tcgaio-backup" autoComplete="off" />
+        </Field>
         <Field label="Target API key" hint="Leave blank to use the key embedded in Target's web app. It can change when the site deploys.">
           <TextInput value={form.targetApiKey} onChange={(event) => setForm({ ...form, targetApiKey: event.target.value })} autoComplete="off" />
         </Field>
@@ -177,6 +269,142 @@ export function SettingsPage() {
           <button className="primary" type="submit" disabled={busy}>Save settings</button>
           <button type="button" onClick={() => void testWebhook()} disabled={busy}>Send test webhook</button>
         </div>
+      </form>
+      <MailSettings />
+      <form className="card stack" onSubmit={(event) => event.preventDefault()}>
+        <div>
+          <h2>Encrypted backup</h2>
+          <p className="hint">Settings, tasks, profiles, accounts, and proxies are sealed with your passphrase. Card numbers, passwords, and sessions stay inside that ciphertext. The passphrase is not saved, and this PC's phone pairing is not replaced on restore. A cloud copy is the same sealed file at the backup URL.</p>
+        </div>
+        <Field label="Passphrase" hint="8 or more characters. You need this same passphrase to restore.">
+          <TextInput type="password" autoComplete="off" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+        </Field>
+        <Field label="Upload token" hint={hasBackupToken ? "A token is saved on this PC. It is not written into the backup." : "Optional. Sent only as a bearer token to your backup URL."}>
+          <TextInput type="password" autoComplete="off" value={backupToken} onChange={(event) => setBackupToken(event.target.value)} />
+        </Field>
+        <div className="actions">
+          <button type="button" disabled={busy} onClick={() => void (async () => {
+            setBusy(true)
+            setError("")
+            setMessage("")
+            try {
+              const result = await unwrap(window.aio.backup.exportFile(passphrase))
+              const blob = new Blob([result.file], { type: "application/octet-stream" })
+              const url = URL.createObjectURL(blob)
+              const link = document.createElement("a")
+              link.href = url
+              link.download = "tcgaio.tcgaio-backup"
+              link.click()
+              URL.revokeObjectURL(url)
+              setPassphrase("")
+              setMessage("Encrypted backup downloaded. Keep the passphrase with you, not in the file.")
+            } catch (err) {
+              setError(errorText(err))
+            } finally {
+              setBusy(false)
+            }
+          })()}>Download backup</button>
+          <button type="button" disabled={busy} onClick={() => document.getElementById("backup-file")?.click()}>Restore from file</button>
+          <input id="backup-file" type="file" accept=".tcgaio-backup,application/json" hidden onChange={(event) => {
+            const file = event.target.files?.[0]
+            event.target.value = ""
+            if (!file) return
+            setBusy(true)
+            setError("")
+            void file.text().then((text) => unwrap(window.aio.backup.restoreFile(passphrase, text))).then(() => {
+              setPassphrase("")
+              setMessage("Backup restored on this PC. Phone pairing was left as it was.")
+              return unwrap(window.aio.settings.get())
+            }).then((next) => {
+              if (!next) return
+              setPayload(next)
+              setForm(next.settings)
+              applyTheme(next.settings)
+            }).catch((err) => setError(errorText(err))).finally(() => setBusy(false))
+          }} />
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.backup.saveToken({ action: backupToken ? "replace" : "clear", token: backupToken })).then((status) => {
+            setHasBackupToken(status.hasToken)
+            setBackupToken("")
+            setMessage(status.hasToken ? "Backup token saved on this PC." : "Backup token removed.")
+          }).catch((err) => setError(errorText(err)))}>{backupToken ? "Save upload token" : "Remove upload token"}</button>
+          <button type="button" disabled={busy} onClick={() => void (async () => {
+            setBusy(true)
+            setError("")
+            try {
+              await unwrap(window.aio.settings.save(form))
+              await unwrap(window.aio.backup.upload(passphrase))
+              setPassphrase("")
+              setMessage("Encrypted backup uploaded. The host received ciphertext only.")
+            } catch (err) {
+              setError(errorText(err))
+            } finally {
+              setBusy(false)
+            }
+          })()}>Upload</button>
+          <button type="button" disabled={busy} onClick={() => void (async () => {
+            setBusy(true)
+            setError("")
+            try {
+              await unwrap(window.aio.backup.download(passphrase))
+              const next = await unwrap(window.aio.settings.get())
+              setPayload(next)
+              setForm(next.settings)
+              applyTheme(next.settings)
+              setPassphrase("")
+              setMessage("Encrypted backup downloaded and restored.")
+            } catch (err) {
+              setError(errorText(err))
+            } finally {
+              setBusy(false)
+            }
+          })()}>Download from URL</button>
+        </div>
+      </form>
+      <form className="card stack" onSubmit={(event) => event.preventDefault()}>
+        <div>
+          <h2>License</h2>
+          <p className="hint">Optional. This PC is {license?.machineId ?? "…"}. Activation sends the license key, this machine id, and the app version. It does not send cards, passwords, cookies, or sessions. Leave required off unless you are distributing the app.</p>
+        </div>
+        <Field label="License key">
+          <TextInput type="password" autoComplete="off" value={licenseKey} onChange={(event) => setLicenseKey(event.target.value)} />
+        </Field>
+        <p className="hint">{license?.activated ? `Activated for ${license.holder}.` : "This PC is not activated."}</p>
+        <div className="actions">
+          <button type="button" disabled={busy} onClick={() => void (async () => {
+            setBusy(true)
+            setError("")
+            try {
+              await unwrap(window.aio.settings.save(form))
+              const next = await unwrap(window.aio.license.activate(licenseKey))
+              setLicense(next)
+              setLicenseKey("")
+              setMessage("This PC is activated.")
+            } catch (err) {
+              setError(errorText(err))
+            } finally {
+              setBusy(false)
+            }
+          })()}>Activate this PC</button>
+        </div>
+        <Field label="Admin token" hint={license?.hasAdmin ? "An admin token is saved on this PC." : "Set one before minting or starting the local server."}>
+          <TextInput type="password" autoComplete="off" value={adminToken} onChange={(event) => setAdminToken(event.target.value)} />
+        </Field>
+        <Field label="Holder"><TextInput value={holder} onChange={(event) => setHolder(event.target.value)} /></Field>
+        <Field label="Seats"><TextInput type="number" min={1} max={50} value={seats} onChange={(event) => setSeats(Number(event.target.value))} /></Field>
+        <div className="actions">
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.saveAdmin({ action: adminToken ? "replace" : "clear", token: adminToken })).then((next) => { setLicense(next); setAdminToken(""); setMessage(next.hasAdmin ? "Admin token saved on this PC." : "Admin token removed.") }).catch((err) => setError(errorText(err)))}>{adminToken ? "Save admin token" : "Remove admin token"}</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.generate()).then((next) => { setLicense(next); setForm((current) => ({ ...current, licensePublicKey: next.publicKey })); setMessage("License identity created. Copy the public key to other PCs. The private key stays here.") }).catch((err) => setError(errorText(err)))}>Create identity</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.mint({ holder, seats, expiresAt: null })).then((next) => { setLicense(next); setMinted(next.key); setMessage("License key created. Copy it now. It is not a card number.") }).catch((err) => setError(errorText(err)))}>Mint key</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.serve({ action: "start", port: 8756 })).then((next) => setMessage(next.url ? `License server listening on ${next.url}. Other PCs need an https address in front of it.` : "License server stopped.")).catch((err) => setError(errorText(err)))}>Start local server</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.serve({ action: "stop" })).then(() => setMessage("License server stopped.")).catch((err) => setError(errorText(err)))}>Stop server</button>
+        </div>
+        {minted ? <p className="hint">New key: {minted}</p> : null}
+        {(license?.issued ?? []).map((row) => (
+          <div key={row.id} className="actions">
+            <span>{row.holder} · {row.seats} seats · {row.machines.length} PCs{row.revoked ? " · revoked" : ""}</span>
+            <button type="button" disabled={busy || row.revoked} onClick={() => void unwrap(window.aio.license.revoke(row.id)).then(setLicense).catch((err) => setError(errorText(err)))}>Revoke</button>
+          </div>
+        ))}
       </form>
       <form className="card stack" onSubmit={(event) => {
         event.preventDefault()

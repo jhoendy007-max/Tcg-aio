@@ -1,9 +1,10 @@
 import { attachSession } from "../../engine/block-recovery"
-import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
+import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
   cartError,
   isChallenge,
@@ -120,7 +121,7 @@ async function runBandai(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
       ctx.log("warn", stock.reason)
-      await ctx.sleep(ctx.settings.monitorDelayMs)
+      await ctx.sleep(retryWait(ctx))
       continue
     }
     if (stock.kind !== "ok") return asResult(stock)
@@ -137,6 +138,8 @@ async function runBandai(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
+    if (await holdMonitorOnly(ctx)) continue
+    await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, reading, page)
     if (cart.kind === "oos" || cart.kind === "retry") {
@@ -156,7 +159,7 @@ async function runBandai(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (started.kind === "retry") {
       ctx.log("warn", started.reason)
       ctx.phase("monitoring")
-      await ctx.sleep(ctx.settings.monitorDelayMs)
+      await ctx.sleep(retryWait(ctx))
       continue
     }
     if (started.kind !== "ok") {
@@ -185,7 +188,8 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
   }
   const reading = readStock(response.value.body, sku)
   if (reading) {
-    noteWatch(ctx, reading)
+    reading.imageUrl = productImage(response.value.body) || undefined
+    noteWatch(ctx, { ...reading, url: page })
     return { kind: "ok", value: reading }
   }
   if (response.value.status === 404) {

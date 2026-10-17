@@ -68,6 +68,25 @@ describe("discord webhooks", () => {
     expect(JSON.stringify(body)).not.toContain("4242424242424242")
     expect(JSON.stringify(body)).toContain("Order: 100")
   })
+
+  it("adds price, stock, link, and image to the embed", () => {
+    const body = buildDiscordBody({
+      kind: "alert",
+      storeName: "Target",
+      sku: "88897904",
+      profileName: "Home",
+      detail: "In stock",
+      price: 49.99,
+      inStock: true,
+      url: "https://www.target.com/p/-/A-88897904",
+      imageUrl: "https://cdn.example/p.jpg"
+    })
+    const text = JSON.stringify(body)
+    expect(text).toContain("Price: $49.99")
+    expect(text).toContain("Stock: in stock")
+    expect(text).toContain("https://www.target.com/p/-/A-88897904")
+    expect(text).toContain("https://cdn.example/p.jpg")
+  })
 })
 
 describe("sessions and stock", () => {

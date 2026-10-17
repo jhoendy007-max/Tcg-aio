@@ -5,7 +5,12 @@ export const STORE_IDS = [
   "pokemon-center",
   "amazon",
   "crunchyroll",
-  "bandai"
+  "bandai",
+  "gamestop",
+  "barnes-noble",
+  "costco",
+  "sams",
+  "tcgplayer"
 ] as const
 
 export type StoreId = (typeof STORE_IDS)[number]
@@ -194,6 +199,23 @@ export function isActiveStatus(status: TaskStatus): boolean {
   return ACTIVE_STATUSES.includes(status)
 }
 
+export type TaskKind = "monitor" | "checkout"
+export type StartMode = "manual" | "scheduled" | "monitor" | "restock" | "builtin"
+
+export interface TaskRole {
+  kind: TaskKind
+  keywords: string
+  priceCap: number | null
+  webhook: string
+  activeHours: string
+  linkedCheckoutIds: string[]
+  checkoutDelayMs: number | null
+  maxPrice: number | null
+  startMode: StartMode
+  linkedMonitorId: string | null
+  jitterPct: number | null
+}
+
 export interface PublicTask {
   id: string
   store: StoreId
@@ -208,6 +230,29 @@ export interface PublicTask {
   testMode: boolean
   /** Optional label so a drop can start every task in the group. */
   group: string
+  /** Lower numbers appear first. Missing values sort with the newest tasks. */
+  rank?: number
+  /** Optional https image. A monitor can fill this from the store's product payload. */
+  imageUrl?: string
+  /** Watch stock and notify. Never add to cart. True for monitor tasks. */
+  monitorOnly?: boolean
+  /** Fields this task sets itself. Blank fields use the store page. */
+  overrides?: TaskOverrides
+  kind?: TaskKind
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  linkedCheckoutIds?: string[]
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  startMode?: StartMode
+  linkedMonitorId?: string | null
+  jitterPct?: number | null
+  /** Last shared stock-read time, in milliseconds. */
+  monitorMs?: number
+  /** Milliseconds from an in-stock reading to the add-to-cart call. */
+  detectToCartMs?: number
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -228,10 +273,53 @@ export interface TaskInput {
   confirmPurchase: boolean
   testMode?: boolean
   group?: string
+  imageUrl?: string
+  monitorOnly?: boolean
+  overrides?: TaskOverrides
+  kind?: TaskKind
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  linkedCheckoutIds?: string[]
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  startMode?: StartMode
+  linkedMonitorId?: string | null
+  jitterPct?: number | null
 }
+
+export type QueueMode = "wait" | "skip" | "pause"
+export type AtcMode = "fast" | "standard"
+export type SoldByMode = "retailer" | "any"
+
+/** Saved values for one store. Absent keys use the recommended default. */
+export interface ModuleRecord {
+  monitorDelayMs?: number
+  retryDelayMs?: number
+  rateLimitMs?: number
+  endpoint?: string
+  zips?: string
+  storeIds?: string
+  queue?: QueueMode
+  atcMode?: AtcMode
+  soldBy?: SoldByMode
+  sessionRefreshMin?: number
+  maxRetries?: number
+  testMode?: boolean
+  blockBackoffMs?: number
+  useGlobal?: Array<"monitorDelayMs" | "retryDelayMs" | "rateLimitMs" | "zips" | "storeIds" | "sessionRefreshMin" | "maxRetries" | "testMode" | "blockBackoffMs">
+}
+
+/** Set on a task. These beat the store page, which beats global Settings. */
+export type TaskOverrides = Omit<ModuleRecord, "useGlobal">
 
 export interface Settings {
   discordWebhook: string
+  /** Opt-in feed for a shared server. Off until the user turns it on. */
+  groupDiscord: boolean
+  /** Separate from the personal webhook. Empty posts nowhere. */
+  groupWebhook: string
   monitorDelayMs: number
   targetStoreId: string
   targetZip: string
@@ -291,10 +379,35 @@ export interface Settings {
   healthReportTime: string
   /** IANA timezone for budgets and the daily report. Blank uses UTC. */
   healthReportZone: string
+  theme: "dark" | "light"
+  accent: "gold" | "blue" | "green" | "rose"
+  appName: string
+  /** data:image URL, or empty. */
+  logoDataUrl: string
+  successSound: boolean
+  taskView: "compact" | "detailed"
+  wizardDone: boolean
+  language: "en" | "es"
+  /** Public OAuth client id for Sign in with Google. Not a secret. */
+  googleMailClientId: string
+  /** Public OAuth client id for Sign in with Microsoft. Not a secret. */
+  microsoftMailClientId: string
+  /** https URL the user owns. The upload token is not stored here. */
+  backupUrl: string
+  /** Optional https license server. Loopback http is allowed only for this PC. */
+  licenseServerUrl: string
+  /** When on, tasks do not start until this PC has an unexpired license. */
+  licenseRequired: boolean
+  /** Seller's public key. Not a secret. The private key is not stored here. */
+  licensePublicKey: string
+  /** Per-store defaults. Missing stores use the recommended values. */
+  modules: Partial<Record<StoreId, ModuleRecord>>
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   discordWebhook: "",
+  groupDiscord: false,
+  groupWebhook: "",
   monitorDelayMs: 3500,
   targetStoreId: "1881",
   targetZip: "10001",
@@ -328,7 +441,22 @@ export const DEFAULT_SETTINGS: Settings = {
   maxPerAccount: 0,
   storePurchaseLimits: "",
   healthReportTime: "",
-  healthReportZone: ""
+  healthReportZone: "",
+  theme: "dark",
+  accent: "gold",
+  appName: "TCGAIO",
+  logoDataUrl: "",
+  successSound: false,
+  taskView: "detailed",
+  wizardDone: false,
+  language: "en",
+  googleMailClientId: "",
+  microsoftMailClientId: "",
+  backupUrl: "",
+  licenseServerUrl: "",
+  licenseRequired: false,
+  licensePublicKey: "",
+  modules: {}
 }
 
 export interface SecurityInfo {
@@ -339,6 +467,18 @@ export interface SecurityInfo {
 export interface SettingsPayload {
   settings: Settings
   security: SecurityInfo
+}
+
+export interface LicenseView {
+  machineId: string
+  publicKey: string
+  hasPrivateKey: boolean
+  hasAdmin: boolean
+  activated: boolean
+  holder: string
+  expiresAt: number | null
+  seats: number
+  issued: Array<{ id: string; holder: string; seats: number; expiresAt: number | null; revoked: boolean; machines: string[] }>
 }
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string }
@@ -380,6 +520,10 @@ export interface Notice {
   profileName: string
   detail: string
   orderId?: string
+  price?: number | null
+  url?: string
+  imageUrl?: string
+  inStock?: boolean
 }
 
 export interface TaskTemplate {
@@ -478,6 +622,52 @@ export interface ImapInput {
   mailbox: string
   password: string
   passwordAction: "keep" | "replace" | "clear"
+}
+
+export type MailProvider = "gmail" | "outlook" | "icloud" | "yahoo" | "custom"
+
+export interface MailboxView {
+  id: string
+  name: string
+  enabled: boolean
+  provider: MailProvider
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  mailbox: string
+  hasPassword: boolean
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+  auth: "password" | "xoauth2"
+  lastOkAt: number | null
+  lastError: string
+  folders: string[]
+}
+
+export interface MailboxInput {
+  id?: string
+  name: string
+  enabled: boolean
+  provider: MailProvider
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  mailbox: string
+  password: string
+  passwordAction: "keep" | "replace" | "clear"
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+}
+
+export interface MailboxStatus {
+  accounts: number
+  enabled: number
+  ready: number
+  lastError: string
 }
 
 export interface RestockRule {
@@ -635,6 +825,8 @@ export interface CheckoutRecord {
   profileId?: string
   quantity?: number
   detail: string
+  /** Current value of this purchase. Empty until the user enters one. */
+  marketValue?: number | null
 }
 
 export interface StoreAnalytics {
@@ -681,9 +873,60 @@ export interface AnalyticsReport {
     blocked: number
     blockRate: number
     avgMs: number
-    byStore: { store: StoreId; samples: number; blocked: number; blockRate: number; avgMs: number }[]
+    p50Ms: number
+    p95Ms: number
+    byStore: { store: StoreId; samples: number; blocked: number; blockRate: number; avgMs: number; p50Ms: number; p95Ms: number }[]
   }
+  stockLog: { store: StoreId; sku: string; at: number; price: number | null; title: string; kind?: string; imageUrl?: string; url?: string }[]
   restockHints: { store: StoreId; sku: string; hourAst: number; samples: number; warmupMin: number; detail: string }[]
+}
+
+export interface InventoryRow {
+  id: string
+  at: number
+  store: StoreId
+  sku: string
+  product: string
+  quantity: number
+  cost: number | null
+  value: number | null
+  profit: number | null
+}
+
+export interface InventoryReport {
+  rows: InventoryRow[]
+  purchases: number
+  cost: number
+  value: number
+  profit: number
+  unvalued: number
+}
+
+export interface ResaleQuery {
+  title: string
+  /** Total paid. Null when the user has not entered a cost. */
+  cost: number | null
+  quantity: number
+  /** Percent of the sale price kept back for fees. Zero means fees are not subtracted. */
+  feePct: number
+  tcgProductId: string
+}
+
+export interface ResaleQuote {
+  title: string
+  cost: number | null
+  quantity: number
+  feePct: number
+  tcgMarket: number | null
+  tcgNote: string
+  ebayMedian: number | null
+  ebayCount: number
+  ebayNote: string
+  tcgProfit: number | null
+  ebayProfit: number | null
+  draft: string
+  /** Always false. The quote is a draft and is not sent to a marketplace. */
+  posted: false
 }
 
 export interface BulkShared {
@@ -707,6 +950,15 @@ export interface BulkEdit {
   confirmPurchase?: boolean
   testMode?: boolean
   group?: string
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  jitterPct?: number | null
+  monitorDelayMs?: number | null
+  retryDelayMs?: number | null
 }
 
 export interface UpdateStatus {

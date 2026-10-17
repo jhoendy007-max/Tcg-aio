@@ -35,10 +35,14 @@ export async function notify(notice: PhoneNotice): Promise<void> {
                 : notice.kind === "paused"
                 ? "Needs attention"
                 : "Checkout failed"
+  const price = typeof notice.price === "number" ? ` · $${notice.price.toFixed(2)}` : ""
+  const image = notice.imageUrl?.startsWith("https://") ? notice.imageUrl : ""
   await Notifications.scheduleNotificationAsync({
     content: {
       title,
-      body: `${notice.storeName} · ${notice.sku}\n${notice.detail}`.slice(0, 240)
+      body: `${notice.storeName} · ${notice.sku}${price}\n${notice.detail}`.slice(0, 240),
+      data: { url: notice.url ?? "", imageUrl: image },
+      ...(image ? { attachments: [{ identifier: "product", url: image, type: "image" }] } : {})
     },
     trigger: null
   })

@@ -5,16 +5,20 @@ import type { Cipher } from "./cipher"
 import { parseSession } from "./session"
 import { cookieHeader } from "./challenge"
 import { parseKeywordQuery } from "./keywords"
-import { assertStore, cleanAddress, cleanCard, cleanEmail, cleanPhone, cleanSettings } from "./validate"
+import { assertStore, cleanAddress, cleanCard, cleanEmail, cleanImageUrl, cleanPhone, cleanSettings } from "./validate"
 import { AppError } from "../shared/errors"
 import { parseProxyList } from "../shared/proxy"
 import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
+import { openBackup, sealBackup, type BackupAccount, type BackupDocument, type BackupProfile } from "./backup"
+import { assertLicenseAllowed, bindMachine, createLicenseIdentity, readLicense, signLicense, type IssuedLicense, type LicenseStatus } from "./license"
 import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent } from "./monitor"
 import { vaultFlag } from "./vault"
 import { parseAstLocal } from "./time"
+import { cleanModuleRecord, cleanTaskOverrides, parseModulePreset } from "../shared/module-settings"
+import { cleanRole, normalizeRole, structuralChange } from "../shared/task-role"
 import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
 import { redact } from "../shared/redact"
 import type {
@@ -58,9 +62,14 @@ import type {
   OrderStatus,
   ImapView,
   ImapInput,
+  MailboxInput,
+  MailboxStatus,
+  MailboxView,
+  MailProvider,
   VaultLink,
   PublicVault
 } from "../shared/types"
+import { isMailProvider, providerForHost } from "../shared/mail"
 
 interface ProfileRecord extends PublicProfile {
   cardSecret: string
@@ -111,6 +120,26 @@ interface UpdateFile {
   checkedAt: number
 }
 
+interface LicenseRow extends IssuedLicense {
+  tokenSecret: string
+}
+
+interface LicenseFile {
+  publicKey: string
+  privateSecret?: string
+  adminSecret?: string
+  issued: LicenseRow[]
+  activation?: {
+    tokenSecret: string
+    licenseId: string
+    holder: string
+    expiresAt: number | null
+    seats: number
+    machineId: string
+    activatedAt: number
+  }
+}
+
 interface DbFile {
   version: 1
   pcId: string
@@ -125,6 +154,8 @@ interface DbFile {
   schedules?: DropSchedule[]
   checkouts?: CheckoutRecord[]
   updates?: UpdateFile
+  backup?: { tokenSecret?: string }
+  license?: LicenseFile
   stockLog?: RestockEvent[]
   monitorSamples?: MonitorSample[]
   templates?: TaskTemplate[]
@@ -133,7 +164,30 @@ interface DbFile {
   learnedKeys?: string[]
   reportDay?: string
   imap?: { enabled: boolean; host: string; port: number; user: string; mailbox: string; passwordSecret?: string }
+  mailboxes?: MailboxFile[]
   vault?: VaultLink[]
+}
+
+interface MailboxFile {
+  id: string
+  name: string
+  enabled: boolean
+  provider: MailProvider
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  mailbox: string
+  passwordSecret?: string
+  refreshSecret?: string
+  auth: "password" | "xoauth2"
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+  lastOkAt: number | null
+  lastError: string
+  folders: string[]
+  seenAlertIds: string[]
 }
 
 export class Database {
@@ -168,6 +222,8 @@ export class Database {
       schedules: normalizeSchedules(parsed.schedules),
       checkouts: normalizeCheckouts(parsed.checkouts),
       updates: normalizeUpdates(parsed.updates),
+      backup: normalizeBackup(parsed.backup),
+      license: normalizeLicense(parsed.license),
       stockLog: Array.isArray(parsed.stockLog) ? parsed.stockLog.slice(0, 400) : [],
       monitorSamples: Array.isArray(parsed.monitorSamples) ? parsed.monitorSamples.slice(0, 500) : [],
       templates: Array.isArray(parsed.templates) ? parsed.templates : [],
@@ -176,9 +232,11 @@ export class Database {
       learnedKeys: Array.isArray(parsed.learnedKeys) ? parsed.learnedKeys.slice(0, 200) : [],
       reportDay: typeof parsed.reportDay === "string" ? parsed.reportDay : "",
       imap: normalizeImap(parsed.imap),
+      mailboxes: loadMailboxes(parsed.mailboxes, parsed.imap),
       vault: Array.isArray(parsed.vault) ? parsed.vault : []
     }
-    let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
+    const migratedMail = !Array.isArray(parsed.mailboxes) && (this.data.mailboxes?.length ?? 0) > 0
+    let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices) || migratedMail
     const interrupted: string[] = []
     for (const task of this.data.tasks) {
       task.group = typeof task.group === "string" ? task.group : ""
@@ -206,6 +264,24 @@ export class Database {
     this.data.settings = cleanSettings(input)
     this.flush()
     return this.getSettings()
+  }
+
+  saveModule(store: StoreId, input: unknown): Settings {
+    const settings = this.getSettings()
+    const modules = { ...settings.modules, [store]: cleanModuleRecord(store, input) }
+    return this.saveSettings({ ...settings, modules })
+  }
+
+  resetModule(store: StoreId): Settings {
+    const settings = this.getSettings()
+    const modules = { ...settings.modules }
+    delete modules[store]
+    return this.saveSettings({ ...settings, modules })
+  }
+
+  importModule(text: string): Settings {
+    const preset = parseModulePreset(text)
+    return this.saveModule(preset.store, preset.record)
   }
 
   listProfiles(): PublicProfile[] {
@@ -481,14 +557,52 @@ export class Database {
   }
 
   listTasks(): PublicTask[] {
-    return this.data.tasks.map(cloneTask)
+    return this.data.tasks.map(cloneTask).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || b.createdAt - a.createdAt)
+  }
+
+  reorderTasks(ids: string[]): PublicTask[] {
+    const known = new Set(this.data.tasks.map((task) => task.id))
+    let rank = 0
+    for (const id of ids) {
+      if (!known.has(id)) continue
+      const task = this.data.tasks.find((item) => item.id === id)
+      if (!task) continue
+      task.rank = rank
+      rank += 1
+      known.delete(id)
+    }
+    for (const id of known) {
+      const task = this.data.tasks.find((item) => item.id === id)
+      if (task) task.rank = rank
+      rank += 1
+    }
+    this.flush()
+    return this.listTasks()
   }
 
   saveTask(input: TaskInput): PublicTask {
     const existing = input.id ? this.requireTask(input.id) : undefined
+    if (existing && isActiveStatus(existing.status)) {
+      const blocked = structuralChange(existing, input)
+      if (blocked) throw new AppError(blocked)
+      const role = cleanRole({ ...existing, ...input, store: existing.store, sku: existing.sku, quantity: existing.quantity, profileId: existing.profileId, accountId: existing.accountId }, existing)
+      const next: PublicTask = {
+        ...existing,
+        ...role,
+        monitorOnly: role.kind === "monitor",
+        group: input.group === undefined ? existing.group : input.group.trim().slice(0, 40),
+        overrides: cleanTaskOverrides(existing.store, input.overrides === undefined ? existing.overrides : input.overrides),
+        testMode: input.testMode === undefined ? existing.testMode : input.testMode === true || existing.testMode
+      }
+      this.data.tasks = this.data.tasks.map((item) => (item.id === next.id ? next : item))
+      this.syncLinks(next)
+      this.flush()
+      return cloneTask(next)
+    }
     const task = this.taskFrom(input, existing)
     if (existing) this.data.tasks = this.data.tasks.map((item) => (item.id === task.id ? task : item))
     else this.data.tasks.unshift(task)
+    this.syncLinks(task)
     this.flush()
     return cloneTask(task)
   }
@@ -555,57 +669,140 @@ export class Database {
         errors.push({ id, error: "Task not found." })
         continue
       }
-      if (isActiveStatus(task.status)) {
-        errors.push({ id, error: "Stop the task before editing it." })
-        continue
+      try {
+        const roleNow = normalizeRole(task)
+        const active = isActiveStatus(task.status)
+        let nextQuantity = task.quantity
+        let profileId = task.profileId
+        let accountId = task.accountId
+        let proxyGroupId = task.proxyGroupId
+        let confirmPurchase = task.confirmPurchase
+        let testMode = task.testMode
+        let structuralError = ""
+        const monitorFields = Boolean(input.profileId) || Boolean(input.accountId) || input.confirmPurchase !== undefined || input.proxyGroupId !== undefined
+        if (roleNow.kind === "monitor" && monitorFields) structuralError = "A monitor task does not use a profile, account, or checkout proxy."
+        const wantsStructure = input.quantity !== undefined || monitorFields || input.testMode === false
+        if (!structuralError && active && wantsStructure) structuralError = "Stop the task before changing the quantity, profile, account, or proxy."
+        if (!structuralError && roleNow.kind === "checkout") {
+          if (account && account.store !== task.store) throw new AppError("Choose an account for the same store as the task.")
+          if (quantity !== undefined) nextQuantity = quantity
+          if (input.profileId) profileId = input.profileId
+          if (account) accountId = account.id
+          if (input.proxyGroupId !== undefined) proxyGroupId = input.proxyGroupId || null
+          if (input.confirmPurchase !== undefined) confirmPurchase = input.confirmPurchase
+          if (input.testMode === false) testMode = false
+        } else if (!structuralError && quantity !== undefined) {
+          nextQuantity = quantity
+        }
+        if (input.testMode === true) testMode = true
+        const role = cleanRole({
+          ...task,
+          quantity: nextQuantity,
+          profileId,
+          accountId,
+          proxyGroupId,
+          confirmPurchase,
+          testMode,
+          keywords: input.keywords === undefined ? task.keywords : input.keywords,
+          priceCap: input.priceCap === undefined ? task.priceCap : input.priceCap,
+          webhook: input.webhook === undefined ? task.webhook : input.webhook,
+          activeHours: input.activeHours === undefined ? task.activeHours : input.activeHours,
+          checkoutDelayMs: input.checkoutDelayMs === undefined ? task.checkoutDelayMs : input.checkoutDelayMs,
+          maxPrice: input.maxPrice === undefined ? task.maxPrice : input.maxPrice,
+          jitterPct: input.jitterPct === undefined ? task.jitterPct : input.jitterPct
+        }, task)
+        let overrides = task.overrides
+        if (input.monitorDelayMs !== undefined || input.retryDelayMs !== undefined) {
+          const next = { ...task.overrides }
+          if (input.monitorDelayMs !== undefined) {
+            if (!input.monitorDelayMs) delete next.monitorDelayMs
+            else next.monitorDelayMs = Math.round(input.monitorDelayMs)
+          }
+          if (input.retryDelayMs !== undefined) {
+            if (!input.retryDelayMs) delete next.retryDelayMs
+            else next.retryDelayMs = Math.round(input.retryDelayMs)
+          }
+          overrides = cleanTaskOverrides(task.store, next)
+        }
+        task.quantity = nextQuantity
+        task.profileId = profileId
+        task.accountId = accountId
+        task.proxyGroupId = proxyGroupId
+        task.confirmPurchase = confirmPurchase
+        task.testMode = testMode
+        task.group = input.group === undefined ? task.group : input.group.trim().slice(0, 40)
+        task.monitorOnly = role.kind === "monitor"
+        task.overrides = overrides
+        Object.assign(task, role)
+        if (structuralError) errors.push({ id, error: structuralError })
+        updated.push(id)
+      } catch (err) {
+        errors.push({ id, error: err instanceof Error ? err.message : "Could not edit the task." })
       }
-      if (account && account.store !== task.store) {
-        errors.push({ id, error: "Choose an account for the same store as the task." })
-        continue
-      }
-      if (quantity !== undefined) task.quantity = quantity
-      if (input.profileId) task.profileId = input.profileId
-      if (account) task.accountId = account.id
-      if (input.proxyGroupId !== undefined) task.proxyGroupId = input.proxyGroupId || null
-      if (input.confirmPurchase !== undefined) task.confirmPurchase = input.confirmPurchase
-      if (input.testMode !== undefined) task.testMode = input.testMode
-      if (input.group !== undefined) task.group = input.group.trim().slice(0, 40)
-      updated.push(id)
     }
     if (updated.length) this.flush()
     return { updated, errors }
   }
 
   private taskFrom(input: TaskInput, existing: PublicTask | undefined): PublicTask {
-    if (existing && isActiveStatus(existing.status)) throw new AppError("Stop the task before editing it.")
+    const role = cleanRole(input, existing)
     const store = assertStore(input.store)
     const sku = input.sku.trim()
-    if (!sku) throw new AppError("Product SKU or URL is required.")
-    const quantity = Math.round(Number(input.quantity))
+    if (!sku && !role.keywords) throw new AppError("Product SKU, URL, or keywords are required.")
+    const quantity = role.kind === "monitor" ? Math.max(1, Math.min(12, Math.round(Number(input.quantity) || 1))) : Math.round(Number(input.quantity))
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
-    this.requireProfile(input.profileId)
-    const account = this.requireAccount(input.accountId)
-    if (account.store !== store) throw new AppError("Choose an account for the same store as the task.")
+    let profileId = input.profileId || ""
+    let accountId = input.accountId || ""
+    if (role.kind === "checkout") {
+      this.requireProfile(profileId)
+      const account = this.requireAccount(accountId)
+      if (account.store !== store) throw new AppError("Choose an account for the same store as the task.")
+    } else {
+      profileId = ""
+      accountId = ""
+    }
     if (input.proxyGroupId) this.getProxyGroup(input.proxyGroupId)
     if (input.monitorProxyGroupId) this.getProxyGroup(input.monitorProxyGroupId)
+    const ranks = this.data.tasks.map((task) => task.rank ?? 0)
     return {
       id: existing?.id ?? randomUUID(),
       store,
       sku,
       quantity,
-      profileId: input.profileId,
-      accountId: input.accountId,
-      proxyGroupId: input.proxyGroupId || null,
-      monitorProxyGroupId: input.monitorProxyGroupId === undefined ? existing?.monitorProxyGroupId ?? null : input.monitorProxyGroupId || null,
-      confirmPurchase: Boolean(input.confirmPurchase),
+      profileId,
+      accountId,
+      proxyGroupId: role.kind === "monitor" ? null : input.proxyGroupId || null,
+      monitorProxyGroupId: role.kind === "monitor"
+        ? input.monitorProxyGroupId || input.proxyGroupId || null
+        : input.monitorProxyGroupId === undefined ? existing?.monitorProxyGroupId ?? null : input.monitorProxyGroupId || null,
+      confirmPurchase: role.kind === "monitor" ? false : Boolean(input.confirmPurchase),
       testMode: input.testMode === true,
       group: (input.group ?? existing?.group ?? "").trim().slice(0, 40),
+      rank: existing?.rank ?? (ranks.length ? Math.min(...ranks) - 1 : 0),
+      imageUrl: input.imageUrl === undefined ? existing?.imageUrl ?? "" : cleanImageUrl(input.imageUrl),
+      monitorOnly: role.kind === "monitor",
+      overrides: cleanTaskOverrides(store, input.overrides === undefined ? existing?.overrides : input.overrides),
+      ...role,
       status: existing?.status === "paused" ? "paused" : "idle",
       detail: existing?.detail ?? "",
       logs: existing?.logs ?? [],
       createdAt: existing?.createdAt ?? Date.now(),
       startedAt: existing?.startedAt,
       finishedAt: existing?.finishedAt
+    }
+  }
+
+  private syncLinks(task: PublicTask): void {
+    if (task.kind !== "monitor") return
+    const linked = new Set(task.linkedCheckoutIds ?? [])
+    for (const other of this.data.tasks) {
+      if (other.id === task.id || other.kind === "monitor") continue
+      if (linked.has(other.id)) {
+        other.linkedMonitorId = task.id
+        if (!other.startMode || other.startMode === "builtin" || other.startMode === "manual") other.startMode = "monitor"
+      } else if (other.linkedMonitorId === task.id) {
+        other.linkedMonitorId = null
+      }
     }
   }
 
@@ -688,6 +885,7 @@ export class Database {
   analytics(): AnalyticsReport {
     const report = summarize(this.data.checkouts ?? [])
     report.monitor = summarizeMonitor(this.data.monitorSamples ?? [])
+    report.stockLog = (this.data.stockLog ?? []).slice(0, 40)
     report.restockHints = suggestWarmups(this.data.stockLog ?? [])
     return report
   }
@@ -733,6 +931,389 @@ export class Database {
   updateToken(): string {
     const secret = this.data.updates?.tokenSecret
     return secret ? this.cipher.decrypt(secret) : ""
+  }
+
+  setBackupToken(action: "keep" | "replace" | "clear", token: string): void {
+    if (!this.data.backup) this.data.backup = {}
+    if (action === "clear") this.data.backup.tokenSecret = undefined
+    if (action === "replace") {
+      const trimmed = token.trim()
+      if (trimmed.length < 8 || /[\r\n\s]/.test(trimmed)) throw new AppError("Backup token is invalid.")
+      this.data.backup.tokenSecret = this.cipher.encrypt(trimmed)
+    }
+    this.flush()
+  }
+
+  hasBackupToken(): boolean {
+    return Boolean(this.data.backup?.tokenSecret)
+  }
+
+  licenseView(): {
+    machineId: string
+    publicKey: string
+    hasPrivateKey: boolean
+    hasAdmin: boolean
+    activated: boolean
+    holder: string
+    expiresAt: number | null
+    seats: number
+    issued: IssuedLicense[]
+  } {
+    const file = this.data.license
+    const activation = file?.activation
+    const active = Boolean(activation && activation.machineId === this.data.pcId && (activation.expiresAt === null || activation.expiresAt > Date.now()))
+    return {
+      machineId: this.data.pcId,
+      publicKey: this.getSettings().licensePublicKey,
+      hasPrivateKey: Boolean(file?.privateSecret),
+      hasAdmin: Boolean(file?.adminSecret),
+      activated: active,
+      holder: activation?.holder ?? "",
+      expiresAt: activation?.expiresAt ?? null,
+      seats: activation?.seats ?? 0,
+      issued: (file?.issued ?? []).map((row) => ({
+        id: row.id,
+        holder: row.holder,
+        seats: row.seats,
+        expiresAt: row.expiresAt,
+        revoked: row.revoked,
+        machines: [...row.machines]
+      }))
+    }
+  }
+
+  generateLicenseIdentity(): { publicKey: string } {
+    const identity = createLicenseIdentity()
+    const file = this.licenseFile()
+    file.publicKey = identity.publicKey
+    file.privateSecret = this.cipher.encrypt(identity.privateKey)
+    this.saveSettings({ ...this.getSettings(), licensePublicKey: identity.publicKey })
+    return { publicKey: identity.publicKey }
+  }
+
+  setLicenseAdmin(action: "keep" | "replace" | "clear", token: string): void {
+    const file = this.licenseFile()
+    if (action === "clear") file.adminSecret = undefined
+    if (action === "replace") {
+      const trimmed = token.trim()
+      if (trimmed.length < 8 || /[\r\n\s]/.test(trimmed)) throw new AppError("Admin token is invalid.")
+      file.adminSecret = this.cipher.encrypt(trimmed)
+    }
+    this.flush()
+  }
+
+  licenseAdminToken(): string {
+    const secret = this.data.license?.adminSecret
+    return secret ? this.cipher.decrypt(secret) : ""
+  }
+
+  mintLicense(input: { holder: string; seats: number; expiresAt: number | null }): { id: string; key: string } {
+    const file = this.licenseFile()
+    if (!file.privateSecret) throw new AppError("Generate a license identity on this PC first.")
+    const signed = signLicense(this.cipher.decrypt(file.privateSecret), input)
+    file.issued.unshift({
+      id: signed.payload.id,
+      holder: signed.payload.holder,
+      seats: signed.payload.seats,
+      expiresAt: signed.payload.exp,
+      revoked: false,
+      machines: [],
+      tokenSecret: this.cipher.encrypt(signed.token)
+    })
+    this.flush()
+    return { id: signed.payload.id, key: signed.token }
+  }
+
+  licenseToken(id: string): string {
+    const row = this.licenseFile().issued.find((item) => item.id === id)
+    if (!row) throw new AppError("That license was not found.")
+    return this.cipher.decrypt(row.tokenSecret)
+  }
+
+  revokeLicense(id: string): void {
+    const row = this.licenseFile().issued.find((item) => item.id === id)
+    if (!row) throw new AppError("That license was not found.")
+    row.revoked = true
+    if (this.data.license?.activation?.licenseId === id) this.data.license.activation = undefined
+    this.flush()
+  }
+
+  activateLicense(key: string): LicenseStatus {
+    const publicKey = this.getSettings().licensePublicKey || this.licenseFile().publicKey
+    if (!publicKey) throw new AppError("Paste the seller's public key first.")
+    const payload = readLicense(key, publicKey)
+    assertLicenseAllowed(payload)
+    const row = this.licenseFile().issued.find((item) => item.id === payload.id)
+    if (row) {
+      const bound = bindMachine(row, this.data.pcId)
+      row.machines = bound.machines
+    }
+    this.licenseFile().activation = {
+      tokenSecret: this.cipher.encrypt(key),
+      licenseId: payload.id,
+      holder: payload.holder,
+      expiresAt: payload.exp,
+      seats: payload.seats,
+      machineId: this.data.pcId,
+      activatedAt: Date.now()
+    }
+    this.flush()
+    return { licenseId: payload.id, holder: payload.holder, expiresAt: payload.exp, seats: payload.seats }
+  }
+
+  saveRemoteActivation(key: string, status: LicenseStatus): LicenseStatus {
+    this.licenseFile().activation = {
+      tokenSecret: this.cipher.encrypt(key),
+      licenseId: status.licenseId,
+      holder: status.holder,
+      expiresAt: status.expiresAt,
+      seats: status.seats,
+      machineId: this.data.pcId,
+      activatedAt: Date.now()
+    }
+    this.flush()
+    return status
+  }
+
+  licensePublicKey(): string {
+    return this.getSettings().licensePublicKey || this.data.license?.publicKey || ""
+  }
+
+  findLicenseToken(key: string): IssuedLicense | null {
+    const file = this.data.license
+    if (!file) return null
+    for (const row of file.issued) {
+      if (this.cipher.decrypt(row.tokenSecret) !== key) continue
+      return { id: row.id, holder: row.holder, seats: row.seats, expiresAt: row.expiresAt, revoked: row.revoked, machines: [...row.machines] }
+    }
+    return null
+  }
+
+  rememberLicense(record: IssuedLicense, key: string): void {
+    const file = this.licenseFile()
+    const row = file.issued.find((item) => item.id === record.id)
+    if (row) {
+      row.holder = record.holder
+      row.seats = record.seats
+      row.expiresAt = record.expiresAt
+      row.revoked = record.revoked
+      row.machines = [...record.machines]
+    } else {
+      file.issued.unshift({ ...record, machines: [...record.machines], tokenSecret: this.cipher.encrypt(key) })
+    }
+    this.flush()
+  }
+
+  licenseAllows(): boolean {
+    if (!this.getSettings().licenseRequired) return true
+    const activation = this.data.license?.activation
+    if (!activation || activation.machineId !== this.data.pcId) return false
+    if (activation.expiresAt !== null && activation.expiresAt <= Date.now()) return false
+    const row = this.data.license?.issued.find((item) => item.id === activation.licenseId)
+    if (row?.revoked) return false
+    return true
+  }
+
+  private licenseFile(): LicenseFile {
+    if (!this.data.license) this.data.license = emptyLicense()
+    return this.data.license
+  }
+
+  backupToken(): string {
+    const secret = this.data.backup?.tokenSecret
+    return secret ? this.cipher.decrypt(secret) : ""
+  }
+
+  backupFile(passphrase: string): string {
+    return sealBackup(this.backupDocument(), passphrase)
+  }
+
+  restoreFile(file: string, passphrase: string): void {
+    this.restoreBackup(openBackup(file, passphrase))
+  }
+
+  backupDocument(): BackupDocument {
+    return {
+      v: 1,
+      settings: this.getSettings(),
+      tasks: this.listTasks().map((task) => {
+        const active = isActiveStatus(task.status)
+        return {
+          ...cloneTask(task),
+          status: active ? "paused" : task.status,
+          detail: active ? "Paused for backup." : task.detail,
+          logs: task.logs.slice(-20).map((line) => ({ ...line, message: redact(line.message).slice(0, 240) }))
+        }
+      }),
+      profiles: this.data.profiles.map((record) => {
+        const card = this.decryptCard(record)
+        return {
+          id: record.id,
+          name: record.name,
+          email: record.email,
+          phone: record.phone,
+          shipping: record.shipping,
+          billing: record.billing,
+          cardName: record.cardName,
+          last4: record.last4,
+          expMonth: record.expMonth,
+          expYear: record.expYear,
+          card
+        }
+      }),
+      accounts: this.data.accounts.map((record) => ({
+        id: record.id,
+        store: record.store,
+        label: record.label,
+        username: record.username,
+        password: record.passwordSecret ? this.cipher.decrypt(record.passwordSecret) : undefined,
+        session: record.sessionSecret ? (JSON.parse(this.cipher.decrypt(record.sessionSecret)) as SessionCookies) : undefined,
+        proxyGroupId: record.proxyGroupId ?? null,
+        sessionState: record.sessionState ?? "missing",
+        lastWarmAt: record.lastWarmAt ?? null
+      })),
+      proxyGroups: this.listProxyGroups(),
+      schedules: this.listSchedules(),
+      templates: this.listTemplates()
+    }
+  }
+
+  restoreBackup(doc: BackupDocument): void {
+    if (!doc || doc.v !== 1) throw new AppError("This backup was written by a newer TCGAIO version.")
+    const snapshot = structuredClone(this.data)
+    try {
+      const keptPc = this.data.pcId
+      const devices = this.data.devices.map((device) => ({ ...device }))
+      const updates = this.data.updates ? { ...this.data.updates } : undefined
+      const backup = this.data.backup ? { ...this.data.backup } : undefined
+      const checkouts = (this.data.checkouts ?? []).map((row) => ({ ...row }))
+      this.data.settings = cleanSettings({ ...DEFAULT_SETTINGS, ...doc.settings })
+      this.data.profiles = (doc.profiles ?? []).slice(0, 200).map((profile) => this.profileFromBackup(profile))
+      this.data.accounts = (doc.accounts ?? []).slice(0, 200).map((account) => this.accountFromBackup(account))
+      this.data.proxyGroups = (doc.proxyGroups ?? []).slice(0, 50).map((group) => cleanBackupProxy(group))
+      const knownProxies = new Set(this.data.proxyGroups.map((group) => group.id))
+      for (const account of this.data.accounts) {
+        if (account.proxyGroupId && !knownProxies.has(account.proxyGroupId)) account.proxyGroupId = null
+      }
+      const tasks: PublicTask[] = []
+      this.data.tasks = []
+      for (const raw of (doc.tasks ?? []).slice(0, 400)) {
+        if (!raw || typeof raw.id !== "string") throw new AppError("A task in the backup is incomplete.")
+        const input = taskInputFromBackup(raw)
+        if (input.proxyGroupId && !knownProxies.has(input.proxyGroupId)) input.proxyGroupId = null
+        if (input.monitorProxyGroupId && !knownProxies.has(input.monitorProxyGroupId)) input.monitorProxyGroupId = null
+        const stub: PublicTask = {
+          ...raw,
+          status: "idle",
+          detail: "Restored from backup.",
+          logs: Array.isArray(raw.logs) ? raw.logs.slice(-20) : [],
+          createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
+        }
+        tasks.push(this.taskFrom(input, stub))
+      }
+      this.data.tasks = tasks
+      for (const task of tasks) this.syncLinks(task)
+      const schedules = normalizeSchedules(doc.schedules)
+      const taskIds = new Set(tasks.map((task) => task.id))
+      this.data.schedules = schedules.map((schedule) => ({
+        ...schedule,
+        taskIds: schedule.taskIds.filter((id) => taskIds.has(id))
+      })).filter((schedule) => schedule.taskIds.length || schedule.group)
+      this.data.templates = (doc.templates ?? []).slice(0, 50).map((template) => this.templateFromBackup(template))
+      this.data.pcId = keptPc
+      this.data.devices = devices
+      this.data.updates = updates
+      this.data.backup = backup
+      this.data.checkouts = checkouts
+      this.flush()
+    } catch (err) {
+      this.data = snapshot
+      throw err
+    }
+  }
+
+  private profileFromBackup(input: BackupProfile): ProfileRecord {
+    if (!input?.card) throw new AppError("A profile in the backup is missing its card.")
+    const shipping = cleanAddress(input.shipping, "Shipping")
+    const billing = cleanAddress(input.billing, "Billing")
+    const name = (input.name ?? "").trim()
+    if (!name) throw new AppError("Profile name is required.")
+    const card = cleanCard(
+      { cardName: input.card.name, cardNumber: input.card.number, expMonth: input.card.expMonth, expYear: input.card.expYear, cvv: input.card.cvv },
+      name
+    )
+    return {
+      id: safeId(input.id),
+      name,
+      email: cleanEmail(input.email),
+      phone: cleanPhone(input.phone),
+      shipping,
+      billing,
+      cardName: card.name,
+      last4: card.last4,
+      expMonth: card.expMonth,
+      expYear: card.expYear,
+      cardSecret: this.cipher.encrypt(JSON.stringify(cardSecretFrom(card)))
+    }
+  }
+
+  private accountFromBackup(input: BackupAccount): AccountRecord {
+    const store = assertStore(input.store)
+    const label = (input.label ?? "").trim()
+    if (!label) throw new AppError("Account label is required.")
+    const passwordSecret = input.password ? this.cipher.encrypt(input.password) : undefined
+    const sessionSecret = input.session ? this.cipher.encrypt(JSON.stringify(parseSession(JSON.stringify(input.session)))) : undefined
+    return {
+      id: safeId(input.id),
+      store,
+      label,
+      username: cleanEmail(input.username),
+      passwordSecret,
+      sessionSecret,
+      proxyGroupId: input.proxyGroupId || null,
+      sessionState: sessionSecret ? input.sessionState === "expired" ? "expired" : "saved" : "missing",
+      lastWarmAt: typeof input.lastWarmAt === "number" ? input.lastWarmAt : null
+    }
+  }
+
+  private templateFromBackup(input: TaskTemplate): TaskTemplate {
+    const name = (input?.name ?? "").trim()
+    if (!name) throw new AppError("Template name is required.")
+    const store = input.store ? assertStore(input.store) : ""
+    const profileIds = [...new Set((input.profileIds ?? []).filter(Boolean))]
+    const accountIds = [...new Set((input.accountIds ?? []).filter(Boolean))]
+    if (!profileIds.length || !accountIds.length) throw new AppError("A template in the backup needs a profile and an account.")
+    for (const id of profileIds) this.requireProfile(id)
+    for (const id of accountIds) {
+      const account = this.requireAccount(id)
+      if (store && account.store !== store) throw new AppError("A template account does not match its store.")
+    }
+    if (input.proxyGroupId && !this.data.proxyGroups.some((group) => group.id === input.proxyGroupId)) {
+      input = { ...input, proxyGroupId: null }
+    }
+    const quantity = Math.round(Number(input.quantity))
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
+    const sku = (input.sku ?? "").trim().slice(0, 180)
+    const keywords = (input.keywords ?? "").trim().slice(0, 200)
+    if (!sku && !keywords) throw new AppError("A template needs a SKU or keywords.")
+    return {
+      id: safeId(input.id),
+      name: name.slice(0, 80),
+      enabled: input.enabled !== false,
+      store,
+      sku,
+      keywords,
+      profileIds,
+      accountIds,
+      proxyGroupId: input.proxyGroupId || null,
+      monitorProxyGroupId: input.monitorProxyGroupId || null,
+      quantity,
+      maxPrice: input.maxPrice === null || input.maxPrice === undefined ? null : Number(input.maxPrice),
+      testMode: input.testMode === true,
+      confirmPurchase: input.confirmPurchase === true,
+      group: (input.group ?? "").trim().slice(0, 40),
+      lastFiredAt: typeof input.lastFiredAt === "number" ? input.lastFiredAt : 0
+    }
   }
 
   saveUpdateNotice(notice: { desktopVersion: string | null; phoneVersion: string | null; notes: string }): void {
@@ -813,13 +1394,16 @@ export class Database {
     return cloneTask(this.requireTask(id))
   }
 
-  patchTask(id: string, patch: Partial<Pick<PublicTask, "status" | "detail" | "startedAt" | "finishedAt">> & { log?: PublicTask["logs"][number]; resetLogs?: boolean }): PublicTask {
+  patchTask(id: string, patch: Partial<Pick<PublicTask, "status" | "detail" | "startedAt" | "finishedAt" | "monitorMs" | "detectToCartMs" | "imageUrl">> & { log?: PublicTask["logs"][number]; resetLogs?: boolean }): PublicTask {
     const task = this.requireTask(id)
     if (patch.resetLogs) task.logs = []
     if (patch.status) task.status = patch.status
     if (patch.detail !== undefined) task.detail = patch.detail
     if ("startedAt" in patch) task.startedAt = patch.startedAt
     if ("finishedAt" in patch) task.finishedAt = patch.finishedAt
+    if (typeof patch.monitorMs === "number") task.monitorMs = patch.monitorMs
+    if (typeof patch.detectToCartMs === "number") task.detectToCartMs = patch.detectToCartMs
+    if (patch.imageUrl) task.imageUrl = patch.imageUrl
     if (patch.log) {
       task.logs.push(patch.log)
       if (task.logs.length > 300) task.logs.splice(0, task.logs.length - 300)
@@ -1063,6 +1647,18 @@ export class Database {
     return (this.data.checkouts ?? []).map((record) => ({ ...record }))
   }
 
+  setCheckoutValue(id: string, marketValue: number | null): CheckoutRecord {
+    const record = this.data.checkouts?.find((item) => item.id === id && item.outcome === "success")
+    if (!record) throw new AppError("That purchase was not found.")
+    if (marketValue === null) record.marketValue = null
+    else {
+      if (!Number.isFinite(marketValue) || marketValue < 0 || marketValue > 100_000) throw new AppError("Current value must be a dollar amount.")
+      record.marketValue = Math.round(marketValue * 100) / 100
+    }
+    this.flush()
+    return { ...record }
+  }
+
   listTemplates(): TaskTemplate[] {
     return (this.data.templates ?? []).map((template) => ({ ...template, profileIds: [...template.profileIds], accountIds: [...template.accountIds] }))
   }
@@ -1217,18 +1813,18 @@ export class Database {
   }
 
   imapView(): ImapView {
-    const imap = this.imapFile()
-    return { enabled: imap.enabled, host: imap.host, port: imap.port, user: imap.user, mailbox: imap.mailbox, hasPassword: Boolean(imap.passwordSecret) }
+    const first = this.listMailboxes()[0]
+    if (!first) return { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX", hasPassword: false }
+    return { enabled: first.enabled, host: first.host, port: first.port, user: first.user, mailbox: first.mailbox, hasPassword: first.hasPassword }
   }
 
   imapLogin(): { host: string; port: number; user: string; mailbox: string; password: string } | null {
-    const imap = this.imapFile()
-    if (!imap.enabled || !imap.host || !imap.user || !imap.passwordSecret) return null
-    return { host: imap.host, port: imap.port, user: imap.user, mailbox: imap.mailbox, password: this.cipher.decrypt(imap.passwordSecret) }
+    const login = this.mailboxLogins("orders")[0]
+    if (!login) return null
+    return { host: login.host, port: login.port, user: login.user, mailbox: login.mailbox, password: login.password }
   }
 
   saveImap(input: ImapInput): ImapView {
-    const imap = this.imapFile()
     const host = input.host.trim()
     const user = input.user.trim()
     const mailbox = (input.mailbox || "INBOX").trim() || "INBOX"
@@ -1236,25 +1832,243 @@ export class Database {
     if (input.enabled && (!host || !user)) throw new AppError("Enter the mail host and username before turning mail tracking on.")
     if (host && !/^[A-Za-z0-9.-]{1,253}$/.test(host)) throw new AppError("Mail host must be a hostname.")
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AppError("Mail port must be from 1 to 65535.")
-    if (input.passwordAction === "clear") imap.passwordSecret = undefined
-    if (input.passwordAction === "replace") {
-      const password = input.password
-      if (!password) throw new AppError("Enter the mail password.")
-      imap.passwordSecret = this.cipher.encrypt(password)
-    }
-    if (input.enabled && !imap.passwordSecret) throw new AppError("Save the mail password before turning mail tracking on.")
-    imap.enabled = input.enabled === true
-    imap.host = host
-    imap.port = port
-    imap.user = user.slice(0, 180)
-    imap.mailbox = mailbox.slice(0, 80)
+    const boxes = this.mailboxes()
+    if (!host && !user && input.passwordAction !== "replace" && !boxes[0]) return this.imapView()
+    const row = boxes[0] ?? this.blankMailbox()
+    if (!boxes[0]) boxes.push(row)
+    this.applyPassword(row, input.password, input.passwordAction)
+    if (input.enabled && !row.passwordSecret) throw new AppError("Save the mail password before turning mail tracking on.")
+    row.enabled = input.enabled === true
+    row.host = host.toLowerCase()
+    row.port = port
+    row.secure = true
+    row.user = user.slice(0, 180)
+    row.mailbox = mailbox.slice(0, 80)
+    row.provider = providerForHost(host)
+    row.orders = true
+    if (!row.name || row.name === "Mailbox") row.name = user || "Mailbox"
+    this.syncLegacyImap()
     this.flush()
     return this.imapView()
   }
 
-  private imapFile(): NonNullable<DbFile["imap"]> {
-    if (!this.data.imap) this.data.imap = { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" }
-    return this.data.imap
+  listMailboxes(): MailboxView[] {
+    return this.mailboxes().map((row) => this.toMailboxView(row))
+  }
+
+  mailboxStatus(): MailboxStatus {
+    const rows = this.listMailboxes()
+    const enabled = rows.filter((row) => row.enabled)
+    return {
+      accounts: rows.length,
+      enabled: enabled.length,
+      ready: enabled.filter((row) => row.hasPassword && !row.lastError).length,
+      lastError: rows.find((row) => row.lastError)?.lastError ?? ""
+    }
+  }
+
+  saveMailbox(input: MailboxInput): MailboxView {
+    const host = input.host.trim().toLowerCase()
+    const user = input.user.trim()
+    const mailbox = (input.mailbox || "INBOX").trim() || "INBOX"
+    const port = Math.round(Number(input.port))
+    const provider = isMailProvider(input.provider) ? input.provider : "custom"
+    const name = (input.name || user || "Mailbox").trim().slice(0, 80)
+    if (!host || !user) throw new AppError("Enter the mail host and username.")
+    if (!/^[a-z0-9.-]{1,253}$/.test(host)) throw new AppError("Mail host must be a hostname.")
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AppError("Mail port must be from 1 to 65535.")
+    const boxes = this.mailboxes()
+    const existing = input.id ? boxes.find((row) => row.id === input.id) : undefined
+    if (input.id && !existing) throw new AppError("Mailbox not found.")
+    if (!existing && boxes.length >= 8) throw new AppError("Save at most 8 mailboxes.")
+    const row = existing ?? this.blankMailbox()
+    this.applyPassword(row, input.password, input.passwordAction)
+    if (input.enabled && !row.passwordSecret && !row.refreshSecret) throw new AppError("Save the app password, or sign in, before turning this mailbox on.")
+    row.name = name
+    row.enabled = input.enabled === true
+    row.provider = provider
+    row.host = host
+    row.port = port
+    row.secure = input.secure !== false
+    row.user = user.slice(0, 180)
+    row.mailbox = mailbox.slice(0, 80)
+    row.orders = input.orders === true
+    row.alerts = input.alerts === true
+    row.codes = input.codes === true
+    if (!existing) boxes.push(row)
+    this.syncLegacyImap()
+    this.flush()
+    return this.toMailboxView(row)
+  }
+
+  deleteMailbox(id: string): void {
+    const boxes = this.mailboxes()
+    const next = boxes.filter((row) => row.id !== id)
+    if (next.length === boxes.length) throw new AppError("Mailbox not found.")
+    this.data.mailboxes = next
+    this.syncLegacyImap()
+    this.flush()
+  }
+
+  saveOAuthMailbox(input: { user: string; provider: "gmail" | "outlook"; refreshToken: string; id?: string }): MailboxView {
+    const user = input.user.trim()
+    if (!user || !user.includes("@")) throw new AppError("Enter the email address before signing in.")
+    if (!input.refreshToken || /[\r\n]/.test(input.refreshToken)) throw new AppError("The sign-in did not return a usable token.")
+    const preset = input.provider === "gmail"
+      ? { host: "imap.gmail.com", port: 993 }
+      : { host: "outlook.office365.com", port: 993 }
+    const boxes = this.mailboxes()
+    const existing = (input.id ? boxes.find((row) => row.id === input.id) : undefined) ?? boxes.find((row) => row.user.toLowerCase() === user.toLowerCase() && row.provider === input.provider)
+    if (!existing && boxes.length >= 8) throw new AppError("Save at most 8 mailboxes.")
+    const row = existing ?? this.blankMailbox()
+    row.name = user.slice(0, 80)
+    row.enabled = true
+    row.provider = input.provider
+    row.host = preset.host
+    row.port = preset.port
+    row.secure = true
+    row.user = user.slice(0, 180)
+    row.mailbox = row.mailbox || "INBOX"
+    row.auth = "xoauth2"
+    row.passwordSecret = undefined
+    row.refreshSecret = this.cipher.encrypt(input.refreshToken)
+    row.orders = true
+    row.codes = true
+    row.lastError = ""
+    if (!existing) boxes.push(row)
+    this.syncLegacyImap()
+    this.flush()
+    return this.toMailboxView(row)
+  }
+
+  mailboxLogins(purpose: "orders" | "alerts" | "codes"): MailboxLogin[] {
+    const logins: MailboxLogin[] = []
+    for (const row of this.mailboxes()) {
+      const login = this.loginFrom(row)
+      if (!login || !row.enabled) continue
+      if (purpose === "orders" && !row.orders) continue
+      if (purpose === "alerts" && !row.alerts) continue
+      if (purpose === "codes" && !row.codes) continue
+      logins.push(login)
+    }
+    return logins
+  }
+
+  mailboxSecret(id: string): MailboxLogin | null {
+    const row = this.mailboxes().find((item) => item.id === id)
+    return row ? this.loginFrom(row) : null
+  }
+
+  noteMailbox(id: string, update: { ok: boolean; error?: string; folders?: string[] }): void {
+    const row = this.mailboxes().find((item) => item.id === id)
+    if (!row) return
+    if (update.ok) {
+      row.lastOkAt = Date.now()
+      row.lastError = ""
+    } else if (update.error) {
+      row.lastError = redact(update.error).replace(/\s+/g, " ").trim().slice(0, 280)
+    }
+    if (update.folders) row.folders = update.folders.map((name) => name.slice(0, 80)).filter(Boolean).slice(0, 80)
+    this.flush()
+  }
+
+  claimMailAlert(id: string, uid: string): boolean {
+    const row = this.mailboxes().find((item) => item.id === id)
+    const key = uid.trim().slice(0, 40)
+    if (!row || !key) return false
+    if (row.seenAlertIds.includes(key)) return false
+    row.seenAlertIds = [key, ...row.seenAlertIds].slice(0, 200)
+    this.flush()
+    return true
+  }
+
+  private loginFrom(row: MailboxFile): MailboxLogin | null {
+    const secret = row.auth === "xoauth2" ? row.refreshSecret : row.passwordSecret
+    if (!secret || !row.host || !row.user) return null
+    return {
+      id: row.id,
+      host: row.host,
+      port: row.port,
+      secure: row.secure !== false,
+      user: row.user,
+      password: this.cipher.decrypt(secret),
+      mailbox: row.mailbox || "INBOX",
+      provider: row.provider,
+      auth: row.auth === "xoauth2" ? "xoauth2" : "password"
+    }
+  }
+
+  private mailboxes(): MailboxFile[] {
+    if (!this.data.mailboxes) this.data.mailboxes = []
+    return this.data.mailboxes
+  }
+
+  private blankMailbox(): MailboxFile {
+    return {
+      id: randomUUID(),
+      name: "Mailbox",
+      enabled: false,
+      provider: "custom",
+      host: "",
+      port: 993,
+      secure: true,
+      user: "",
+      mailbox: "INBOX",
+      auth: "password",
+      orders: true,
+      alerts: false,
+      codes: true,
+      lastOkAt: null,
+      lastError: "",
+      folders: [],
+      seenAlertIds: []
+    }
+  }
+
+  private applyPassword(row: MailboxFile, password: string, action: MailboxInput["passwordAction"]): void {
+    if (action === "clear") row.passwordSecret = undefined
+    if (action !== "replace") return
+    if (!password) throw new AppError("Enter the app password.")
+    if (/[\r\n]/.test(password)) throw new AppError("The app password cannot contain a line break.")
+    row.passwordSecret = this.cipher.encrypt(password)
+    row.refreshSecret = undefined
+    row.auth = "password"
+  }
+
+  private toMailboxView(row: MailboxFile): MailboxView {
+    return {
+      id: row.id,
+      name: row.name,
+      enabled: row.enabled,
+      provider: row.provider,
+      host: row.host,
+      port: row.port,
+      secure: row.secure !== false,
+      user: row.user,
+      mailbox: row.mailbox,
+      hasPassword: Boolean(row.passwordSecret || row.refreshSecret),
+      auth: row.auth === "xoauth2" ? "xoauth2" : "password",
+      orders: row.orders,
+      alerts: row.alerts,
+      codes: row.codes,
+      lastOkAt: row.lastOkAt,
+      lastError: row.lastError,
+      folders: [...row.folders]
+    }
+  }
+
+  private syncLegacyImap(): void {
+    const first = this.mailboxes()[0]
+    this.data.imap = first
+      ? {
+          enabled: first.enabled,
+          host: first.host,
+          port: first.port,
+          user: first.user,
+          mailbox: first.mailbox,
+          passwordSecret: first.passwordSecret
+        }
+      : { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" }
   }
 
   private restock(): RestockFile {
@@ -1317,12 +2131,77 @@ function emptyDb(): DbFile {
     learnedKeys: [],
     reportDay: "",
     imap: { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" },
+    mailboxes: [],
     vault: [],
     updates: emptyUpdates()
   }
 }
 
-function normalizeImap(value: DbFile["imap"]): DbFile["imap"] {
+export interface MailboxLogin {
+  id: string
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  password: string
+  mailbox: string
+  provider: MailProvider
+  auth: "password" | "xoauth2"
+}
+
+function loadMailboxes(value: DbFile["mailboxes"], legacy: DbFile["imap"]): MailboxFile[] {
+  if (Array.isArray(value)) return value.map(normalizeMailbox).slice(0, 8)
+  const imap = normalizeImap(legacy)
+  if (!imap.host && !imap.user && !imap.passwordSecret) return []
+  return [{
+    id: randomUUID(),
+    name: imap.user || "Mailbox",
+    enabled: imap.enabled,
+    provider: providerForHost(imap.host),
+    host: imap.host,
+    port: imap.port,
+    secure: true,
+    user: imap.user,
+    mailbox: imap.mailbox,
+    passwordSecret: imap.passwordSecret,
+    auth: "password",
+    orders: true,
+    alerts: false,
+    codes: true,
+    lastOkAt: null,
+    lastError: "",
+    folders: [],
+    seenAlertIds: []
+  }]
+}
+
+function normalizeMailbox(value: Partial<MailboxFile> | undefined): MailboxFile {
+  const host = typeof value?.host === "string" ? value.host : ""
+  const provider = typeof value?.provider === "string" && isMailProvider(value.provider) ? value.provider : providerForHost(host)
+  return {
+    id: typeof value?.id === "string" && value.id ? value.id : randomUUID(),
+    name: typeof value?.name === "string" && value.name ? value.name.slice(0, 80) : "Mailbox",
+    enabled: value?.enabled === true,
+    provider,
+    host,
+    port: typeof value?.port === "number" ? value.port : 993,
+    secure: value?.secure !== false,
+    user: typeof value?.user === "string" ? value.user : "",
+    mailbox: typeof value?.mailbox === "string" && value.mailbox ? value.mailbox : "INBOX",
+    passwordSecret: typeof value?.passwordSecret === "string" ? value.passwordSecret : undefined,
+    refreshSecret: typeof value?.refreshSecret === "string" ? value.refreshSecret : undefined,
+    auth: value?.auth === "xoauth2" ? "xoauth2" : "password",
+    orders: value?.orders !== false,
+    alerts: value?.alerts === true,
+    codes: value?.codes !== false,
+    lastOkAt: typeof value?.lastOkAt === "number" ? value.lastOkAt : null,
+    lastError: typeof value?.lastError === "string" ? value.lastError.slice(0, 180) : "",
+    folders: Array.isArray(value?.folders) ? value.folders.filter((item): item is string => typeof item === "string").slice(0, 80) : [],
+    seenAlertIds: Array.isArray(value?.seenAlertIds) ? value.seenAlertIds.filter((item): item is string => typeof item === "string").slice(0, 200) : []
+  }
+}
+
+function normalizeImap(value: DbFile["imap"]): NonNullable<DbFile["imap"]> {
   return {
     enabled: value?.enabled === true,
     host: typeof value?.host === "string" ? value.host : "",
@@ -1386,7 +2265,94 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 }
 
 function cloneTask(task: PublicTask): PublicTask {
-  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, logs: task.logs.map((line) => ({ ...line })) }
+  const role = normalizeRole(task)
+  return { ...task, ...role, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: role.kind === "monitor" || task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, overrides: task.overrides ? { ...task.overrides } : undefined, logs: task.logs.map((line) => ({ ...line })) }
+}
+
+function emptyLicense(): LicenseFile {
+  return { publicKey: "", issued: [] }
+}
+
+function normalizeLicense(value: LicenseFile | undefined): LicenseFile | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const issued = Array.isArray(value.issued) ? value.issued.filter((row) => row && typeof row.id === "string" && typeof row.tokenSecret === "string").map((row) => ({
+    id: row.id,
+    holder: typeof row.holder === "string" ? row.holder : "",
+    seats: Number.isInteger(row.seats) ? row.seats : 1,
+    expiresAt: typeof row.expiresAt === "number" ? row.expiresAt : null,
+    revoked: row.revoked === true,
+    machines: Array.isArray(row.machines) ? row.machines.filter((id) => typeof id === "string") : [],
+    tokenSecret: row.tokenSecret
+  })) : []
+  const activation = value.activation && typeof value.activation.tokenSecret === "string" && typeof value.activation.machineId === "string" ? value.activation : undefined
+  return {
+    publicKey: typeof value.publicKey === "string" ? value.publicKey : "",
+    privateSecret: typeof value.privateSecret === "string" ? value.privateSecret : undefined,
+    adminSecret: typeof value.adminSecret === "string" ? value.adminSecret : undefined,
+    issued,
+    activation
+  }
+}
+
+function normalizeBackup(value: { tokenSecret?: string } | undefined): { tokenSecret?: string } | undefined {
+  if (!value || typeof value !== "object") return undefined
+  return { tokenSecret: typeof value.tokenSecret === "string" ? value.tokenSecret : undefined }
+}
+
+function safeId(id: string | undefined): string {
+  return typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id) ? id : randomUUID()
+}
+
+function cleanBackupProxy(group: ProxyGroup): ProxyGroup {
+  if (!group || typeof group.name !== "string" || !group.name.trim()) throw new AppError("A proxy group in the backup is incomplete.")
+  const proxies = (group.proxies ?? []).slice(0, 200).map((proxy) => {
+    const port = Math.round(Number(proxy.port))
+    if (!proxy.host || !Number.isInteger(port) || port < 1 || port > 65535) throw new AppError("A proxy in the backup is incomplete.")
+    return {
+      id: safeId(proxy.id),
+      host: String(proxy.host).slice(0, 200),
+      port,
+      username: proxy.username ? String(proxy.username).slice(0, 200) : undefined,
+      password: proxy.password ? String(proxy.password).slice(0, 200) : undefined
+    }
+  })
+  if (!proxies.length) throw new AppError("A proxy group in the backup has no proxies.")
+  return {
+    id: safeId(group.id),
+    name: group.name.trim().slice(0, 80),
+    network: group.network === "residential" ? "residential" : "datacenter",
+    proxies
+  }
+}
+
+function taskInputFromBackup(task: PublicTask): TaskInput {
+  return {
+    id: task.id,
+    store: task.store,
+    sku: task.sku,
+    quantity: task.quantity,
+    profileId: task.profileId,
+    accountId: task.accountId,
+    proxyGroupId: task.proxyGroupId,
+    monitorProxyGroupId: task.monitorProxyGroupId,
+    confirmPurchase: task.confirmPurchase,
+    testMode: task.testMode,
+    group: task.group,
+    imageUrl: task.imageUrl,
+    monitorOnly: task.monitorOnly,
+    overrides: task.overrides,
+    kind: task.kind,
+    keywords: task.keywords,
+    priceCap: task.priceCap,
+    webhook: task.webhook,
+    activeHours: task.activeHours,
+    linkedCheckoutIds: task.linkedCheckoutIds,
+    checkoutDelayMs: task.checkoutDelayMs,
+    maxPrice: task.maxPrice,
+    startMode: task.startMode,
+    linkedMonitorId: task.linkedMonitorId,
+    jitterPct: task.jitterPct
+  }
 }
 
 function emptyUpdates(): UpdateFile {
@@ -1423,7 +2389,11 @@ function normalizeSchedules(value: DropSchedule[] | undefined): DropSchedule[] {
 function normalizeCheckouts(value: CheckoutRecord[] | undefined): CheckoutRecord[] {
   if (!Array.isArray(value)) return []
   const outcomes = new Set<CheckoutOutcome>(["success", "failure", "paused", "tested"])
-  return value.filter((record) => record && typeof record.id === "string" && outcomes.has(record.outcome)).slice(0, 400)
+  return value.filter((record) => record && typeof record.id === "string" && outcomes.has(record.outcome)).slice(0, 400).map((record) => {
+    const marketValue = record.marketValue
+    if (typeof marketValue === "number" && Number.isFinite(marketValue) && marketValue >= 0) return { ...record, marketValue: Math.round(marketValue * 100) / 100 }
+    return { ...record, marketValue: null }
+  })
 }
 
 function normalizeRestock(value: RestockFile | undefined): RestockFile {

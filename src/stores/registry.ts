@@ -9,6 +9,11 @@ import { createPokemonCenterModule } from "./pokemon-center"
 import { createAmazonModule } from "./amazon"
 import { createCrunchyrollModule } from "./crunchyroll"
 import { createBandaiModule } from "./bandai"
+import { createGameStopModule } from "./gamestop"
+import { createBarnesNobleModule } from "./barnes-noble"
+import { createCostcoModule } from "./costco"
+import { createSamsModule } from "./sams"
+import { createTcgplayerModule } from "./tcgplayer"
 
 export function createRegistry(): Map<StoreId, StoreModule> {
   const modules = new Map<StoreId, StoreModule>()
@@ -20,6 +25,11 @@ export function createRegistry(): Map<StoreId, StoreModule> {
   modules.set("amazon", createAmazonModule())
   modules.set("crunchyroll", createCrunchyrollModule())
   modules.set("bandai", createBandaiModule())
+  modules.set("gamestop", createGameStopModule())
+  modules.set("barnes-noble", createBarnesNobleModule())
+  modules.set("costco", createCostcoModule())
+  modules.set("sams", createSamsModule())
+  modules.set("tcgplayer", createTcgplayerModule())
   return modules
 }
 

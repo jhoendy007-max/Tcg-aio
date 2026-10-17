@@ -45,6 +45,13 @@ jobs:
           prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
           files: release/TCGAIO-Session-Sync-*.zip
           overwrite_files: true
+      - name: Publish the desktop tour
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
+          files: release-assets/desktop-home-tasks-phone-tour.mp4
+          overwrite_files: true
 
   windows:
     runs-on: windows-latest

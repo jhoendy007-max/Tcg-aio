@@ -11,6 +11,7 @@ import type {
   Result,
   Settings,
   SettingsPayload,
+  StoreId,
   StoreInfo,
   TaskEvent,
   TaskInput,
@@ -32,8 +33,14 @@ import type {
   TaskTemplate,
   TaskTemplateInput,
   OrderRecord,
+  InventoryReport,
+  ResaleQuery,
+  ResaleQuote,
   ImapView,
+  LicenseView,
   ImapInput,
+  MailboxInput,
+  MailboxView,
   PublicVault
 } from "./types"
 import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
@@ -43,6 +50,7 @@ export interface AioApi {
     list: () => Promise<Result<PublicTask[]>>
     save: (input: TaskInput) => Promise<Result<PublicTask>>
     delete: (id: string) => Promise<Result<{ id: string }>>
+    reorder: (ids: string[]) => Promise<Result<PublicTask[]>>
     start: (id: string) => Promise<Result<{ started: true }>>
     test: (id: string) => Promise<Result<{ started: true }>>
     stop: (id: string) => Promise<Result<{ stopped: true }>>
@@ -75,6 +83,9 @@ export interface AioApi {
     get: () => Promise<Result<SettingsPayload>>
     save: (input: Settings) => Promise<Result<SettingsPayload>>
     testWebhook: () => Promise<Result<{ delivered: true }>>
+    saveModule: (store: StoreId, record: unknown) => Promise<Result<SettingsPayload>>
+    resetModule: (store: StoreId) => Promise<Result<SettingsPayload>>
+    importModule: (text: string) => Promise<Result<SettingsPayload>>
   }
   stores: {
     list: () => Promise<Result<StoreInfo[]>>
@@ -135,6 +146,38 @@ export interface AioApi {
     orders: () => Promise<Result<OrderRecord[]>>
     imap: () => Promise<Result<ImapView>>
     saveImap: (input: ImapInput) => Promise<Result<ImapView>>
+  }
+  mail: {
+    list: () => Promise<Result<MailboxView[]>>
+    save: (input: MailboxInput) => Promise<Result<MailboxView>>
+    delete: (id: string) => Promise<Result<{ id: string }>>
+    test: (id: string) => Promise<Result<MailboxView>>
+    signIn: (input: { provider: "gmail" | "outlook"; user: string }) => Promise<Result<MailboxView>>
+    open: (url: string) => Promise<Result<{ opened: true }>>
+  }
+  resale: {
+    quote: (input: ResaleQuery) => Promise<Result<ResaleQuote>>
+  }
+  inventory: {
+    get: () => Promise<Result<InventoryReport>>
+    setValue: (id: string, value: number | null) => Promise<Result<InventoryReport>>
+    csv: () => Promise<Result<{ csv: string }>>
+  }
+  backup: {
+    exportFile: (passphrase: string) => Promise<Result<{ file: string }>>
+    restoreFile: (passphrase: string, file: string) => Promise<Result<{ restored: true }>>
+    saveToken: (input: { action: "keep" | "replace" | "clear"; token: string }) => Promise<Result<{ hasToken: boolean }>>
+    upload: (passphrase: string) => Promise<Result<{ uploaded: true }>>
+    download: (passphrase: string) => Promise<Result<{ restored: true }>>
+  }
+  license: {
+    get: () => Promise<Result<LicenseView>>
+    generate: () => Promise<Result<LicenseView>>
+    saveAdmin: (input: { action: "keep" | "replace" | "clear"; token: string }) => Promise<Result<LicenseView>>
+    mint: (input: { holder: string; seats: number; expiresAt: number | null }) => Promise<Result<LicenseView & { key: string }>>
+    revoke: (id: string) => Promise<Result<LicenseView>>
+    activate: (key: string) => Promise<Result<LicenseView>>
+    serve: (input: { action: "start" | "stop"; port?: number }) => Promise<Result<{ url: string }>>
   }
   vault: {
     list: () => Promise<Result<PublicVault[]>>

@@ -1,19 +1,22 @@
 # TCGAIO
 
-Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, and Amazon by ASIN or product URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
+Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, Amazon by ASIN or product URL, and Premium Bandai by product code. GameStop, Barnes & Noble, Costco, and Sam's Club watch the product page with your saved session and stop so you can add the item in that browser. TCGplayer Direct watches the public catalog. Pokémon Center and Premium Bandai remain the official US preorder sources. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
 
 Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If a store shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
 
-Test mode, from Settings or a task, runs the real monitor, cart, address, shipping, and payment-token steps and stops before place order. The place-order request is refused by the task HTTP client, so it cannot be sent. A TEST badge shows on the desktop and the phone. Run test starts that path for one task. Store health check sends one read-only GET per store through the selected proxy group.
+Test mode, from Settings or a task, runs the real monitor, cart, address, shipping, and payment-token steps and stops before place order. The place-order request is refused by the task HTTP client, so it cannot be sent. A TEST badge shows on the desktop and the phone. Run test starts that path for one task. Store health check sends one read-only GET per store through the selected proxy group. `npm run bench:monitors -- --n 5` repeats those checks and prints p50, p95, and the success rate. Add `--proxy host:port` to send them through one proxy.
 
 ## What you get
 
-- **Tasks** — store, SKU or URL, quantity, profile, account, proxy group, start/stop, and a live status log.
+- **Home** — active tasks, today's checkouts, spend, success rate, and proxy and session health.
+- **Tasks** — separate monitor and checkout tasks. A monitor watches a SKU, URL, or keywords and can start several linked checkouts. A checkout can start by hand, on a schedule, from a monitor, from a restock alert, or with its own monitor. Delays, caps, hours, and the webhook can change while a task is running. The same editor is on the phone, in English or Spanish. Compact or detailed. Dark, light, and accent colors, plus a name and logo, are in Settings.
+- **Setup** — a first-run wizard for a profile, an account, optional proxies, and one test-mode task. It stays hidden once you have a profile or an account, or after you skip it.
 - **Profiles** — shipping and billing. Card number and CVV are encrypted locally.
 - **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
-- **Settings** — Discord webhook and Target monitor delay, store ID, ZIP, and state.
-- **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. Card numbers and passwords stay on the PC.
+- **Stores** — one settings page per store, with recommended defaults, reset, and JSON presets. A task override wins over the store, which wins over global Settings. The same page is on the phone, in English or Spanish.
+- **Settings** — Discord webhook, Target monitor delay, store ID, ZIP, and state, and read-only IMAP mailboxes. An email address fills the server settings. Google and Microsoft can sign in; iCloud and Yahoo use an app password. The same mail screen is on the phone, in English or Spanish. An encrypted backup uses a passphrase you keep. The optional cloud copy is the same sealed file.
+- **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. One phone can switch among several PCs. Card numbers and passwords stay on the PC.
 - **Session Sync** — a Chrome or Edge extension that sends your own store sign-in to this PC. You link each account. It does not read other sites.
 
 On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Pokémon Center payment fetches a CyberSource Flex capture context with a GET that does not include the card, then posts the encrypted card only to `flex.cybersource.com`. Crunchyroll payment posts the card form only to `api.stripe.com` and sends the store a `pm_` id plus a masked card. Amazon checkout uses the address and payment already saved on the Amazon account and does not send the card number or CVV. Walmart's PIE key is fetched with a GET that does not include the card.
@@ -64,9 +67,13 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 ## Session Sync
 
-Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai. It does not collect other sites, share a session with anyone else, or create cookies.
+Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on the stores in the catalog (Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer). It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.9.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.19.zip` next to the Windows installer and the phone APK.
+
+Analytics can check a win against the public TCGplayer market price and the public eBay sold search, show profit, and copy a listing draft. It does not post the listing. Inventory lists those purchases, the current value you enter, total profit, and a CSV export.
+
+The Android home screen can show a TCGAIO widget with wins and active tasks. iOS widgets are not in this beta. The phone still follows the desktop theme, and each task can be swiped or tapped.
 
 1. Download that zip and unzip it. `manifest.json` has to be in the folder you select, not inside a second folder.
 2. Open `chrome://extensions` or `edge://extensions`.

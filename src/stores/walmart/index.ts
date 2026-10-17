@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto"
 import { attachSession } from "../../engine/block-recovery"
-import { monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
+import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { proxyLabel } from "../../shared/proxy"
 import { redact } from "../../shared/redact"
 import type { ProxyEndpoint, SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import type { StoreModule, StoreRunContext, StoreRunResult } from "../module"
+import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
   bodyHas,
   findAddressId,
@@ -118,7 +119,7 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
       ctx.log("warn", stock.reason)
-      await ctx.sleep(ctx.settings.monitorDelayMs)
+      await ctx.sleep(retryWait(ctx))
       continue
     }
     if (stock.kind !== "ok") return asResult(stock)
@@ -136,6 +137,8 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.phase("in_stock")
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
+    if (await holdMonitorOnly(ctx)) continue
+    await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, itemId, reading)
     if (cart.kind === "oos") {
@@ -212,7 +215,10 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, itemId: string): 
     body: JSON.stringify({ variables: { itemId, isSubscriptionEligible: false } })
   }))
   const primary = interpretMonitor(response)
-  if (primary.kind === "ok") noteWatch(ctx, primary.value)
+  if (primary.kind === "ok") {
+    primary.value.imageUrl = productImage(response.body) || undefined
+    noteWatch(ctx, { ...primary.value, url: `https://www.walmart.com/ip/${itemId}` })
+  }
   if (primary.kind === "paused" || primary.kind === "ok") return primary
   if (response.status === 429 || response.status >= 500) return primary
   const page = await call(ctx, {
@@ -226,7 +232,8 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, itemId: string): 
   }
   const reading = readStock(page.body)
   if (reading) {
-    noteWatch(ctx, reading)
+    reading.imageUrl = productImage(page.body) || undefined
+    noteWatch(ctx, { ...reading, url: `https://www.walmart.com/ip/${itemId}` })
     return { kind: "ok", value: reading }
   }
   if (page.status === 404) {

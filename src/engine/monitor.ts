@@ -9,6 +9,8 @@ export interface WatchSnapshot {
   soldByRetailer: boolean
   purchasable: boolean
   title: string
+  imageUrl?: string
+  url?: string
 }
 
 export interface MonitorPlace {
@@ -33,6 +35,9 @@ export interface RestockEvent {
   at: number
   price: number | null
   title: string
+  kind?: "restock" | "price" | "offer" | "oos"
+  imageUrl?: string
+  url?: string
 }
 
 export interface RestockHint {
@@ -47,8 +52,12 @@ export interface RestockHint {
 export interface MonitorSample {
   store: StoreId
   ms: number
+  dnsMs?: number
+  connectMs?: number
+  ttfbMs?: number
   blocked: boolean
   at: number
+  proxy?: string
 }
 
 export interface MonitorStoreStat {
@@ -57,6 +66,8 @@ export interface MonitorStoreStat {
   blocked: number
   blockRate: number
   avgMs: number
+  p50Ms: number
+  p95Ms: number
 }
 
 export interface MonitorStats {
@@ -64,6 +75,8 @@ export interface MonitorStats {
   blocked: number
   blockRate: number
   avgMs: number
+  p50Ms: number
+  p95Ms: number
   byStore: MonitorStoreStat[]
 }
 
@@ -110,18 +123,35 @@ export function monitorKey(store: string, sku: string, location: string, proxy?:
 
 export function noteWatch(
   ctx: { observe?: (snapshot: WatchSnapshot) => void },
-  reading: { inStock: boolean; title?: string; price?: number; offerId?: string; seller?: string }
+  reading: { inStock: boolean; title?: string; price?: number; offerId?: string; seller?: string; imageUrl?: string; url?: string }
 ): void {
   const seller = (reading.seller ?? "").trim().toLowerCase()
-  const namedRetailer = /walmart|target|best buy|amazon\.com|^amazon$|pokemon|crunchyroll|bandai/.test(seller)
+  const namedRetailer = /walmart|target|best buy|amazon\.com|^amazon$|pokemon|crunchyroll|bandai|gamestop|barnes|costco|sam's club|tcgplayer direct/.test(seller)
   ctx.observe?.({
     inStock: reading.inStock,
     price: typeof reading.price === "number" ? reading.price : null,
     offerId: reading.offerId ?? "",
     soldByRetailer: namedRetailer || (!seller && reading.inStock),
     purchasable: reading.inStock,
-    title: reading.title ?? ""
+    title: reading.title ?? "",
+    imageUrl: reading.imageUrl || undefined,
+    url: reading.url || undefined
   })
+}
+
+/** True when the task should stay on the monitor and skip cart. */
+export async function holdMonitorOnly(ctx: { monitorOnly?: boolean; log: (level: "info", message: string) => void; sleep: (ms: number) => Promise<void>; settings: { monitorDelayMs: number } }): Promise<boolean> {
+  if (!ctx.monitorOnly) return false
+  ctx.log("info", "Monitor only. Stock is noted and no cart request is sent.")
+  await ctx.sleep(ctx.settings.monitorDelayMs)
+  return true
+}
+
+export function percentile(values: number[], p: number): number {
+  if (!values.length) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const rank = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))
+  return sorted[rank] ?? 0
 }
 
 export function detectChanges(
@@ -263,18 +293,26 @@ export function summarizeMonitor(samples: MonitorSample[]): MonitorStats {
     byStore.set(sample.store, row)
   }
   const total = samples.length
+  const all = samples.map((sample) => sample.ms)
   return {
     samples: total,
     blocked,
     blockRate: total ? blocked / total : 0,
     avgMs: total ? Math.round(ms / total) : 0,
-    byStore: [...byStore.entries()].map(([store, row]) => ({
-      store,
-      samples: row.samples,
-      blocked: row.blocked,
-      blockRate: row.samples ? row.blocked / row.samples : 0,
-      avgMs: row.samples ? Math.round(row.ms / row.samples) : 0
-    }))
+    p50Ms: percentile(all, 50),
+    p95Ms: percentile(all, 95),
+    byStore: [...byStore.entries()].map(([store, row]) => {
+      const times = samples.filter((sample) => sample.store === store).map((sample) => sample.ms)
+      return {
+        store,
+        samples: row.samples,
+        blocked: row.blocked,
+        blockRate: row.samples ? row.blocked / row.samples : 0,
+        avgMs: row.samples ? Math.round(row.ms / row.samples) : 0,
+        p50Ms: percentile(times, 50),
+        p95Ms: percentile(times, 95)
+      }
+    })
   }
 }
 

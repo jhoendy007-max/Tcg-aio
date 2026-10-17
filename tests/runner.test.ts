@@ -150,4 +150,40 @@ describe("task runner", () => {
     const service = new TaskService(db, new Map(), () => undefined, async () => false)
     expect(() => service.start(task.id)).toThrow(/real shipping order/)
   })
+
+  it("starts a monitor-only task without purchase confirmation", async () => {
+    const { db, task } = setup()
+    db.saveTask({
+      id: task.id,
+      store: "target",
+      sku: "88897904",
+      quantity: 1,
+      profileId: task.profileId,
+      accountId: task.accountId,
+      proxyGroupId: null,
+      confirmPurchase: false,
+      monitorOnly: true
+    })
+    let cart = false
+    const module: StoreModule = {
+      id: "target",
+      displayName: "Target",
+      skuHint: "TCIN",
+      implemented: true,
+      async run(ctx) {
+        expect(ctx.monitorOnly).toBe(true)
+        ctx.phase("in_stock")
+        ctx.phase("adding_to_cart")
+        cart = true
+        return { outcome: "stopped", reason: "Stopped" }
+      }
+    }
+    const service = new TaskService(db, new Map([["target", module]]), () => undefined, async () => false)
+    service.start(task.id)
+    await service.wait(task.id)
+    const saved = db.getTask(task.id)
+    expect(saved.status).toBe("stopped")
+    expect(saved.detectToCartMs).toBeGreaterThanOrEqual(0)
+    expect(cart).toBe(true)
+  })
 })
