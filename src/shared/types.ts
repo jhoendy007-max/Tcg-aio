@@ -208,6 +208,10 @@ export interface PublicTask {
   testMode: boolean
   /** Optional label so a drop can start every task in the group. */
   group: string
+  /** Lower numbers appear first. Missing values sort with the newest tasks. */
+  rank?: number
+  /** Optional https image the user attached. Empty shows the store mark. */
+  imageUrl?: string
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -228,6 +232,7 @@ export interface TaskInput {
   confirmPurchase: boolean
   testMode?: boolean
   group?: string
+  imageUrl?: string
 }
 
 export interface Settings {
@@ -291,6 +296,14 @@ export interface Settings {
   healthReportTime: string
   /** IANA timezone for budgets and the daily report. Blank uses UTC. */
   healthReportZone: string
+  theme: "dark" | "light"
+  accent: "gold" | "blue" | "green" | "rose"
+  appName: string
+  /** data:image URL, or empty. */
+  logoDataUrl: string
+  successSound: boolean
+  taskView: "compact" | "detailed"
+  wizardDone: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -328,7 +341,14 @@ export const DEFAULT_SETTINGS: Settings = {
   maxPerAccount: 0,
   storePurchaseLimits: "",
   healthReportTime: "",
-  healthReportZone: ""
+  healthReportZone: "",
+  theme: "dark",
+  accent: "gold",
+  appName: "TCGAIO",
+  logoDataUrl: "",
+  successSound: false,
+  taskView: "detailed",
+  wizardDone: false
 }
 
 export interface SecurityInfo {

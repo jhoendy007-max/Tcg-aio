@@ -129,8 +129,37 @@ export function cleanSettings(input: Settings): Settings {
     maxPerAccount: cleanCount(input.maxPerAccount, "Max per account"),
     storePurchaseLimits: cleanStoreLimits(input.storePurchaseLimits ?? ""),
     healthReportTime: cleanClock(input.healthReportTime ?? ""),
-    healthReportZone: cleanZone(input.healthReportZone ?? "")
+    healthReportZone: cleanZone(input.healthReportZone ?? ""),
+    theme: input.theme === "light" ? "light" : "dark",
+    accent: input.accent === "blue" || input.accent === "green" || input.accent === "rose" ? input.accent : "gold",
+    appName: cleanAppName(input.appName),
+    logoDataUrl: cleanLogo(input.logoDataUrl),
+    successSound: input.successSound === true,
+    taskView: input.taskView === "compact" ? "compact" : "detailed",
+    wizardDone: input.wizardDone === true
   }
+}
+
+function cleanAppName(value: string | undefined): string {
+  const name = (value ?? "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 24)
+  return name || "TCGAIO"
+}
+
+function cleanLogo(value: string | undefined): string {
+  const logo = (value ?? "").trim()
+  if (!logo) return ""
+  if (logo.length > 120_000) throw new AppError("The logo image is too large. Use a file under about 80 KB.")
+  if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(logo)) {
+    throw new AppError("The logo has to be a PNG, JPEG, or WebP image.")
+  }
+  return logo
+}
+
+export function cleanImageUrl(value: string | undefined): string {
+  const url = (value ?? "").trim()
+  if (!url) return ""
+  if (url.length > 400 || !/^https:\/\/[^\s]+$/i.test(url)) throw new AppError("Product image URL must be an https link.")
+  return url
 }
 
 function cleanMoney(value: number, label: string): number {

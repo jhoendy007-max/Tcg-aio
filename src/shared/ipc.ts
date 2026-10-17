@@ -2,6 +2,7 @@ export const channels = {
   tasksList: "tasks:list",
   tasksSave: "tasks:save",
   tasksDelete: "tasks:delete",
+  tasksReorder: "tasks:reorder",
   tasksStart: "tasks:start",
   tasksTest: "tasks:test",
   tasksStop: "tasks:stop",

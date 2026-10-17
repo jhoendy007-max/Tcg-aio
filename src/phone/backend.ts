@@ -49,7 +49,13 @@ export function createPhoneHost(
       analytics: analytics(),
       updates: updates(),
       keeper: keeper(),
-      autopilot: settings.autopilot
+      autopilot: settings.autopilot,
+      brand: {
+        appName: settings.appName,
+        theme: settings.theme,
+        accent: settings.accent,
+        successSound: settings.successSound
+      }
     }
   }
   const schedules = (): PhoneSchedule[] => db.listSchedules().map((schedule) => ({

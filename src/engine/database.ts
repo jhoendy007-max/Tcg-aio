@@ -5,7 +5,7 @@ import type { Cipher } from "./cipher"
 import { parseSession } from "./session"
 import { cookieHeader } from "./challenge"
 import { parseKeywordQuery } from "./keywords"
-import { assertStore, cleanAddress, cleanCard, cleanEmail, cleanPhone, cleanSettings } from "./validate"
+import { assertStore, cleanAddress, cleanCard, cleanEmail, cleanImageUrl, cleanPhone, cleanSettings } from "./validate"
 import { AppError } from "../shared/errors"
 import { parseProxyList } from "../shared/proxy"
 import { applyBlockRates } from "./health"
@@ -481,7 +481,27 @@ export class Database {
   }
 
   listTasks(): PublicTask[] {
-    return this.data.tasks.map(cloneTask)
+    return this.data.tasks.map(cloneTask).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || b.createdAt - a.createdAt)
+  }
+
+  reorderTasks(ids: string[]): PublicTask[] {
+    const known = new Set(this.data.tasks.map((task) => task.id))
+    let rank = 0
+    for (const id of ids) {
+      if (!known.has(id)) continue
+      const task = this.data.tasks.find((item) => item.id === id)
+      if (!task) continue
+      task.rank = rank
+      rank += 1
+      known.delete(id)
+    }
+    for (const id of known) {
+      const task = this.data.tasks.find((item) => item.id === id)
+      if (task) task.rank = rank
+      rank += 1
+    }
+    this.flush()
+    return this.listTasks()
   }
 
   saveTask(input: TaskInput): PublicTask {
@@ -588,6 +608,7 @@ export class Database {
     if (account.store !== store) throw new AppError("Choose an account for the same store as the task.")
     if (input.proxyGroupId) this.getProxyGroup(input.proxyGroupId)
     if (input.monitorProxyGroupId) this.getProxyGroup(input.monitorProxyGroupId)
+    const ranks = this.data.tasks.map((task) => task.rank ?? 0)
     return {
       id: existing?.id ?? randomUUID(),
       store,
@@ -600,6 +621,8 @@ export class Database {
       confirmPurchase: Boolean(input.confirmPurchase),
       testMode: input.testMode === true,
       group: (input.group ?? existing?.group ?? "").trim().slice(0, 40),
+      rank: existing?.rank ?? (ranks.length ? Math.min(...ranks) - 1 : 0),
+      imageUrl: input.imageUrl === undefined ? existing?.imageUrl ?? "" : cleanImageUrl(input.imageUrl),
       status: existing?.status === "paused" ? "paused" : "idle",
       detail: existing?.detail ?? "",
       logs: existing?.logs ?? [],
@@ -1386,7 +1409,7 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 }
 
 function cloneTask(task: PublicTask): PublicTask {
-  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, logs: task.logs.map((line) => ({ ...line })) }
+  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", logs: task.logs.map((line) => ({ ...line })) }
 }
 
 function emptyUpdates(): UpdateFile {

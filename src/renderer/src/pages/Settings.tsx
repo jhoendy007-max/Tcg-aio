@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { DEFAULT_SETTINGS, type Settings, type SettingsPayload } from "../../../shared/types"
-import { Banner, Field, TextInput } from "../components/ui"
+import { Banner, Field, Select, TextInput } from "../components/ui"
+import { applyTheme } from "../theme"
 import { errorText, unwrap } from "../lib"
 
 export function SettingsPage() {
@@ -31,12 +32,32 @@ export function SettingsPage() {
       const next = await unwrap(window.aio.settings.save(form))
       setPayload(next)
       setForm(next.settings)
+      applyTheme(next.settings)
+      window.dispatchEvent(new CustomEvent("tcgaio-settings", { detail: next.settings }))
       setMessage("Settings saved.")
     } catch (err) {
       setError(errorText(err))
     } finally {
       setBusy(false)
     }
+  }
+
+  async function readLogo(file: File | undefined) {
+    setError("")
+    if (!file) return
+    if (file.size > 90_000) {
+      setError("The logo image is too large. Use a file under about 80 KB.")
+      return
+    }
+    const mime = file.type === "image/png" || file.type === "image/jpeg" || file.type === "image/webp" ? file.type : ""
+    if (!mime) {
+      setError("The logo has to be a PNG, JPEG, or WebP image.")
+      return
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    let binary = ""
+    for (const byte of bytes) binary += String.fromCharCode(byte)
+    setForm((current) => ({ ...current, logoDataUrl: `data:${mime};base64,${btoa(binary)}` }))
   }
 
   async function testWebhook() {
@@ -66,6 +87,45 @@ export function SettingsPage() {
       {message ? <Banner tone="info">{message}</Banner> : null}
       {payload ? <div className="card security">{payload.security.description}</div> : null}
       <form className="card form-grid" onSubmit={save}>
+        <div className="span-2">
+          <h2>Appearance</h2>
+          <p className="hint">Theme, accent, and the name in the sidebar. The logo stays on this PC.</p>
+        </div>
+        <Field label="Theme">
+          <Select value={form.theme} onChange={(event) => { const theme: Settings["theme"] = event.target.value === "light" ? "light" : "dark"; const next = { ...form, theme }; setForm(next); applyTheme(next) }}>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </Select>
+        </Field>
+        <Field label="Task table">
+          <Select value={form.taskView} onChange={(event) => setForm({ ...form, taskView: event.target.value === "compact" ? "compact" : "detailed" })}>
+            <option value="detailed">Detailed</option>
+            <option value="compact">Compact</option>
+          </Select>
+        </Field>
+        <fieldset className="span-2">
+          <legend>Accent</legend>
+          <div className="swatches">
+            {(["gold", "blue", "green", "rose"] as const).map((accent) => (
+              <label key={accent} className="swatch">
+                <input type="radio" name="accent" value={accent} checked={form.accent === accent} onChange={() => { const next = { ...form, accent }; setForm(next); applyTheme(next) }} />
+                <span>{accent}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <Field label="App name" hint="Shown in the sidebar. Up to 24 characters.">
+          <TextInput value={form.appName} maxLength={24} onChange={(event) => setForm({ ...form, appName: event.target.value })} />
+        </Field>
+        <Field label="Logo" hint="PNG, JPEG, or WebP under about 80 KB. Leave it empty to keep the mark.">
+          <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void readLogo(event.target.files?.[0])} />
+        </Field>
+        {form.logoDataUrl ? <img className="brand-logo" src={form.logoDataUrl} alt="Current logo" /> : null}
+        {form.logoDataUrl ? <button type="button" onClick={() => setForm({ ...form, logoDataUrl: "" })}>Remove logo</button> : null}
+        <label className="check span-2">
+          <input type="checkbox" checked={form.successSound} onChange={(event) => setForm({ ...form, successSound: event.target.checked })} />
+          <span>Play a short sound when a checkout succeeds. This stays off until you turn it on.</span>
+        </label>
         <Field className="span-2" label="Discord webhook" hint="https://discord.com/api/webhooks/… Success, failure, and challenge pauses are posted here. Card data is not.">
           <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
         </Field>

@@ -10,7 +10,44 @@ export const colors = {
   accentInk: "#1c1508",
   ok: "#3cba8b",
   warn: "#e0a045",
-  danger: "#e25b5b"
+  danger: "#e25b5b",
+  wash: "#2a2418"
+}
+
+const ACCENT: Record<"dark" | "light", Record<string, [string, string]>> = {
+  dark: {
+    gold: ["#e0b15a", "#1c1508"],
+    blue: ["#79a6f5", "#0d1828"],
+    green: ["#3cba8b", "#062018"],
+    rose: ["#e07a8a", "#2a1014"]
+  },
+  light: {
+    gold: ["#8d6416", "#fffaf0"],
+    blue: ["#1f5fbf", "#f5f9ff"],
+    green: ["#0f7a4b", "#f3fff8"],
+    rose: ["#a33b52", "#fff6f8"]
+  }
+}
+
+export function palette(brand?: { theme?: "dark" | "light"; accent?: string }): typeof colors {
+  const mode = brand?.theme === "light" ? "light" : "dark"
+  const accent = ACCENT[mode][brand?.accent ?? "gold"] ?? ACCENT[mode].gold
+  if (mode === "dark") return { ...colors, accent: accent[0], accentInk: accent[1] }
+  return {
+    bg: "#f4f1ea",
+    sidebar: "#fffdf8",
+    card: "#ffffff",
+    card2: "#f7f4ee",
+    line: "#e4ddd0",
+    text: "#1c1915",
+    muted: "#6d655b",
+    accent: accent[0],
+    accentInk: accent[1],
+    ok: "#0f7a4b",
+    warn: "#8a5a10",
+    danger: "#a12626",
+    wash: "#f3ead8"
+  }
 }
 
 export const STATUS_LABEL: Record<string, string> = {

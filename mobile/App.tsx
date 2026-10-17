@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar"
-import { useEffect, useRef, useState } from "react"
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
 import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from "../src/phone/client"
 import type { PhoneChallenge, PhoneSnapshot, PhoneTask, PhoneTaskDraft } from "../src/phone/protocol"
@@ -9,11 +9,18 @@ import type { KeywordWatchInput, RestockRuleInput } from "../src/shared/types"
 import { ensureNotificationPermission, notify } from "./src/notify"
 import { clearLink, loadLink, saveLink } from "./src/storage"
 import type { StoreHealth } from "../src/shared/types"
-import { colors, isActive, STATUS_LABEL } from "./src/theme"
+import { SwipeTask } from "./src/SwipeTask"
+import { updateWidget } from "./src/widget"
+import { colors, isActive, palette, STATUS_LABEL } from "./src/theme"
 import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
 
 type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats"
+type Bag = { colors: typeof colors; styles: ReturnType<typeof createStyles> }
+const ThemeContext = createContext<Bag>({ colors, styles: createStyles(colors) })
+function useTheme() { return useContext(ThemeContext) }
+
+const LETTER: Record<string, string> = { target: "T", walmart: "W", bestbuy: "B", "pokemon-center": "P", amazon: "A", crunchyroll: "C", bandai: "N" }
 
 const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
   store: snap?.stores[0]?.id ?? "target",
@@ -41,12 +48,16 @@ export default function App() {
   const [deviceName, setDeviceName] = useState("My phone")
   const [paste, setPaste] = useState("")
   const [scanning, setScanning] = useState(false)
+  const [banner, setBanner] = useState("")
+  const seen = useRef(new Map<string, string>())
   const [permission, requestPermission] = useCameraPermissions()
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function applySnapshot(next: PhoneSnapshot) {
     setSnap(next)
-    setPcName(next.pcName)
+    setPcName(next.brand?.appName || next.pcName)
+    const active = next.tasks.filter((task) => isActive(task.status)).length
+    updateWidget(next.analytics?.success ?? 0, active)
   }
 
   function bind(next: PhoneSession) {
@@ -54,6 +65,11 @@ export default function App() {
     next.onOnline(setOnline)
     next.onSnapshot(applySnapshot)
     next.onTask((task) => {
+      const before = seen.current.get(task.id)
+      seen.current.set(task.id, task.status)
+      if (before && before !== task.status && (task.status === "success" || task.status === "tested")) {
+        setBanner(task.status === "tested" ? `${task.storeName} test finished. Place order was not sent.` : `${task.storeName} checkout confirmed. ${task.sku}`)
+      }
       setSnap((current) => current ? { ...current, tasks: upsert(current.tasks, task) } : current)
     })
     next.onDeleted((id) => {
@@ -161,11 +177,15 @@ export default function App() {
   }
 
   const storeAccounts = snap?.accounts.filter((account) => account.store === draft?.store) ?? []
+  const theme = useMemo(() => palette(snap?.brand), [snap?.brand?.theme, snap?.brand?.accent])
+  const styles = useMemo(() => createStyles(theme), [theme])
+  const activeCount = (snap?.tasks ?? []).filter((task) => isActive(task.status)).length
 
   return (
+    <ThemeContext.Provider value={{ colors: theme, styles }}>
     <View style={styles.root}>
-      <StatusBar style="light" />
-      {screen === "boot" ? <ActivityIndicator color={colors.accent} style={styles.boot} /> : null}
+      <StatusBar style={theme.bg === colors.bg ? "light" : "dark"} />
+      {screen === "boot" ? <ActivityIndicator color={theme.accent} style={styles.boot} /> : null}
       {screen === "pair" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <Text style={styles.brand}>TCGAIO</Text>
@@ -173,12 +193,12 @@ export default function App() {
           <Text style={styles.p}>On the PC, open Phone and choose Pair device. Scan that QR code. The PC keeps the card and passwords.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
           <Text style={styles.label}>Name on the PC</Text>
-          <TextInput style={styles.input} value={deviceName} onChangeText={setDeviceName} placeholder="My phone" placeholderTextColor={colors.muted} />
+          <TextInput style={styles.input} value={deviceName} onChangeText={setDeviceName} placeholder="My phone" placeholderTextColor={theme.muted} />
           <Pressable style={styles.primary} onPress={() => { void requestPermission().then(() => setScanning(true)) }}>
             <Text style={styles.primaryText}>Scan QR code</Text>
           </Pressable>
           <Text style={styles.label}>Or paste the pairing code</Text>
-          <TextInput style={[styles.input, styles.paste]} value={paste} onChangeText={setPaste} multiline autoCapitalize="none" placeholder='{"v":1,...}' placeholderTextColor={colors.muted} />
+          <TextInput style={[styles.input, styles.paste]} value={paste} onChangeText={setPaste} multiline autoCapitalize="none" placeholder='{"v":1,...}' placeholderTextColor={theme.muted} />
           <Pressable style={styles.secondary} onPress={() => void pairFrom(paste)}><Text style={styles.secondaryText}>Pair</Text></Pressable>
           {scanning ? (
             <View style={styles.cameraBox}>
@@ -201,13 +221,14 @@ export default function App() {
         <ScrollView contentContainerStyle={styles.pad}>
           <View style={styles.row}>
             <View>
-              <Text style={styles.brand}>TCGAIO</Text>
+              <Text style={styles.brand}>{snap?.brand?.appName || "TCGAIO"}</Text>
               <Text style={styles.h1}>{pcName}</Text>
             </View>
             <Text style={[styles.pill, online ? styles.pillOn : styles.pillOff]}>{online ? "PC online" : "PC offline"}</Text>
           </View>
           <Text style={styles.p}>Tasks run on the PC. This phone starts, stops, and watches them.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
+          {banner ? <Text accessibilityLiveRegion="polite" style={styles.banner}>{banner}</Text> : null}
           {challenge && screen !== "alerts" ? (
             <ChallengeCard challenge={challenge} now={now} session={session.current} onRun={run} />
           ) : null}
@@ -229,7 +250,7 @@ export default function App() {
                 ))}
               </View>
               <Text style={styles.label}>SKU or URL</Text>
-              <TextInput style={styles.input} value={draft.sku} onChangeText={(sku) => setDraft({ ...draft, sku })} autoCapitalize="none" placeholderTextColor={colors.muted} />
+              <TextInput style={styles.input} value={draft.sku} onChangeText={(sku) => setDraft({ ...draft, sku })} autoCapitalize="none" placeholderTextColor={theme.muted} />
               <Text style={styles.label}>Quantity</Text>
               <TextInput style={styles.input} value={String(draft.quantity)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, quantity: Number(value) || 1 })} />
               <Text style={styles.label}>Profile</Text>
@@ -261,11 +282,11 @@ export default function App() {
               </View>
               <View style={styles.switchRow}>
                 <Text style={styles.p}>Test mode. Runs the real flow and stops before place order.</Text>
-                <Switch value={draft.testMode === true} onValueChange={(testMode) => setDraft({ ...draft, testMode })} trackColor={{ true: colors.accent, false: colors.line }} />
+                <Switch value={draft.testMode === true} onValueChange={(testMode) => setDraft({ ...draft, testMode })} trackColor={{ true: theme.accent, false: theme.line }} />
               </View>
               <View style={styles.switchRow}>
                 <Text style={styles.p}>This task may place a real shipping order. Ignored while test mode is on.</Text>
-                <Switch value={draft.confirmPurchase} onValueChange={(confirmPurchase) => setDraft({ ...draft, confirmPurchase })} trackColor={{ true: colors.accent, false: colors.line }} />
+                <Switch value={draft.confirmPurchase} onValueChange={(confirmPurchase) => setDraft({ ...draft, confirmPurchase })} trackColor={{ true: theme.accent, false: theme.line }} />
               </View>
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => void run(async () => {
@@ -283,9 +304,15 @@ export default function App() {
           ) : (
             <>
               {snap?.testMode ? <Text style={styles.p}>Global test mode is on. Every task stops before place order.</Text> : null}
+              <View style={styles.metrics}>
+                <View style={styles.metric}><Text style={styles.metricNum}>{activeCount}</Text><Text style={styles.p}>Active</Text></View>
+                <View style={styles.metric}><Text style={styles.metricNum}>{snap?.analytics?.success ?? 0}</Text><Text style={styles.p}>Wins</Text></View>
+                <View style={styles.metric}><Text style={styles.metricNum}>${(snap?.analytics?.spend ?? 0).toFixed(0)}</Text><Text style={styles.p}>Spend</Text></View>
+                <View style={styles.metric}><Text style={styles.metricNum}>{Math.round((snap?.analytics?.winRate ?? 0) * 100)}%</Text><Text style={styles.p}>Win rate</Text></View>
+              </View>
               <View style={styles.switchRow}>
                 <Text style={styles.p}>Autopilot. Restock alerts, keyword hits, and learned restock hours can start a saved template.</Text>
-                <Switch value={snap?.autopilot === true} onValueChange={(enabled) => void run(() => session.current!.setAutopilot(enabled))} trackColor={{ true: colors.accent, false: colors.line }} />
+                <Switch value={snap?.autopilot === true} onValueChange={(enabled) => void run(() => session.current!.setAutopilot(enabled))} trackColor={{ true: theme.accent, false: theme.line }} />
               </View>
               {snap && isNewer(snap.updates?.phoneVersion ?? null, PHONE_VERSION) ? <Text style={styles.p}>Phone {snap.updates.phoneVersion} is on the PC's GitHub release. Install that APK over this {PHONE_VERSION} build. The download stays on the PC.</Text> : null}
               {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
@@ -308,8 +335,11 @@ export default function App() {
                 <Text key={row.store} style={styles.p}>{row.storeName} · {row.proxy} · {row.verdict} · {row.detail}</Text>
               )) : null}
               {(snap?.tasks ?? []).map((item) => (
-                <Pressable key={item.id} style={[styles.card, selected === item.id && styles.cardOn]} onPress={() => setSelected(item.id)}>
+                <SwipeTask key={item.id} active={isActive(item.status)} onPrimary={() => void run(() => isActive(item.status) ? session.current!.stop(item.id) : session.current!.start(item.id))} onTest={() => void run(() => session.current!.runTest(item.id))}>
+                <Pressable style={[styles.card, selected === item.id && styles.cardOn]} onPress={() => setSelected(item.id)} accessibilityHint="Swipe right to start or stop. Swipe left to run a test. Buttons below do the same.">
                   <View style={styles.row}>
+                    <View style={[styles.mark, { backgroundColor: theme.accent }]}><Text style={styles.markText}>{LETTER[item.store] ?? "S"}</Text></View>
+                    {item.imageUrl?.startsWith("https://") ? <Image source={{ uri: item.imageUrl }} style={styles.photo} accessibilityIgnoresInvertColors /> : null}
                     <Text style={styles.h2}>{item.storeName}</Text>
                     {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
                     <Text style={styles.pill}>{STATUS_LABEL[item.status] ?? item.status}</Text>
@@ -332,6 +362,7 @@ export default function App() {
                     setScreen("edit")
                   }} /> : null}
                 </Pressable>
+                </SwipeTask>
               ))}
               {snap && snap.tasks.length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
               <Pressable onPress={() => void forget()}><Text style={styles.link}>Forget this PC</Text></Pressable>
@@ -340,6 +371,7 @@ export default function App() {
         </ScrollView>
       ) : null}
     </View>
+    </ThemeContext.Provider>
   )
 }
 
@@ -363,6 +395,7 @@ function DropsPanel({ snap, now, session, onRun, onBack }: {
   const [warmupMin, setWarmupMin] = useState("10")
   const [group, setGroup] = useState("")
   const [text, setText] = useState("")
+  const { styles, colors } = useTheme()
   const account = snap?.accounts[0]
   const profile = snap?.profiles[0]
   return (
@@ -402,6 +435,7 @@ function StatsPanel({ snap, session, onRun, onBack }: {
   onRun: (action: () => Promise<{ ok: boolean; error?: string; csv?: string }>) => Promise<{ ok: boolean; csv?: string } | undefined>
   onBack: () => void
 }) {
+  const { styles } = useTheme()
   const [csv, setCsv] = useState("")
   const stats = snap?.analytics
   return (
@@ -432,6 +466,7 @@ function TaskDetail({ task, onRun, session, onEdit }: {
   onRun: (action: () => Promise<{ ok: boolean; error?: string }>) => Promise<unknown>
   onEdit: () => void
 }) {
+  const { styles } = useTheme()
   return (
     <View>
       <View style={styles.row}>
@@ -461,6 +496,7 @@ function AlertsPanel({ snap, onRun, session, onBack }: {
   onRun: (action: () => Promise<{ ok: boolean; error?: string; alerts?: PhoneSnapshot["alerts"] }>) => Promise<unknown>
   onBack: () => void
 }) {
+  const { styles, colors } = useTheme()
   const alerts = snap?.alerts
   const [rule, setRule] = useState<RestockRuleInput | null>(null)
   const [watch, setWatch] = useState<KeywordWatchInput | null>(null)
@@ -586,37 +622,46 @@ function upsert(tasks: PhoneTask[], task: PhoneTask): PhoneTask[] {
   return next
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
-  boot: { marginTop: 80 },
-  pad: { padding: 20, paddingTop: 56, gap: 12 },
-  brand: { color: colors.accent, letterSpacing: 2, fontSize: 12, fontWeight: "700" },
-  h1: { color: colors.text, fontSize: 28, fontWeight: "700" },
-  h2: { color: colors.text, fontSize: 16, fontWeight: "700" },
-  p: { color: colors.muted, fontSize: 14, flexShrink: 1 },
-  err: { color: "#ffd0d0", backgroundColor: "#3a1d1d", padding: 10, borderRadius: 8 },
-  label: { color: colors.muted, fontSize: 12, marginTop: 8 },
-  input: { backgroundColor: colors.card2, color: colors.text, borderColor: colors.line, borderWidth: 1, borderRadius: 8, padding: 10 },
-  area: { minHeight: 90, textAlignVertical: "top" },
-  paste: { minHeight: 80, textAlignVertical: "top" },
-  primary: { backgroundColor: colors.accent, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
-  primaryText: { color: colors.accentInk, fontWeight: "700" },
-  secondary: { borderColor: colors.line, borderWidth: 1, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
-  secondaryText: { color: colors.text },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  card: { backgroundColor: colors.card, borderRadius: 10, padding: 14, gap: 8, borderWidth: 1, borderColor: colors.line },
-  cardOn: { borderColor: colors.accent },
-  sku: { color: colors.text, fontSize: 15 },
-  pill: { color: colors.text, backgroundColor: "#2a303b", borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3, overflow: "hidden", fontSize: 12 },
-  pillOn: { backgroundColor: "#16362b", color: "#b7f0d6" },
-  pillOff: { backgroundColor: "#3d3118", color: "#ffe1a8" },
-  choices: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  choice: { borderColor: colors.line, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
-  choiceOn: { borderColor: colors.accent, backgroundColor: "#2a2418" },
-  choiceText: { color: colors.text, fontSize: 13 },
-  switchRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8 },
-  log: { color: colors.muted, fontFamily: "monospace", fontSize: 12 },
-  link: { color: colors.accent, marginTop: 12 },
-  cameraBox: { gap: 8 },
-  camera: { height: 280, borderRadius: 12, overflow: "hidden" }
-})
+function createStyles(c: typeof colors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.bg },
+    boot: { marginTop: 80 },
+    pad: { padding: 20, paddingTop: 56, gap: 12 },
+    brand: { color: c.accent, letterSpacing: 2, fontSize: 12, fontWeight: "700" },
+    h1: { color: c.text, fontSize: 28, fontWeight: "700" },
+    h2: { color: c.text, fontSize: 16, fontWeight: "700" },
+    p: { color: c.muted, fontSize: 14, flexShrink: 1 },
+    err: { color: "#ffd0d0", backgroundColor: "#3a1d1d", padding: 10, borderRadius: 8 },
+    banner: { color: c.text, backgroundColor: c.card, borderColor: c.accent, borderWidth: 1, padding: 10, borderRadius: 8 },
+    label: { color: c.muted, fontSize: 12, marginTop: 8 },
+    input: { backgroundColor: c.card2, color: c.text, borderColor: c.line, borderWidth: 1, borderRadius: 8, padding: 10 },
+    area: { minHeight: 90, textAlignVertical: "top" },
+    paste: { minHeight: 80, textAlignVertical: "top" },
+    primary: { backgroundColor: c.accent, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
+    primaryText: { color: c.accentInk, fontWeight: "700" },
+    secondary: { borderColor: c.line, borderWidth: 1, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 14 },
+    secondaryText: { color: c.text },
+    row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" },
+    card: { backgroundColor: c.card, borderRadius: 10, padding: 14, gap: 8, borderWidth: 1, borderColor: c.line },
+    cardOn: { borderColor: c.accent },
+    sku: { color: c.text, fontSize: 15 },
+    pill: { color: c.text, backgroundColor: "#2a303b", borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3, overflow: "hidden", fontSize: 12 },
+    pillOn: { backgroundColor: "#16362b", color: "#b7f0d6" },
+    pillOff: { backgroundColor: "#3d3118", color: "#ffe1a8" },
+    choices: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    choice: { borderColor: c.line, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
+    choiceOn: { borderColor: c.accent, backgroundColor: c.wash },
+    choiceText: { color: c.text, fontSize: 13 },
+    switchRow: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 8 },
+    log: { color: c.muted, fontFamily: "monospace", fontSize: 12 },
+    link: { color: c.accent, marginTop: 12 },
+    cameraBox: { gap: 8 },
+    camera: { height: 280, borderRadius: 12, overflow: "hidden" },
+    metrics: { flexDirection: "row", gap: 8 },
+    metric: { flex: 1, backgroundColor: c.card, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: c.line },
+    metricNum: { color: c.text, fontSize: 18, fontWeight: "700" },
+    mark: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+    markText: { color: c.accentInk, fontWeight: "700" },
+    photo: { width: 36, height: 36, borderRadius: 8 }
+  })
+}

@@ -20,3 +20,5 @@ Electron 33. Main process in `src/main`, preload bridge in `src/preload`, React 
 - Electron windows and the updater download path are not unit-tested. Do not claim a live sign-in, captcha solve, or update download from a unit test.
 
 UI copy is a short sentence. Test mode shows a TEST badge. A test run’s log is the checklist from `note()` / `finishTest`.
+
+Home is the default page. Appearance (theme, accent, app name, logo, success sound, task density) is saved with the other settings. The setup wizard runs only for an empty vault that has not finished setup. Store marks are letter tiles. Product photos are optional https URLs. Do not fetch retailer artwork or copy a store logo.

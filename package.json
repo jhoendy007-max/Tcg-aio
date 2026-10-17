@@ -1,6 +1,6 @@
 {
   "name": "tcgaio",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "description": "Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops.",
   "main": "./out/main/index.js",

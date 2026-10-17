@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
-import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type StoreHealth, type StoreInfo, type TaskInput } from "../../../shared/types"
+import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type Settings, type StoreHealth, type StoreInfo, type TaskInput, type TaskStatus } from "../../../shared/types"
+import { storeName } from "../../../shared/stores"
+import { ProductVisual } from "../components/marks"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { TasksBulk } from "./TasksBulk"
 import { errorText, formatTime, STATUS_LABEL, unwrap } from "../lib"
@@ -14,7 +16,8 @@ const emptyForm = (): TaskInput => ({
   monitorProxyGroupId: null,
   confirmPurchase: false,
   testMode: false,
-  group: ""
+  group: "",
+  imageUrl: ""
 })
 
 export function TasksPage() {
@@ -33,6 +36,12 @@ export function TasksPage() {
   const [busy, setBusy] = useState(false)
   const [challenge, setChallenge] = useState<PublicChallenge | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [query, setQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("")
+  const [storeFilter, setStoreFilter] = useState("")
+  const [grouped, setGrouped] = useState(true)
+  const [dragId, setDragId] = useState<string | null>(null)
 
   async function reload() {
     const [nextTasks, nextProfiles, nextAccounts, nextGroups, nextStores, settings] = await Promise.all([
@@ -44,6 +53,7 @@ export function TasksPage() {
       unwrap(window.aio.settings.get())
     ])
     setGlobalTest(settings.settings.testMode)
+    setSettings(settings.settings)
     setTasks(nextTasks)
     setProfiles(nextProfiles)
     setAccounts(nextAccounts)
@@ -63,10 +73,9 @@ export function TasksPage() {
       }
       setTasks((current) => {
         const index = current.findIndex((task) => task.id === event.task.id)
-        if (index < 0) return [event.task, ...current]
-        const next = current.slice()
-        next[index] = event.task
-        return next
+        const next = index < 0 ? [event.task, ...current] : current.slice()
+        if (index >= 0) next[index] = event.task
+        return next.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || b.createdAt - a.createdAt)
       })
     })
     const stopChallenge = window.aio.challenge.onEvent(setChallenge)
@@ -81,6 +90,69 @@ export function TasksPage() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [challenge])
+
+  const taskView = settings?.taskView ?? "detailed"
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return tasks.filter((task) => {
+      if (statusFilter && task.status !== statusFilter) return false
+      if (storeFilter && task.store !== storeFilter) return false
+      if (!needle) return true
+      const hay = [task.sku, task.group, task.detail, storeName(task.store), STATUS_LABEL[task.status]].join(" ").toLowerCase()
+      return hay.includes(needle)
+    })
+  }, [tasks, query, statusFilter, storeFilter])
+  const sections = useMemo(() => {
+    if (!grouped) return [{ label: "", rows: filtered }]
+    const buckets = new Map<string, PublicTask[]>()
+    for (const task of filtered) {
+      const label = task.group?.trim() || "Ungrouped"
+      const rows = buckets.get(label) ?? []
+      rows.push(task)
+      buckets.set(label, rows)
+    }
+    return [...buckets.entries()].map(([label, rows]) => ({ label, rows }))
+  }, [filtered, grouped])
+
+  async function commitOrder(ids: string[]) {
+    setError("")
+    try {
+      setTasks(await unwrap(window.aio.tasks.reorder(ids)))
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
+  function place(fromId: string, toId: string, after: boolean) {
+    if (fromId === toId) return
+    const next = tasks.map((task) => task.id).filter((id) => id !== fromId)
+    let index = next.indexOf(toId)
+    if (index < 0) return
+    if (after) index += 1
+    next.splice(index, 0, fromId)
+    void commitOrder(next)
+  }
+
+  function moveVisible(id: string, delta: number) {
+    const visible = filtered.map((task) => task.id)
+    const index = visible.indexOf(id)
+    const target = visible[index + delta]
+    if (!target) return
+    place(id, target, delta > 0)
+  }
+
+  async function setView(taskView: Settings["taskView"]) {
+    if (!settings) return
+    const next = { ...settings, taskView }
+    setSettings(next)
+    try {
+      const saved = await unwrap(window.aio.settings.save(next))
+      setSettings(saved.settings)
+      window.dispatchEvent(new CustomEvent("tcgaio-settings", { detail: saved.settings }))
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
 
   const selected = tasks.find((task) => task.id === selectedId) ?? null
   const storeAccounts = accounts.filter((account) => account.store === form?.store)
@@ -215,6 +287,9 @@ export function TasksPage() {
           <Field label="Group" hint="Optional. A drop can start every task with this label.">
             <TextInput value={form.group ?? ""} onChange={(event) => setForm({ ...form, group: event.target.value })} placeholder="ETB" />
           </Field>
+          <Field className="span-2" label="Product image URL" hint="Optional https link. Leave it blank to show the store mark. TCGAIO does not fetch retailer art on its own.">
+            <TextInput value={form.imageUrl ?? ""} onChange={(event) => setForm({ ...form, imageUrl: event.target.value })} placeholder="https://" inputMode="url" />
+          </Field>
           <Field label="Monitor proxy group" hint="Stock checks use this pool. Leave it blank to use the checkout proxy group.">
             <Select value={form.monitorProxyGroupId ?? ""} onChange={(event) => setForm({ ...form, monitorProxyGroupId: event.target.value || null })}>
               <option value="">Same as checkout</option>
@@ -277,50 +352,70 @@ export function TasksPage() {
         ) : null}
       </div>
       <TasksBulk tasks={tasks} profiles={profiles} accounts={accounts} groups={groups} stores={stores} onChanged={() => reload()} />
+      <div className="card toolbar">
+        <Field label="Search">
+          <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SKU, store, or group" aria-label="Search tasks" />
+        </Field>
+        <Field label="Status">
+          <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "")} aria-label="Filter by status">
+            <option value="">All statuses</option>
+            {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((status) => <option key={status} value={status}>{STATUS_LABEL[status]}</option>)}
+          </Select>
+        </Field>
+        <Field label="Store">
+          <Select value={storeFilter} onChange={(event) => setStoreFilter(event.target.value)} aria-label="Filter by store">
+            <option value="">All stores</option>
+            {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+          </Select>
+        </Field>
+        <label className="check">
+          <input type="checkbox" checked={grouped} onChange={(event) => setGrouped(event.target.checked)} />
+          <span>Group by drop</span>
+        </label>
+        <div className="actions">
+          <button type="button" aria-pressed={taskView === "compact"} onClick={() => void setView("compact")}>Compact</button>
+          <button type="button" aria-pressed={taskView === "detailed"} onClick={() => void setView("detailed")}>Detailed</button>
+        </div>
+      </div>
       <div className="table-wrap card">
         <table>
           <thead>
             <tr>
-              <th>Store</th>
+              <th>Order</th>
               <th>Product</th>
-              <th>Qty</th>
-              <th>Profile</th>
-              <th>Account</th>
-              <th>Proxy</th>
+              {taskView === "detailed" ? <th>Qty</th> : null}
+              {taskView === "detailed" ? <th>Profile</th> : null}
+              {taskView === "detailed" ? <th>Account</th> : null}
+              {taskView === "detailed" ? <th>Proxy</th> : null}
               <th>Status</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {tasks.length === 0 ? (
-              <tr><td colSpan={8} className="empty">No tasks yet. Create one when the profile and account are saved.</td></tr>
-            ) : tasks.map((task) => (
-              <tr key={task.id} className={task.id === selectedId ? "selected" : ""} onClick={() => setSelectedId(task.id)}>
-                <td>{names.store.get(task.store) ?? task.store}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</td>
-                <td className="sku">{task.sku}</td>
-                <td>{task.quantity}</td>
-                <td>{names.profile.get(task.profileId) ?? "Missing"}</td>
-                <td>{names.account.get(task.accountId) ?? "Missing"}</td>
-                <td>{task.proxyGroupId ? names.group.get(task.proxyGroupId) ?? "Missing" : "Direct"}</td>
-                <td>
-                  <span className={`pill ${task.status}`}>{STATUS_LABEL[task.status]}</span>
-                  {task.detail ? <div className="detail">{task.detail}</div> : null}
-                </td>
-                <td className="row-actions">
-                  {isActiveStatus(task.status) ? (
-                    <button type="button" onClick={(event) => { event.stopPropagation(); void stop(task.id) }}>Stop</button>
-                  ) : (
-                    <button type="button" className="primary" disabled={!task.confirmPurchase && !task.testMode} onClick={(event) => { event.stopPropagation(); void start(task.id) }}>
-                      {task.status === "paused" ? "Resume" : "Start"}
-                    </button>
-                  )}
-                  {!isActiveStatus(task.status) ? (
-                    <button type="button" onClick={(event) => { event.stopPropagation(); void runTest(task.id) }}>Run test</button>
-                  ) : null}
-                  <button type="button" onClick={(event) => { event.stopPropagation(); setForm(toInput(task)); setError("") }} disabled={isActiveStatus(task.status)}>Edit</button>
-                  <button type="button" className="danger" onClick={(event) => { event.stopPropagation(); void remove(task.id) }} disabled={isActiveStatus(task.status)}>Delete</button>
-                </td>
-              </tr>
+              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty">No tasks yet. Create one when the profile and account are saved.</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty">No tasks match this search.</td></tr>
+            ) : sections.map((section) => (
+              <SectionRows
+                key={section.label || "all"}
+                section={section}
+                grouped={grouped}
+                taskView={taskView}
+                selectedId={selectedId}
+                globalTest={globalTest}
+                dragId={dragId}
+                names={names}
+                onSelect={setSelectedId}
+                onDrag={setDragId}
+                onDrop={(target) => { if (dragId) place(dragId, target, false); setDragId(null) }}
+                onMove={moveVisible}
+                onStart={start}
+                onStop={stop}
+                onTest={runTest}
+                onEdit={(task) => { setForm(toInput(task)); setError("") }}
+                onDelete={remove}
+              />
             ))}
           </tbody>
         </table>
@@ -343,6 +438,78 @@ export function TasksPage() {
   )
 }
 
+function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
+  section: { label: string; rows: PublicTask[] }
+  grouped: boolean
+  taskView: "compact" | "detailed"
+  selectedId: string | null
+  globalTest: boolean
+  dragId: string | null
+  names: { profile: Map<string, string>; account: Map<string, string>; group: Map<string, string> }
+  onSelect: (id: string) => void
+  onDrag: (id: string | null) => void
+  onDrop: (id: string) => void
+  onMove: (id: string, delta: number) => void
+  onStart: (id: string) => void
+  onStop: (id: string) => void
+  onTest: (id: string) => void
+  onEdit: (task: PublicTask) => void
+  onDelete: (id: string) => void
+}) {
+  const cols = taskView === "detailed" ? 8 : 4
+  return (
+    <>
+      {grouped ? <tr className="group-row"><td colSpan={cols}>{section.label}</td></tr> : null}
+      {section.rows.map((task) => (
+        <tr
+          key={task.id}
+          className={`${task.id === selectedId ? "selected" : ""} ${dragId === task.id ? "dragging" : ""}`.trim()}
+          onClick={() => onSelect(task.id)}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => { event.preventDefault(); onDrop(task.id) }}
+        >
+          <td className="row-actions">
+            <button type="button" className="drag-handle" draggable aria-label={`Drag ${task.sku}`} onDragStart={(event) => { event.dataTransfer.setData("text/plain", task.id); event.dataTransfer.effectAllowed = "move"; onDrag(task.id) }} onDragEnd={() => onDrag(null)}>Move</button>
+            <button type="button" aria-label={`Move ${task.sku} up`} onClick={(event) => { event.stopPropagation(); onMove(task.id, -1) }}>Up</button>
+            <button type="button" aria-label={`Move ${task.sku} down`} onClick={(event) => { event.stopPropagation(); onMove(task.id, 1) }}>Down</button>
+          </td>
+          <td>
+            <div className="product-cell">
+              <ProductVisual store={task.store} name={storeName(task.store)} sku={task.sku} imageUrl={task.imageUrl} />
+              <div>
+                <div>{storeName(task.store)}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
+                <div className="sku">{task.sku}</div>
+              </div>
+            </div>
+          </td>
+          {taskView === "detailed" ? <td>{task.quantity}</td> : null}
+          {taskView === "detailed" ? <td>{names.profile.get(task.profileId) ?? "Missing"}</td> : null}
+          {taskView === "detailed" ? <td>{names.account.get(task.accountId) ?? "Missing"}</td> : null}
+          {taskView === "detailed" ? <td>{task.proxyGroupId ? names.group.get(task.proxyGroupId) ?? "Missing" : "Direct"}</td> : null}
+          <td>
+            <span className={`pill ${task.status}`}>{STATUS_LABEL[task.status]}</span>
+            {task.detail ? <div className="detail">{task.detail}</div> : null}
+          </td>
+          <td className="row-actions">
+            {isActiveStatus(task.status) ? (
+              <button type="button" onClick={(event) => { event.stopPropagation(); void onStop(task.id) }}>Stop</button>
+            ) : (
+              <button type="button" className="primary" disabled={!task.confirmPurchase && !task.testMode} onClick={(event) => { event.stopPropagation(); void onStart(task.id) }}>
+                {task.status === "paused" ? "Resume" : "Start"}
+              </button>
+            )}
+            {!isActiveStatus(task.status) ? (
+              <button type="button" onClick={(event) => { event.stopPropagation(); void onTest(task.id) }}>Run test</button>
+            ) : null}
+            <button type="button" onClick={(event) => { event.stopPropagation(); onEdit(task) }} disabled={isActiveStatus(task.status)}>Edit</button>
+            <button type="button" className="danger" onClick={(event) => { event.stopPropagation(); void onDelete(task.id) }} disabled={isActiveStatus(task.status)}>Delete</button>
+          </td>
+        </tr>
+      ))}
+    </>
+  )
+}
+
 function toInput(task: PublicTask): TaskInput {
   return {
     id: task.id,
@@ -355,6 +522,7 @@ function toInput(task: PublicTask): TaskInput {
     monitorProxyGroupId: task.monitorProxyGroupId,
     confirmPurchase: task.confirmPurchase,
     testMode: task.testMode,
-    group: task.group ?? ""
+    group: task.group ?? "",
+    imageUrl: task.imageUrl ?? ""
   }
 }

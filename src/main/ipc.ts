@@ -47,6 +47,7 @@ export function registerIpc(
   }
   handle(channels.tasksList, () => db.listTasks())
   handle(channels.tasksSave, (input) => db.saveTask(input))
+  handle(channels.tasksReorder, (ids: string[]) => db.reorderTasks(Array.isArray(ids) ? ids : []))
   handle(channels.tasksDelete, (id: string) => {
     if (runner.isRunning(id)) throw new Error("Stop the task before deleting it.")
     db.deleteTask(id)

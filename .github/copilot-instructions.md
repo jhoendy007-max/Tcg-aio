@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.9 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.10 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -76,6 +76,16 @@ Host permissions are only the seven store sites. The user links each account exp
 The desktop Session Sync page shows expiry, last used, and a flag. It does not show the cookie. A one-minute check uses the saved expiry. It does not open store login pages. Logged-out and expiring-soon notices go to Discord and the phone at most once per day. The cookie never goes in the phone snapshot or a broadcast to every device.
 
 Do not harvest other sites, share a session with another user, or forge cookies. `scripts/pack-extension.mjs` writes `release/TCGAIO-Session-Sync-<version>.zip` (manifest at the zip root) and a `.crx` around that zip. The private key is not written. Load unpacked is the install path. A `v*` tag publishes the zip next to the Windows installer and the release APK.
+
+## Front end
+
+Home is the first page. It shows active tasks, today's checkouts, spend, success rate, proxy bench state, and session saved/expired/missing. The task table can search, filter, group by drop label, and reorder. Compact and detailed are a setting. Store marks are original letter tiles, not retailer logos. A product photo appears only when the task has an https image URL the user entered.
+
+Theme, accent, app name, and an optional logo live in Settings. The logo is a small PNG, JPEG, or WebP data URL. Success sound is off until the user turns it on. The confirmation overlay opens when a task moves to success or tested. Checkout spend and the order number come from the saved checkout row.
+
+The first-run wizard shows only when setup is unfinished and there are no profiles and no accounts. Skip marks setup finished. The wizard's first task is test mode with confirm purchase off.
+
+The phone uses the same colors from the snapshot `brand` field. That field does not include the logo. Swipe actions sit beside the visible Start, Stop, and Test buttons. The Android home widget (wins and active tasks) is added by `mobile/plugins/withWidgets.js` during prebuild. There is no iOS widget target in this beta: the Xcode project is not checked in, and an untested WidgetKit extension could break the TestFlight build.
 
 ## Commands
 

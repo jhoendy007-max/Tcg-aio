@@ -43,6 +43,7 @@ export interface AioApi {
     list: () => Promise<Result<PublicTask[]>>
     save: (input: TaskInput) => Promise<Result<PublicTask>>
     delete: (id: string) => Promise<Result<{ id: string }>>
+    reorder: (ids: string[]) => Promise<Result<PublicTask[]>>
     start: (id: string) => Promise<Result<{ started: true }>>
     test: (id: string) => Promise<Result<{ started: true }>>
     stop: (id: string) => Promise<Result<{ stopped: true }>>

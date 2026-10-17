@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import type { AnalyticsReport } from "../../../shared/types"
 import { formatAst } from "../../../engine/time"
+import { SpeedChart, SpendChart, WinChart } from "../components/charts"
 import { Banner } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
@@ -60,6 +61,20 @@ export function AnalyticsPage() {
         {report.restockHints.length === 0 ? <p className="hint">Restock times show up here after the same SKU comes back at least twice in the same hour.</p> : report.restockHints.map((hint) => (
           <p key={`${hint.store}:${hint.sku}:${hint.hourAst}`} className="hint">{hint.detail}</p>
         ))}
+      </div>
+      <div className="chart-grid">
+        <div className="card">
+          <h2>Wins over time</h2>
+          {report.timeline.length === 0 ? <p className="hint">No checkouts recorded yet.</p> : <WinChart points={report.timeline} />}
+        </div>
+        <div className="card">
+          <h2>Spend per store</h2>
+          <SpendChart rows={report.byStore.map((row) => ({ name: row.storeName, spend: row.spend }))} />
+        </div>
+      </div>
+      <div className="card">
+        <h2>Monitor speed</h2>
+        <SpeedChart rows={report.monitor.byStore.map((row) => ({ name: row.store, ms: row.avgMs }))} />
       </div>
       <div className="card">
         <h2>Timeline</h2>

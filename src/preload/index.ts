@@ -9,6 +9,7 @@ const api: AioApi = {
     list: () => ipcRenderer.invoke(channels.tasksList),
     save: (input) => ipcRenderer.invoke(channels.tasksSave, input),
     delete: (id) => ipcRenderer.invoke(channels.tasksDelete, id),
+    reorder: (ids) => ipcRenderer.invoke(channels.tasksReorder, ids),
     start: (id) => ipcRenderer.invoke(channels.tasksStart, id),
     test: (id) => ipcRenderer.invoke(channels.tasksTest, id),
     stop: (id) => ipcRenderer.invoke(channels.tasksStop, id),

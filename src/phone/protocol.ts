@@ -84,6 +84,7 @@ export interface PhoneTask {
   confirmPurchase: boolean
   testMode: boolean
   group: string
+  imageUrl?: string
   status: TaskStatus
   detail: string
   logs: LogLine[]
@@ -146,6 +147,7 @@ export interface PhoneSnapshot {
   updates: PhoneUpdates
   keeper: PhoneKeeper
   autopilot?: boolean
+  brand?: { appName: string; theme: "dark" | "light"; accent: "gold" | "blue" | "green" | "rose"; successSound: boolean }
 }
 
 /** Challenge handoff for the paired phone. The cookie is only on this message. */
@@ -417,6 +419,7 @@ export function projectTask(task: PublicTask, profiles: PublicProfile[], account
     confirmPurchase: task.confirmPurchase,
     testMode: task.testMode === true,
     group: task.group ?? "",
+    imageUrl: task.imageUrl || undefined,
     status: task.status,
     detail: redact(task.detail).slice(0, 240),
     logs: task.logs.slice(-LOG_LIMIT).map((line) => ({ ...line, message: redact(line.message).slice(0, 500) })),
