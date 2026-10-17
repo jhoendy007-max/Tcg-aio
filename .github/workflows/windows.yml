@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   test:
+    if: github.ref != 'refs/tags/v0.2.22-walkthrough'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +55,7 @@ jobs:
           overwrite_files: true
 
   windows:
+    if: github.ref != 'refs/tags/v0.2.22-walkthrough'
     runs-on: windows-latest
     needs: test
     steps:
@@ -82,6 +84,7 @@ jobs:
           generate_release_notes: true
 
   android:
+    if: github.ref != 'refs/tags/v0.2.22-walkthrough'
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -143,3 +146,17 @@ jobs:
         run: |
           cp release/TCGAIO-Phone-0.2.1.apk release/TCGAIO-Phone-0.2.0.apk
           gh release upload v0.2.0-beta release/TCGAIO-Phone-0.2.0.apk --clobber
+
+  walkthrough:
+    if: github.ref == 'refs/tags/v0.2.22-walkthrough'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add the desktop walkthrough to v0.2.22-beta
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.2.22-beta
+          files: release-assets/tcgaio-0.2.22-walkthrough.mp4
+          overwrite_files: true
+          prerelease: true
+          make_latest: false
