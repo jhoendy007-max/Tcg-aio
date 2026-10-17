@@ -445,6 +445,31 @@ export interface ImapView {
   hasPassword: boolean
 }
 
+export interface VaultLink {
+  accountId: string
+  deviceId: string
+  twoWay: boolean
+  linkedAt: number
+  lastUsedAt: number | null
+  expiresAt: number | null
+  loggedOut: boolean
+  alertedDay: string
+}
+
+export interface PublicVault {
+  accountId: string
+  store: StoreId
+  label: string
+  sessionState: SessionState
+  deviceId: string
+  deviceName: string
+  twoWay: boolean
+  lastUsedAt: number | null
+  expiresAt: number | null
+  loggedOut: boolean
+  flag: "ok" | "expiring" | "logged-out"
+}
+
 export interface ImapInput {
   enabled: boolean
   host: string

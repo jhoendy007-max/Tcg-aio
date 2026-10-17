@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "TCGAIO Session Sync",
+  "version": "0.2.9",
+  "description": "Sends your own store sign-in from this browser to TCGAIO on your PC. It does not read other sites.",
+  "permissions": ["cookies", "storage", "alarms", "scripting"],
+  "host_permissions": [
+    "https://www.target.com/*",
+    "https://*.target.com/*",
+    "https://www.walmart.com/*",
+    "https://*.walmart.com/*",
+    "https://www.bestbuy.com/*",
+    "https://*.bestbuy.com/*",
+    "https://www.pokemoncenter.com/*",
+    "https://*.pokemoncenter.com/*",
+    "https://www.amazon.com/*",
+    "https://*.amazon.com/*",
+    "https://www.crunchyroll.com/*",
+    "https://store.crunchyroll.com/*",
+    "https://*.crunchyroll.com/*",
+    "https://p-bandai.com/*",
+    "https://www.p-bandai.com/*",
+    "https://*.p-bandai.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TCGAIO Session Sync"
+  }
+}

@@ -33,7 +33,8 @@ import type {
   TaskTemplateInput,
   OrderRecord,
   ImapView,
-  ImapInput
+  ImapInput,
+  PublicVault
 } from "./types"
 import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
 
@@ -134,6 +135,11 @@ export interface AioApi {
     orders: () => Promise<Result<OrderRecord[]>>
     imap: () => Promise<Result<ImapView>>
     saveImap: (input: ImapInput) => Promise<Result<ImapView>>
+  }
+  vault: {
+    list: () => Promise<Result<PublicVault[]>>
+    unlink: (deviceId: string, accountId: string) => Promise<Result<PublicVault[]>>
+    setTwoWay: (deviceId: string, accountId: string, twoWay: boolean) => Promise<Result<PublicVault[]>>
   }
 }
 

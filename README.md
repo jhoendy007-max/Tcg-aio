@@ -14,6 +14,7 @@ Test mode, from Settings or a task, runs the real monitor, cart, address, shippi
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
 - **Settings** — Discord webhook and Target monitor delay, store ID, ZIP, and state.
 - **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. Card numbers and passwords stay on the PC.
+- **Session Sync** — a Chrome or Edge extension that sends your own store sign-in to this PC. You link each account. It does not read other sites.
 
 On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Pokémon Center payment fetches a CyberSource Flex capture context with a GET that does not include the card, then posts the encrypted card only to `flex.cybersource.com`. Crunchyroll payment posts the card form only to `api.stripe.com` and sends the store a `pm_` id plus a masked card. Amazon checkout uses the address and payment already saved on the Amazon account and does not send the card number or CVV. Walmart's PIE key is fetched with a GET that does not include the card.
 
@@ -59,13 +60,32 @@ npm run dist:win
 
 The NSIS installer is written to `release/TCGAIO-Setup-0.2.0.exe`. The installer is per-user and lets you choose the directory. `dist:win` passes `--publish never`, so a branch build does not need a GitHub token. A `v*` tag publishes the installer as a GitHub Release.
 
-GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and production build on Ubuntu, then `npm run dist:win` on `windows-latest` and uploads the `.exe`. The same workflow builds the Android APK.
+GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and production build on Ubuntu, then `npm run dist:win` on `windows-latest` and uploads the `.exe`. The same workflow builds the Android APK and packs the Session Sync zip.
+
+## Session Sync
+
+Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai. It does not collect other sites, share a session with anyone else, or create cookies.
+
+A tagged release includes `TCGAIO-Session-Sync-0.2.9.zip` next to the Windows installer and the phone APK.
+
+1. Download that zip and unzip it. `manifest.json` has to be in the folder you select, not inside a second folder.
+2. Open `chrome://extensions` or `edge://extensions`.
+3. Turn on **Developer mode**.
+4. Choose **Load unpacked** and select the unzipped folder.
+5. On the desktop **Phone** page, create a pairing code. It expires in three minutes and works once. The same code pairs a phone or this extension.
+6. Open the extension, paste the code, and pair. The PC lists it as **Session Sync**. Revoke it from that device list when you want it to stop.
+7. Link each account, then use **Sync now** or sign in on that store. Cookie changes for a linked account sync on their own.
+8. Two-way is optional. When it is on, a session the app refreshes can be written back into this browser. Those are cookies the PC already saved.
+
+To pack a `.crx` on your own machine, use **Pack extension** on the extensions page and keep the `.pem` it gives you. Do not commit that key. Chrome only installs a packed `.crx` from the Chrome Web Store or an enterprise policy, so **Load unpacked** is the install path for a personal browser. From a checkout you can also run `npm run pack:extension`. That writes the zip and a `.crx` under `release/` and does not save the private key.
+
+The desktop **Session Sync** page shows which browser is linked, when the session expires, when it was last used, and whether it is expiring or logged out. A check once a minute flags a saved session that has expired. It does not open the store login page. Expiring and logged-out notices go to Discord and a paired phone at most once a day. The cookie stays in the encrypted vault.
 
 App data lives in Electron's user data directory (`%APPDATA%\tcgaio` on Windows): `tcgaio.json` for tasks and ciphertext, and `tcgaio.key` only when the AES fallback is used.
 
 ## Phone app
 
-The desktop app is the engine. Leave it running. The phone does not check out by itself, and it never receives the card number, CVV, account password, store session, or proxy password. Profiles show the name, card last four, city, and state. Accounts show a masked username. Proxy groups show a name and a count.
+The desktop app is the engine. Leave it running. The phone does not check out by itself, and it never receives the card number, CVV, account password, store session, or proxy password. Profiles show the name, card last four, city, and state. Accounts show a masked username. Proxy groups show a name and a count. Session Sync is the only client that receives a saved store cookie, and only for an account that browser linked with two-way sync.
 
 ### How the connection works
 

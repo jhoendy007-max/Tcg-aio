@@ -245,6 +245,10 @@ export type ClientMessage =
   | { type: "schedule.save"; req: string; conn: string; name: string; startAt: string; stopAt: string; warmupMin: number; group: string; taskIds: string[] }
   | { type: "schedule.delete"; req: string; conn: string; scheduleId: string }
   | { type: "analytics.csv"; req: string; conn: string }
+  | { type: "vault.link"; req: string; conn: string; accountId: string; twoWay: boolean }
+  | { type: "vault.unlink"; req: string; conn: string; accountId: string }
+  | { type: "vault.push"; req: string; conn: string; accountId: string; cookie: string; expiresAt: number | null }
+  | { type: "vault.pull"; req: string; conn: string; accountId: string }
 
 export type ServerMessage =
   | { type: "paired"; token: string; deviceId: string; pcName: string }
@@ -255,7 +259,8 @@ export type ServerMessage =
   | { type: "notice"; notice: PhoneNotice }
   | { type: "alerts"; alerts: PhoneAlerts }
   | { type: "challenge"; challenge: PhoneChallenge | null }
-  | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: StoreHealth[]; alerts?: PhoneAlerts; csv?: string; created?: number }
+  | { type: "result"; req: string; ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: StoreHealth[]; alerts?: PhoneAlerts; csv?: string; created?: number; cookie?: string }
+  | { type: "vault.session"; accountId: string; cookie: string }
   | { type: "result"; req: string; ok: false; error: string }
   | { type: "error"; error: string }
 
@@ -491,6 +496,16 @@ export function asClientMessage(value: unknown): ClientMessage {
     return { type: "task.duplicate", req: message.req, conn: message.conn, taskId: message.taskId }
   }
   if (message.type === "analytics.csv") return { type: "analytics.csv", req: message.req, conn: message.conn }
+  if (message.type === "vault.link" || message.type === "vault.unlink" || message.type === "vault.push" || message.type === "vault.pull") {
+    if (typeof message.accountId !== "string" || !message.accountId) throw new Error("Choose an account.")
+    if (message.type === "vault.link") return { type: "vault.link", req: message.req, conn: message.conn, accountId: message.accountId, twoWay: message.twoWay === true }
+    if (message.type === "vault.unlink") return { type: "vault.unlink", req: message.req, conn: message.conn, accountId: message.accountId }
+    if (message.type === "vault.pull") return { type: "vault.pull", req: message.req, conn: message.conn, accountId: message.accountId }
+    const cookie = typeof message.cookie === "string" ? message.cookie.replace(/[\r\n]/g, "").trim() : ""
+    if (!cookie) throw new Error("The browser session is empty.")
+    const expiresAt = typeof message.expiresAt === "number" && Number.isFinite(message.expiresAt) ? message.expiresAt : null
+    return { type: "vault.push", req: message.req, conn: message.conn, accountId: message.accountId, cookie: cookie.slice(0, 8192), expiresAt }
+  }
   if (message.type === "schedule.delete") {
     if (typeof message.scheduleId !== "string" || !message.scheduleId) throw new Error("Choose a drop.")
     return { type: "schedule.delete", req: message.req, conn: message.conn, scheduleId: message.scheduleId }

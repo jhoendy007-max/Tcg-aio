@@ -76,7 +76,7 @@ export function PhonePage() {
       <header className="page-head">
         <div>
           <h1>Phone</h1>
-          <p>The PC keeps monitoring and checking out. A paired phone can watch tasks and start or stop them. Card numbers, CVVs, and passwords stay on this PC.</p>
+          <p>The PC keeps monitoring and checking out. A paired phone can watch tasks and start or stop them. Session Sync, the browser extension, uses this same one-time code. Card numbers, CVVs, and passwords stay on this PC.</p>
         </div>
         <button type="button" className="primary" onClick={() => void pair()} disabled={busy || !status?.listening}>Pair device</button>
       </header>

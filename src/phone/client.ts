@@ -38,6 +38,7 @@ export interface PhoneCommandResult {
   alerts?: PhoneAlerts
   csv?: string
   created?: number
+  cookie?: string
 }
 
 export class PhoneRevoked extends Error {
@@ -83,6 +84,7 @@ export class PhoneSession {
   private onAlertsCb: ((alerts: PhoneAlerts) => void) | null = null
   private onChallengeCb: ((challenge: PhoneChallenge | null) => void) | null = null
   private onOnlineCb: ((online: boolean) => void) | null = null
+  private onVaultCb: ((accountId: string, cookie: string) => void) | null = null
   constructor(private link: SavedPhoneLink | null = null) {}
 
   saved(): SavedPhoneLink | null {
@@ -115,6 +117,26 @@ export class PhoneSession {
 
   onOnline(cb: (online: boolean) => void): void {
     this.onOnlineCb = cb
+  }
+
+  onVault(cb: (accountId: string, cookie: string) => void): void {
+    this.onVaultCb = cb
+  }
+
+  linkVault(accountId: string, twoWay: boolean): Promise<PhoneCommandResult> {
+    return this.request({ type: "vault.link", req: rid(), conn: this.conn, accountId, twoWay })
+  }
+
+  unlinkVault(accountId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "vault.unlink", req: rid(), conn: this.conn, accountId })
+  }
+
+  pushVault(accountId: string, cookie: string, expiresAt: number | null): Promise<PhoneCommandResult> {
+    return this.request({ type: "vault.push", req: rid(), conn: this.conn, accountId, cookie, expiresAt })
+  }
+
+  pullVault(accountId: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "vault.pull", req: rid(), conn: this.conn, accountId })
   }
 
   async pair(payload: PairingPayload, deviceName: string, options?: ConnectOptions): Promise<SavedPhoneLink> {
@@ -303,7 +325,7 @@ export class PhoneSession {
     const response = await pending
     if (response.type !== "result") throw new Error("The PC did not answer.")
     if (!response.ok) return { ok: false, error: response.error }
-    return { ok: true, started: response.started, errors: response.errors, task: response.task, health: response.health, alerts: response.alerts, csv: response.csv, created: response.created }
+    return { ok: true, started: response.started, errors: response.errors, task: response.task, health: response.health, alerts: response.alerts, csv: response.csv, created: response.created, cookie: response.cookie }
   }
 
   private send(message: ClientMessage): void {
@@ -430,10 +452,11 @@ export class PhoneSession {
     else if (message.type === "notice") this.onNoticeCb?.(message.notice)
     else if (message.type === "alerts") this.onAlertsCb?.(message.alerts)
     else if (message.type === "challenge") this.onChallengeCb?.(message.challenge)
+    else if (message.type === "vault.session") this.onVaultCb?.(message.accountId, message.cookie)
     else if (message.type === "presence") this.setOnline(true)
     const index = this.waiters.findIndex((waiter) => waiter.match(message))
     if (index < 0) {
-      this.inbox.push(message)
+      if (message.type !== "vault.session") this.inbox.push(message)
       return
     }
     const [waiter] = this.waiters.splice(index, 1)

@@ -65,6 +65,11 @@ export interface PhoneHost {
   saveSchedule?(input: { name: string; startAt: string; stopAt: string; warmupMin: number; group: string; taskIds: string[] }): void
   deleteSchedule?(id: string): void
   analyticsCsv?(): string
+  linkVault?(deviceId: string, accountId: string, twoWay: boolean): void
+  unlinkVault?(deviceId: string, accountId: string): void
+  pushVault?(deviceId: string, accountId: string, cookie: string, expiresAt: number | null): void
+  pullVault?(deviceId: string, accountId: string): string
+  twoWayDevices?(accountId: string): string[]
 }
 
 interface DeviceKey {
@@ -550,15 +555,48 @@ export class PhoneServer {
         this.reply(conn, req, { ok: true, csv: this.host.analyticsCsv() })
         return
       }
+      if (!conn.deviceId) throw new Error("This browser is not paired.")
+      if (message.type === "vault.link") {
+        if (!this.host.linkVault) throw new Error("Session sync is not available.")
+        this.host.linkVault(conn.deviceId, message.accountId, message.twoWay)
+        this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "vault.unlink") {
+        if (!this.host.unlinkVault) throw new Error("Session sync is not available.")
+        this.host.unlinkVault(conn.deviceId, message.accountId)
+        this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "vault.push") {
+        if (!this.host.pushVault) throw new Error("Session sync is not available.")
+        this.host.pushVault(conn.deviceId, message.accountId, message.cookie, message.expiresAt)
+        this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "vault.pull") {
+        if (!this.host.pullVault) throw new Error("Session sync is not available.")
+        this.reply(conn, req, { ok: true, cookie: this.host.pullVault(conn.deviceId, message.accountId) })
+        return
+      }
     } catch (err) {
       this.reply(conn, req, { ok: false, error: safeError(err) })
     }
   }
 
-  private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: import("../shared/types").StoreHealth[]; alerts?: PhoneAlerts; csv?: string; created?: number } | { ok: false; error: string }): void {
+  pushVaultSession(accountId: string, cookie: string): void {
+    const devices = new Set(this.host.twoWayDevices?.(accountId) ?? [])
+    if (!devices.size || !cookie) return
+    for (const conn of this.conns) {
+      if (!conn.deviceId || !devices.has(conn.deviceId) || !conn.key) continue
+      this.send(conn, conn.key, "session", { type: "vault.session", accountId, cookie })
+    }
+  }
+
+  private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: import("../shared/types").StoreHealth[]; alerts?: PhoneAlerts; csv?: string; created?: number; cookie?: string } | { ok: false; error: string }): void {
     if (!conn.key) return
     this.send(conn, conn.key, "session", body.ok
-      ? { type: "result", req, ok: true, started: body.started, errors: body.errors, task: body.task, health: body.health, alerts: body.alerts, csv: body.csv, created: body.created }
+      ? { type: "result", req, ok: true, started: body.started, errors: body.errors, task: body.task, health: body.health, alerts: body.alerts, csv: body.csv, created: body.created, cookie: body.cookie }
       : { type: "result", req, ok: false, error: body.error })
   }
 

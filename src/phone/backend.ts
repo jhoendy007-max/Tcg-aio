@@ -235,6 +235,21 @@ export function createPhoneHost(
     },
     analyticsCsv() {
       return db.checkoutCsv()
+    },
+    linkVault(deviceId: string, accountId: string, twoWay: boolean) {
+      db.linkVault(deviceId, accountId, twoWay)
+    },
+    unlinkVault(deviceId: string, accountId: string) {
+      db.unlinkVault(deviceId, accountId)
+    },
+    pushVault(deviceId: string, accountId: string, cookie: string, expiresAt: number | null) {
+      db.pushVault(deviceId, accountId, cookie, expiresAt)
+    },
+    pullVault(deviceId: string, accountId: string) {
+      return db.pullVault(deviceId, accountId)
+    },
+    twoWayDevices(accountId: string) {
+      return db.vaultLinksFor(accountId, true).map((link) => link.deviceId)
     }
   }
 }
