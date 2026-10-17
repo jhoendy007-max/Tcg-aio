@@ -39,6 +39,8 @@ export interface PhoneHost {
   stop(id: string): void
   startAll(): { started: string[]; errors: { id: string; error: string }[] }
   stopAll(): void
+  pauseAll?(): void
+  setAutopilot?(enabled: boolean): void
   devices(): PhoneDevice[]
   deviceTokens(): { id: string; name: string; token: string }[]
   saveDevice(device: { id: string; name: string; token: string }): void
@@ -411,9 +413,17 @@ export class PhoneServer {
         this.reply(conn, req, { ok: true, started: outcome.started, errors: outcome.errors })
         return
       }
-      if (message.type === "task.stopAll") {
-        this.host.stopAll()
+      if (message.type === "task.stopAll" || message.type === "task.pauseAll") {
+        if (message.type === "task.pauseAll" && this.host.pauseAll) this.host.pauseAll()
+        else this.host.stopAll()
         this.reply(conn, req, { ok: true })
+        return
+      }
+      if (message.type === "autopilot.set") {
+        if (!this.host.setAutopilot) throw new Error("Autopilot is not available.")
+        this.host.setAutopilot(message.enabled)
+        this.reply(conn, req, { ok: true })
+        this.broadcast({ type: "snapshot", conn: "", snapshot: this.host.snapshot() })
         return
       }
       if (message.type === "task.save") {

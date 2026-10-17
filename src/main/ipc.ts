@@ -14,7 +14,7 @@ import type { TaskService } from "../engine/task-runner"
 import type { PhoneServer } from "../phone/server"
 import { encodePairingPayload } from "../phone/protocol"
 import { channels } from "../shared/ipc"
-import type { Result, Settings, TaskEvent } from "../shared/types"
+import type { ImapInput, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
 import { listStores } from "../stores/registry"
 import type { StoreId } from "../shared/types"
 import type { StoreModule } from "../stores/module"
@@ -28,7 +28,8 @@ export function registerIpc(
   alerts: AlertService,
   challenge: ChallengeController,
   sessions: SessionBrowser,
-  updates: UpdateController
+  updates: UpdateController,
+  onSettings?: (settings: Settings) => void
 ): void {
   const publishAlerts = () => {
     const status = phone.status()
@@ -99,8 +100,9 @@ export function registerIpc(
   handle(channels.sessionWarm, (id: string) => sessions.warm(id))
   handle(channels.settingsGet, () => ({ settings: db.getSettings(), security: db.security() }))
   handle(channels.settingsSave, (input: Settings) => {
-    db.saveSettings(input)
-    return { settings: db.getSettings(), security: db.security() }
+    const settings = db.saveSettings(input)
+    onSettings?.(settings)
+    return { settings, security: db.security() }
   })
   handle(channels.settingsTest, async () => {
     const webhook = db.getSettings().discordWebhook
@@ -216,6 +218,15 @@ export function registerIpc(
     db.setUpdateToken(input.action, input.token ?? "")
     return updates.current()
   })
+  handle(channels.templatesList, () => db.listTemplates())
+  handle(channels.templatesSave, (input: TaskTemplateInput) => db.saveTemplate(input))
+  handle(channels.templatesDelete, (id: string) => {
+    db.deleteTemplate(id)
+    return { id }
+  })
+  handle(channels.ordersList, () => db.listOrders())
+  handle(channels.imapGet, () => db.imapView())
+  handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
 }
 
 function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {

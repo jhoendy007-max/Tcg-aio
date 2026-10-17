@@ -108,6 +108,33 @@ describe("task runner", () => {
     expect(db.getTask(task.id).status).toBe("stopped")
   })
 
+  it("does not send place order when the daily budget is spent", async () => {
+    const { db, task } = setup()
+    db.saveSettings({ ...db.getSettings(), dailyBudget: 10, healthReportZone: "UTC" })
+    db.recordCheckout({ store: "target", sku: "88897904", product: "ETB", outcome: "success", profileName: "Home", detail: "Order 1", price: 10, accountId: "other", quantity: 1 })
+    const urls: string[] = []
+    const module: StoreModule = {
+      id: "target",
+      displayName: "Target",
+      skuHint: "TCIN",
+      implemented: true,
+      async run(ctx) {
+        await ctx.http.request({ method: "POST", url: "https://www.target.com/web_checkouts/v1/checkout", body: "{}" })
+        return { outcome: "success", detail: "should not win" }
+      }
+    }
+    const service = new TaskService(db, new Map([["target", module]]), () => undefined, async () => false, {
+      async request(input) {
+        urls.push(input.url)
+        return { status: 200, body: "{}", headers: {} }
+      }
+    })
+    service.start(task.id)
+    await service.wait(task.id)
+    expect(db.getTask(task.id).status).toBe("paused")
+    expect(urls).toEqual([])
+  })
+
   it("refuses to start without purchase confirmation", () => {
     const { db, task } = setup()
     db.saveTask({

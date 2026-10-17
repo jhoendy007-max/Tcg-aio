@@ -113,6 +113,14 @@ const api: AioApi = {
       ipcRenderer.on(channels.updatesEvent, listener)
       return () => ipcRenderer.removeListener(channels.updatesEvent, listener)
     }
+  },
+  autopilot: {
+    list: () => ipcRenderer.invoke(channels.templatesList),
+    save: (input) => ipcRenderer.invoke(channels.templatesSave, input),
+    delete: (id) => ipcRenderer.invoke(channels.templatesDelete, id),
+    orders: () => ipcRenderer.invoke(channels.ordersList),
+    imap: () => ipcRenderer.invoke(channels.imapGet),
+    saveImap: (input) => ipcRenderer.invoke(channels.imapSave, input)
   }
 }
 

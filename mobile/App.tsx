@@ -283,12 +283,17 @@ export default function App() {
           ) : (
             <>
               {snap?.testMode ? <Text style={styles.p}>Global test mode is on. Every task stops before place order.</Text> : null}
+              <View style={styles.switchRow}>
+                <Text style={styles.p}>Autopilot. Restock alerts, keyword hits, and learned restock hours can start a saved template.</Text>
+                <Switch value={snap?.autopilot === true} onValueChange={(enabled) => void run(() => session.current!.setAutopilot(enabled))} trackColor={{ true: colors.accent, false: colors.line }} />
+              </View>
               {snap && isNewer(snap.updates?.phoneVersion ?? null, PHONE_VERSION) ? <Text style={styles.p}>Phone {snap.updates.phoneVersion} is on the PC's GitHub release. Install that APK over this {PHONE_VERSION} build. The download stays on the PC.</Text> : null}
               {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
               {nextDrop(snap, now) ? <Text style={styles.p}>Next drop {nextDrop(snap, now)}</Text> : null}
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
+                <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.pauseAll())}><Text style={styles.secondaryText}>Pause all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("alerts")}><Text style={styles.secondaryText}>Alerts</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => setScreen("drops")}><Text style={styles.secondaryText}>Drops</Text></Pressable>

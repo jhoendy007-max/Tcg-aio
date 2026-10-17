@@ -28,7 +28,12 @@ import type {
   BulkShared,
   DropSchedule,
   DropScheduleInput,
-  UpdateStatus
+  UpdateStatus,
+  TaskTemplate,
+  TaskTemplateInput,
+  OrderRecord,
+  ImapView,
+  ImapInput
 } from "./types"
 import type { PhoneInvite, PhoneStatus } from "../phone/protocol"
 
@@ -121,6 +126,14 @@ export interface AioApi {
     install: () => Promise<Result<{ installing: true }>>
     saveToken: (input: { action: "keep" | "replace" | "clear"; token: string }) => Promise<Result<UpdateStatus>>
     onEvent: (cb: (status: UpdateStatus) => void) => () => void
+  }
+  autopilot: {
+    list: () => Promise<Result<TaskTemplate[]>>
+    save: (input: TaskTemplateInput) => Promise<Result<TaskTemplate>>
+    delete: (id: string) => Promise<Result<{ id: string }>>
+    orders: () => Promise<Result<OrderRecord[]>>
+    imap: () => Promise<Result<ImapView>>
+    saveImap: (input: ImapInput) => Promise<Result<ImapView>>
   }
 }
 

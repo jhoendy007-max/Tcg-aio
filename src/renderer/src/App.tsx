@@ -9,6 +9,7 @@ import { TasksPage } from "./pages/Tasks"
 import { KeeperPage } from "./pages/Keeper"
 import { DropsPage } from "./pages/Drops"
 import { AnalyticsPage } from "./pages/Analytics"
+import { AutopilotPage } from "./pages/Autopilot"
 import { APP_VERSION } from "../../shared/version"
 import type { UpdateStatus } from "../../shared/types"
 import { errorText, unwrap } from "./lib"
@@ -19,6 +20,7 @@ const PAGES = [
   { id: "drops", label: "Drops" },
   { id: "stats", label: "Analytics" },
   { id: "alerts", label: "Alerts" },
+  { id: "autopilot", label: "Autopilot" },
   { id: "profiles", label: "Profiles" },
   { id: "proxies", label: "Proxies" },
   { id: "accounts", label: "Accounts" },
@@ -90,6 +92,7 @@ export function App() {
         {page === "drops" ? <DropsPage /> : null}
         {page === "stats" ? <AnalyticsPage /> : null}
         {page === "alerts" ? <AlertsPage /> : null}
+        {page === "autopilot" ? <AutopilotPage /> : null}
         {page === "profiles" ? <ProfilesPage /> : null}
         {page === "proxies" ? <ProxiesPage /> : null}
         {page === "accounts" ? <AccountsPage /> : null}

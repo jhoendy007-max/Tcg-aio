@@ -59,5 +59,11 @@ export const channels = {
   updatesDownload: "updates:download",
   updatesInstall: "updates:install",
   updatesToken: "updates:token",
-  updatesEvent: "updates:event"
+  updatesEvent: "updates:event",
+  templatesList: "templates:list",
+  templatesSave: "templates:save",
+  templatesDelete: "templates:delete",
+  ordersList: "orders:list",
+  imapGet: "imap:get",
+  imapSave: "imap:save"
 } as const

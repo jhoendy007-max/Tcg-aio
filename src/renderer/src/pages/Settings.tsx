@@ -109,6 +109,49 @@ export function SettingsPage() {
           <TextInput value={form.monitorStoreIds} onChange={(event) => setForm({ ...form, monitorStoreIds: event.target.value })} placeholder="1881, 3244" />
         </Field>
         <label className="check span-2">
+          <input type="checkbox" checked={form.autopilot} onChange={(event) => setForm({ ...form, autopilot: event.target.checked })} />
+          <span>Autopilot. Saved templates can start when a restock alert, keyword hit, or learned restock hour matches. The global off switch stops new starts.</span>
+        </label>
+        <Field label="Autopilot price cap" hint="0 uses only the cap on each template.">
+          <TextInput type="number" min={0} value={form.autopilotPriceCap} onChange={(event) => setForm({ ...form, autopilotPriceCap: Number(event.target.value) })} />
+        </Field>
+        <Field label="Stuck task (minutes)" hint="Restart a running task that has not logged anything. 5–120.">
+          <TextInput type="number" min={5} max={120} value={form.stuckMinutes} onChange={(event) => setForm({ ...form, stuckMinutes: Number(event.target.value) })} />
+        </Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.launchOnBoot} onChange={(event) => setForm({ ...form, launchOnBoot: event.target.checked })} />
+          <span>Launch TCGAIO when Windows starts. This stays off until you turn it on.</span>
+        </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.resumeOnLaunch} onChange={(event) => setForm({ ...form, resumeOnLaunch: event.target.checked })} />
+          <span>After a crash, resume tasks that were still running.</span>
+        </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.relaunchOnCrash} onChange={(event) => setForm({ ...form, relaunchOnCrash: event.target.checked })} />
+          <span>Relaunch the app after an unexpected error, at most once a minute.</span>
+        </label>
+        <Field label="Daily budget" hint="0 means no cap. A checkout over the cap is not sent.">
+          <TextInput type="number" min={0} value={form.dailyBudget} onChange={(event) => setForm({ ...form, dailyBudget: Number(event.target.value) })} />
+        </Field>
+        <Field label="Drop budget" hint="0 means no cap. Applies while a scheduled drop is running.">
+          <TextInput type="number" min={0} value={form.dropBudget} onChange={(event) => setForm({ ...form, dropBudget: Number(event.target.value) })} />
+        </Field>
+        <Field label="Max per SKU" hint="Successful quantity per SKU per day. 0 means no cap.">
+          <TextInput type="number" min={0} max={99} value={form.maxPerSku} onChange={(event) => setForm({ ...form, maxPerSku: Number(event.target.value) })} />
+        </Field>
+        <Field label="Max per account" hint="Successful orders per account per day. 0 means no cap.">
+          <TextInput type="number" min={0} max={99} value={form.maxPerAccount} onChange={(event) => setForm({ ...form, maxPerAccount: Number(event.target.value) })} />
+        </Field>
+        <Field className="span-2" label="Store purchase limits" hint="One line per store, like target:1. That is the most of one SKU an account can win today.">
+          <TextInput value={form.storePurchaseLimits} onChange={(event) => setForm({ ...form, storePurchaseLimits: event.target.value })} placeholder="target:1" />
+        </Field>
+        <Field label="Health report time" hint="HH:MM in the timezone below. Blank turns the report off.">
+          <TextInput value={form.healthReportTime} onChange={(event) => setForm({ ...form, healthReportTime: event.target.value })} placeholder="08:00" />
+        </Field>
+        <Field label="Report timezone" hint="IANA name, like America/New_York. Blank uses UTC for budgets.">
+          <TextInput value={form.healthReportZone} onChange={(event) => setForm({ ...form, healthReportZone: event.target.value })} placeholder="America/New_York" />
+        </Field>
+        <label className="check span-2">
           <input type="checkbox" checked={form.alertPrice} onChange={(event) => setForm({ ...form, alertPrice: event.target.checked })} />
           <span>Alert when the price changes.</span>
         </label>

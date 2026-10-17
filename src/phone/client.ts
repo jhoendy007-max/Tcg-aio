@@ -211,6 +211,14 @@ export class PhoneSession {
     return this.request({ type: "task.stopAll", req: rid(), conn: this.conn })
   }
 
+  pauseAll(): Promise<PhoneCommandResult> {
+    return this.request({ type: "task.pauseAll", req: rid(), conn: this.conn })
+  }
+
+  setAutopilot(enabled: boolean): Promise<PhoneCommandResult> {
+    return this.request({ type: "autopilot.set", req: rid(), conn: this.conn, enabled })
+  }
+
   saveTask(task: PhoneTaskDraft): Promise<PhoneCommandResult> {
     return this.request({ type: "task.save", req: rid(), conn: this.conn, task })
   }

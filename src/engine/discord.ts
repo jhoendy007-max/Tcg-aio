@@ -24,7 +24,7 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
     ? 0x3cba8b
     : notice.kind === "tested" || notice.kind === "alert"
       ? 0x6aa6ff
-      : notice.kind === "drop"
+      : notice.kind === "drop" || notice.kind === "health"
         ? 0x6aa6ff
         : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session"
           ? 0xe0a045
@@ -42,7 +42,9 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
               ? `${notice.storeName} needs a sign-in`
               : notice.kind === "drop"
                 ? `${notice.sku} drop`
-                : notice.kind === "paused"
+                : notice.kind === "health"
+                  ? "Daily health report"
+                  : notice.kind === "paused"
                   ? `${notice.storeName} needs attention`
                   : `${notice.storeName} checkout failed`
   const lines = [

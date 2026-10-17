@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.7 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.8 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -49,6 +49,22 @@ A stock reading can notify on price, new offer id, unavailable-to-purchasable, a
 A block (HTTP 403, 412, 429, or 435, except a real product queue) backs off, rotates within the current pool, and reloads the account browser to copy cookies the site set. After `blockRetries` the task pauses. Place-order requests are not retried. A person still solves a challenge in the existing handoff. Do not open a second solver.
 
 Monitor sample counts, average time, and block rate are on the analytics report.
+
+## Hands-free
+
+Autopilot is off until the user turns it on. A saved template can create and start a task from a restock alert, a keyword hit, or a learned restock hour. Price caps skip a signal that has no price. Rotation uses only accounts and profiles saved on that PC, and it stops when the daily, drop, SKU, account, or per-store quantity limit is reached.
+
+Those limits are checked again in the task HTTP client before a place-order request. Test mode still throws before that request is sent. A limit pause does not retry the order.
+
+Self-healing runs only while autopilot is on. A task with no log for `stuckMinutes` is restarted up to three times. An expired session opens Session Keeper once, then the task can move to another saved account for the same store. A benched proxy is replaced from the same pool. If every proxy in the pool is benched, the task pauses.
+
+Windows launch at boot is opt-in (`launchOnBoot`). A clean quit marks running tasks stopped. A crash leaves them active, and the next launch resumes them when `resumeOnLaunch` is on. An uncaught error can relaunch the process at most once a minute.
+
+Order rows are stored after a win. A later GET of that account's order page, plus an optional IMAP mailbox the user connects, can mark the order cancelled or record a tracking number. The mail password is encrypted with the same cipher as the other secrets.
+
+The daily report uses `healthReportTime` in `healthReportZone` (the host zone when the field is blank) and goes to Discord and the phone.
+
+The phone can set autopilot and pause every running task. The desktop app stays Windows-only. Do not add a macOS disk image, macOS CI, or Mac signing. The phone keeps the TestFlight path in `mobile/eas.json`.
 
 ## Commands
 
