@@ -63,6 +63,7 @@ export function cleanSettings(input: Settings): Settings {
     throw new AppError("Monitor delay must be between 1000 and 60000 ms.")
   }
   assertDiscordWebhook(input.discordWebhook ?? "")
+  assertDiscordWebhook(input.groupWebhook ?? "")
   const targetStoreId = (input.targetStoreId || DEFAULT_SETTINGS.targetStoreId).trim()
   const targetZip = (input.targetZip || DEFAULT_SETTINGS.targetZip).trim()
   const targetState = (input.targetState || DEFAULT_SETTINGS.targetState).trim().toUpperCase()
@@ -99,6 +100,8 @@ export function cleanSettings(input: Settings): Settings {
   const monitorStoreIds = cleanStoreIdList(input.monitorStoreIds ?? "")
   return {
     discordWebhook: input.discordWebhook.trim(),
+    groupDiscord: input.groupDiscord === true,
+    groupWebhook: (input.groupWebhook ?? "").trim(),
     monitorDelayMs,
     targetStoreId,
     targetZip,

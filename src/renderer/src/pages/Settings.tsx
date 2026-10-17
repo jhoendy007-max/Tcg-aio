@@ -142,6 +142,13 @@ export function SettingsPage() {
           <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
         </Field>
         <label className="check span-2">
+          <input type="checkbox" checked={form.groupDiscord} onChange={(event) => setForm({ ...form, groupDiscord: event.target.checked })} />
+          <span>Also post restocks and successful checkouts to a shared group webhook. This stays off until you turn it on. The group post leaves out profile, email, card, and proxy details.</span>
+        </label>
+        <Field className="span-2" label="Group webhook" hint="A different https://discord.com/api/webhooks/… URL. Nothing is sent here while the switch above is off.">
+          <TextInput value={form.groupWebhook} onChange={(event) => setForm({ ...form, groupWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
+        </Field>
+        <label className="check span-2">
           <input type="checkbox" checked={form.testMode} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
           <span>Test mode for every task. The real flow runs through payment and stops before place order. Nothing is charged.</span>
         </label>
