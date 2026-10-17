@@ -1,14 +1,16 @@
 import { useState } from "react"
+import { taskText } from "../../../shared/task-role"
 import type { ProxyGroup, PublicAccount, PublicProfile, PublicTask, StoreId, StoreInfo } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
-export function TasksBulk({ tasks, profiles, accounts, groups, stores, onChanged }: {
+export function TasksBulk({ tasks, profiles, accounts, groups, stores, lang, onChanged }: {
   tasks: PublicTask[]
   profiles: PublicProfile[]
   accounts: PublicAccount[]
   groups: ProxyGroup[]
   stores: StoreInfo[]
+  lang: "en" | "es"
   onChanged: () => Promise<void> | void
 }) {
   const [store, setStore] = useState<StoreId>("target")
@@ -23,6 +25,8 @@ export function TasksBulk({ tasks, profiles, accounts, groups, stores, onChanged
   const [picked, setPicked] = useState<string[]>([])
   const [editQuantity, setEditQuantity] = useState("")
   const [editGroup, setEditGroup] = useState("")
+  const [editCap, setEditCap] = useState("")
+  const [editKeywords, setEditKeywords] = useState("")
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -121,16 +125,20 @@ export function TasksBulk({ tasks, profiles, accounts, groups, stores, onChanged
       <div className="actions">
         <button type="button" disabled={busy} onClick={() => void run(async () => { const copies = await unwrap(window.aio.bulk.duplicate(picked)); setMessage(`Duplicated ${copies.length}.`); setPicked([]) })}>Duplicate</button>
         <button type="button" className="danger" disabled={busy} onClick={() => void run(async () => { const result = await unwrap(window.aio.bulk.delete(picked)); setMessage(`Deleted ${result.deleted.length}.`); setPicked([]) })}>Delete</button>
-        <TextInput value={editQuantity} onChange={(event) => setEditQuantity(event.target.value)} placeholder="Qty" />
-        <TextInput value={editGroup} onChange={(event) => setEditGroup(event.target.value)} placeholder="Group" />
+        <TextInput value={editQuantity} onChange={(event) => setEditQuantity(event.target.value)} placeholder={taskText(lang, "quantity")} />
+        <TextInput value={editGroup} onChange={(event) => setEditGroup(event.target.value)} placeholder={taskText(lang, "group")} />
+        <TextInput value={editKeywords} onChange={(event) => setEditKeywords(event.target.value)} placeholder={taskText(lang, "keywords")} />
+        <TextInput value={editCap} onChange={(event) => setEditCap(event.target.value)} placeholder={taskText(lang, "maxPrice")} />
         <button type="button" disabled={busy} onClick={() => void run(async () => {
           const result = await unwrap(window.aio.bulk.edit({
             ids: picked,
             quantity: editQuantity ? Number(editQuantity) : undefined,
-            group: editGroup || undefined
+            group: editGroup || undefined,
+            keywords: editKeywords || undefined,
+            maxPrice: editCap.trim() === "" ? undefined : Number(editCap)
           }))
-          setMessage(`Updated ${result.updated.length}.`)
-        })}>Apply to selected</button>
+          setMessage(`Updated ${result.updated.length}.${result.errors[0] ? ` ${result.errors[0].error}` : ""}`)
+        })}>{lang === "es" ? "Aplicar" : "Apply to selected"}</button>
       </div>
       <div className="choices">
         {tasks.map((task) => (

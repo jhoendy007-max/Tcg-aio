@@ -41,6 +41,8 @@ export interface StoreRunContext {
   mailCode?: () => Promise<string | null>
   /** Watch stock only. The module must not add to cart. */
   monitorOnly?: boolean
+  /** Extra wait before add-to-cart, in milliseconds. Zero uses the store pace only. */
+  checkoutDelayMs?: number
   /** Resolved store settings. Task overrides already won. */
   module?: ModulePace
   /** Set for a test run. The HTTP client also refuses place-order requests. */
@@ -50,8 +52,13 @@ export interface StoreRunContext {
   checklistText?: () => string
 }
 
-/** Standard add-to-cart waits one retry interval. Fast does not. */
+/** A checkout delay waits first. Standard add-to-cart then waits one retry interval. Fast does not. */
 export async function paceAddToCart(ctx: StoreRunContext): Promise<void> {
+  const extra = Math.max(0, Math.round(ctx.checkoutDelayMs ?? 0))
+  if (extra > 0) {
+    ctx.log("info", `Waiting ${extra} ms before adding to cart.`)
+    await ctx.sleep(extra)
+  }
   if (ctx.module?.atcMode !== "standard") return
   ctx.log("info", "Standard add-to-cart is on for this store. Waiting one retry interval before adding.")
   await ctx.sleep(ctx.module.retryDelayMs)

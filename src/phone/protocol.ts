@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2"
 import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils"
 import { redact } from "../shared/redact"
 import { isStoreId, storeName } from "../shared/stores"
-import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, ModuleRecord, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StoreHealth, StoreId, StoreInfo, TaskStatus } from "../shared/types"
+import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, ModuleRecord, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StartMode, StoreHealth, StoreId, StoreInfo, TaskKind, TaskOverrides, TaskStatus } from "../shared/types"
 
 export const PHONE_PROTOCOL = 1
 export const INVITE_TTL_MS = 3 * 60 * 1000
@@ -86,6 +86,19 @@ export interface PhoneTask {
   group: string
   imageUrl?: string
   monitorOnly?: boolean
+  kind?: TaskKind
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  linkedCheckoutIds?: string[]
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  startMode?: StartMode
+  linkedMonitorId?: string | null
+  jitterPct?: number | null
+  monitorProxyGroupId?: string | null
+  overrides?: TaskOverrides
   monitorMs?: number
   detectToCartMs?: number
   status: TaskStatus
@@ -279,6 +292,19 @@ export interface PhoneTaskDraft {
   confirmPurchase: boolean
   testMode?: boolean
   group?: string
+  kind?: TaskKind
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  linkedCheckoutIds?: string[]
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  startMode?: StartMode
+  linkedMonitorId?: string | null
+  jitterPct?: number | null
+  monitorProxyGroupId?: string | null
+  overrides?: TaskOverrides
 }
 
 export type ClientMessage =
@@ -492,7 +518,20 @@ export function projectTask(task: PublicTask, profiles: PublicProfile[], account
     testMode: task.testMode === true,
     group: task.group ?? "",
     imageUrl: task.imageUrl || undefined,
-    monitorOnly: task.monitorOnly === true,
+    monitorOnly: task.monitorOnly === true || task.kind === "monitor",
+    kind: task.kind === "monitor" || task.monitorOnly ? "monitor" : "checkout",
+    keywords: task.keywords ?? "",
+    priceCap: task.priceCap ?? null,
+    webhook: task.webhook ?? "",
+    activeHours: task.activeHours ?? "",
+    linkedCheckoutIds: task.linkedCheckoutIds ?? [],
+    checkoutDelayMs: task.checkoutDelayMs ?? null,
+    maxPrice: task.maxPrice ?? null,
+    startMode: task.startMode ?? (task.kind === "monitor" || task.monitorOnly ? "manual" : "builtin"),
+    linkedMonitorId: task.linkedMonitorId ?? null,
+    jitterPct: task.jitterPct ?? null,
+    monitorProxyGroupId: task.monitorProxyGroupId,
+    overrides: task.overrides,
     monitorMs: task.monitorMs,
     detectToCartMs: task.detectToCartMs,
     status: task.status,
@@ -506,24 +545,54 @@ export function parseTaskDraft(value: unknown): PhoneTaskDraft {
   if (!value || typeof value !== "object") throw new Error("Task is invalid.")
   const input = value as Record<string, unknown>
   if (typeof input.store !== "string" || !isStoreId(input.store)) throw new Error("Choose a store.")
-  if (typeof input.sku !== "string" || !input.sku.trim()) throw new Error("Product SKU or URL is required.")
+  const kind: TaskKind = input.kind === "monitor" ? "monitor" : "checkout"
+  const keywords = typeof input.keywords === "string" ? input.keywords.trim().slice(0, 200) : ""
+  const sku = typeof input.sku === "string" ? input.sku.trim() : ""
+  if (!sku && !keywords) throw new Error("Product SKU or URL is required.")
   const quantity = Math.round(Number(input.quantity))
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new Error("Quantity must be from 1 to 12.")
-  if (typeof input.profileId !== "string" || !input.profileId) throw new Error("Choose a profile.")
-  if (typeof input.accountId !== "string" || !input.accountId) throw new Error("Choose an account.")
+  const profileId = typeof input.profileId === "string" ? input.profileId : ""
+  const accountId = typeof input.accountId === "string" ? input.accountId : ""
+  if (kind !== "monitor") {
+    if (!profileId) throw new Error("Choose a profile.")
+    if (!accountId) throw new Error("Choose an account.")
+  }
   const proxyGroupId = typeof input.proxyGroupId === "string" && input.proxyGroupId ? input.proxyGroupId : null
+  const monitorProxyGroupId = typeof input.monitorProxyGroupId === "string" && input.monitorProxyGroupId ? input.monitorProxyGroupId : null
+  const modes: StartMode[] = ["manual", "scheduled", "monitor", "restock", "builtin"]
+  const startMode = modes.includes(input.startMode as StartMode) ? input.startMode as StartMode : undefined
   return {
     id: typeof input.id === "string" && input.id ? input.id : undefined,
     store: input.store,
-    sku: input.sku.trim(),
+    sku,
     quantity,
-    profileId: input.profileId,
-    accountId: input.accountId,
-    proxyGroupId,
-    confirmPurchase: input.confirmPurchase === true,
+    profileId,
+    accountId,
+    proxyGroupId: kind === "monitor" ? null : proxyGroupId,
+    confirmPurchase: kind === "monitor" ? false : input.confirmPurchase === true,
     testMode: input.testMode === true,
-    group: typeof input.group === "string" ? input.group.trim().slice(0, 40) : ""
+    group: typeof input.group === "string" ? input.group.trim().slice(0, 40) : "",
+    kind,
+    keywords,
+    priceCap: optionalMoney(input.priceCap),
+    webhook: typeof input.webhook === "string" ? input.webhook.trim().slice(0, 300) : "",
+    activeHours: typeof input.activeHours === "string" ? input.activeHours.slice(0, 400) : "",
+    linkedCheckoutIds: Array.isArray(input.linkedCheckoutIds) ? input.linkedCheckoutIds.filter((id): id is string => typeof id === "string").slice(0, 20) : [],
+    checkoutDelayMs: optionalMoney(input.checkoutDelayMs),
+    maxPrice: optionalMoney(input.maxPrice),
+    startMode,
+    linkedMonitorId: typeof input.linkedMonitorId === "string" && input.linkedMonitorId ? input.linkedMonitorId.slice(0, 80) : null,
+    jitterPct: optionalMoney(input.jitterPct),
+    monitorProxyGroupId,
+    overrides: input.overrides && typeof input.overrides === "object" ? input.overrides as TaskOverrides : undefined
   }
+}
+
+function optionalMoney(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null || value === "") return null
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : null
 }
 
 export function asClientMessage(value: unknown): ClientMessage {

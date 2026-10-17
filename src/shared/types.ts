@@ -194,6 +194,23 @@ export function isActiveStatus(status: TaskStatus): boolean {
   return ACTIVE_STATUSES.includes(status)
 }
 
+export type TaskKind = "monitor" | "checkout"
+export type StartMode = "manual" | "scheduled" | "monitor" | "restock" | "builtin"
+
+export interface TaskRole {
+  kind: TaskKind
+  keywords: string
+  priceCap: number | null
+  webhook: string
+  activeHours: string
+  linkedCheckoutIds: string[]
+  checkoutDelayMs: number | null
+  maxPrice: number | null
+  startMode: StartMode
+  linkedMonitorId: string | null
+  jitterPct: number | null
+}
+
 export interface PublicTask {
   id: string
   store: StoreId
@@ -212,10 +229,21 @@ export interface PublicTask {
   rank?: number
   /** Optional https image. A monitor can fill this from the store's product payload. */
   imageUrl?: string
-  /** Watch stock and notify. Never add to cart. */
+  /** Watch stock and notify. Never add to cart. True for monitor tasks. */
   monitorOnly?: boolean
   /** Fields this task sets itself. Blank fields use the store page. */
   overrides?: TaskOverrides
+  kind?: TaskKind
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  linkedCheckoutIds?: string[]
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  startMode?: StartMode
+  linkedMonitorId?: string | null
+  jitterPct?: number | null
   /** Last shared stock-read time, in milliseconds. */
   monitorMs?: number
   /** Milliseconds from an in-stock reading to the add-to-cart call. */
@@ -243,6 +271,17 @@ export interface TaskInput {
   imageUrl?: string
   monitorOnly?: boolean
   overrides?: TaskOverrides
+  kind?: TaskKind
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  linkedCheckoutIds?: string[]
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  startMode?: StartMode
+  linkedMonitorId?: string | null
+  jitterPct?: number | null
 }
 
 export type QueueMode = "wait" | "skip" | "pause"
@@ -826,6 +865,15 @@ export interface BulkEdit {
   confirmPurchase?: boolean
   testMode?: boolean
   group?: string
+  keywords?: string
+  priceCap?: number | null
+  webhook?: string
+  activeHours?: string
+  checkoutDelayMs?: number | null
+  maxPrice?: number | null
+  jitterPct?: number | null
+  monitorDelayMs?: number | null
+  retryDelayMs?: number | null
 }
 
 export interface UpdateStatus {
