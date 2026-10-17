@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.19 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.19-beta monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -156,7 +156,7 @@ Phone:
 
 Use the local binaries (`./node_modules/.bin/tsc`, `./node_modules/.bin/vitest`) from the repo root. Do not run `npx tsc` from another directory.
 
-CI is `.github/workflows/windows.yml`. Pushes to `main` and `cursor/**`, pull requests, and tags `v*` run test, then Windows and Android. The installer, `latest.yml`, blockmap, APK, and Session Sync zip publish only when the ref is a `v*` tag. Do not move an existing release tag to pick up docs.
+CI is `.github/workflows/windows.yml`. Pushes to `main` and `cursor/**`, pull requests, and tags `v*` run test, then Windows and Android. The installer, `latest.yml`, blockmap, APK, Session Sync zip, and `release-assets/desktop-home-tasks-phone-tour.mp4` publish only when the ref is a `v*` tag. Do not move an existing release tag to pick up docs. The desktop stays Windows-only. Do not add a macOS disk image or macOS CI.
 
 The desktop app is Windows only. Do not add a macOS disk image, a `macos-latest` job, Mac signing, or notarization. The phone app keeps its iOS TestFlight path: `mobile/eas.json` production profile (`ios.distribution: store`), then `npx eas build -p ios --profile production` and `npx eas submit -p ios --profile production`. GitHub Actions does not build that iOS binary.
 
