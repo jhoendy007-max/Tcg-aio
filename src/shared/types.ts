@@ -388,6 +388,8 @@ export interface Settings {
   googleMailClientId: string
   /** Public OAuth client id for Sign in with Microsoft. Not a secret. */
   microsoftMailClientId: string
+  /** https URL the user owns. The upload token is not stored here. */
+  backupUrl: string
   /** Per-store defaults. Missing stores use the recommended values. */
   modules: Partial<Record<StoreId, ModuleRecord>>
 }
@@ -438,6 +440,7 @@ export const DEFAULT_SETTINGS: Settings = {
   language: "en",
   googleMailClientId: "",
   microsoftMailClientId: "",
+  backupUrl: "",
   modules: {}
 }
 

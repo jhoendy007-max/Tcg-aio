@@ -2,6 +2,7 @@ import { digitsOnly, expiryInFuture, last4, luhnOk, normalizeExp } from "../shar
 import { cleanModules } from "../shared/module-settings"
 import { AppError } from "../shared/errors"
 import { isStoreId } from "../shared/stores"
+import { assertBackupUrl } from "./backup"
 import { assertDiscordWebhook } from "./discord"
 import type { Address, Settings } from "../shared/types"
 import { DEFAULT_SETTINGS } from "../shared/types"
@@ -141,6 +142,7 @@ export function cleanSettings(input: Settings): Settings {
     language: input.language === "es" ? "es" : "en",
     googleMailClientId: cleanClientId(input.googleMailClientId),
     microsoftMailClientId: cleanClientId(input.microsoftMailClientId),
+    backupUrl: assertBackupUrl(input.backupUrl ?? ""),
     modules: cleanModules(input.modules)
   }
 }

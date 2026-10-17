@@ -13,6 +13,9 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false)
   const [token, setToken] = useState("")
   const [hasToken, setHasToken] = useState(false)
+  const [passphrase, setPassphrase] = useState("")
+  const [backupToken, setBackupToken] = useState("")
+  const [hasBackupToken, setHasBackupToken] = useState(false)
 
   useEffect(() => {
     void unwrap(window.aio.settings.get())
@@ -22,6 +25,7 @@ export function SettingsPage() {
       })
       .catch((err) => setError(errorText(err)))
     void unwrap(window.aio.updates.get()).then((status) => setHasToken(status.hasToken)).catch(() => undefined)
+    void unwrap(window.aio.backup.saveToken({ action: "keep", token: "" })).then((status) => setHasBackupToken(status.hasToken)).catch(() => undefined)
   }, [])
 
   async function save(event: React.FormEvent) {
@@ -231,6 +235,9 @@ export function SettingsPage() {
         <Field label="Target store ID"><TextInput value={form.targetStoreId} onChange={(event) => setForm({ ...form, targetStoreId: event.target.value })} required /></Field>
         <Field label="Target ZIP"><TextInput value={form.targetZip} onChange={(event) => setForm({ ...form, targetZip: event.target.value })} required /></Field>
         <Field label="Target state"><TextInput value={form.targetState} maxLength={2} onChange={(event) => setForm({ ...form, targetState: event.target.value })} required /></Field>
+        <Field className="span-2" label="Backup URL" hint="Optional https link you control. The file stored there is ciphertext. Do not put the token in the URL.">
+          <TextInput value={form.backupUrl} onChange={(event) => setForm({ ...form, backupUrl: event.target.value })} placeholder="https://example.com/tcgaio-backup" autoComplete="off" />
+        </Field>
         <Field label="Target API key" hint="Leave blank to use the key embedded in Target's web app. It can change when the site deploys.">
           <TextInput value={form.targetApiKey} onChange={(event) => setForm({ ...form, targetApiKey: event.target.value })} autoComplete="off" />
         </Field>
@@ -240,6 +247,95 @@ export function SettingsPage() {
         </div>
       </form>
       <MailSettings />
+      <form className="card stack" onSubmit={(event) => event.preventDefault()}>
+        <div>
+          <h2>Encrypted backup</h2>
+          <p className="hint">Settings, tasks, profiles, accounts, and proxies are sealed with your passphrase. Card numbers, passwords, and sessions stay inside that ciphertext. The passphrase is not saved, and this PC's phone pairing is not replaced on restore. A cloud copy is the same sealed file at the backup URL.</p>
+        </div>
+        <Field label="Passphrase" hint="8 or more characters. You need this same passphrase to restore.">
+          <TextInput type="password" autoComplete="off" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+        </Field>
+        <Field label="Upload token" hint={hasBackupToken ? "A token is saved on this PC. It is not written into the backup." : "Optional. Sent only as a bearer token to your backup URL."}>
+          <TextInput type="password" autoComplete="off" value={backupToken} onChange={(event) => setBackupToken(event.target.value)} />
+        </Field>
+        <div className="actions">
+          <button type="button" disabled={busy} onClick={() => void (async () => {
+            setBusy(true)
+            setError("")
+            setMessage("")
+            try {
+              const result = await unwrap(window.aio.backup.exportFile(passphrase))
+              const blob = new Blob([result.file], { type: "application/octet-stream" })
+              const url = URL.createObjectURL(blob)
+              const link = document.createElement("a")
+              link.href = url
+              link.download = "tcgaio.tcgaio-backup"
+              link.click()
+              URL.revokeObjectURL(url)
+              setPassphrase("")
+              setMessage("Encrypted backup downloaded. Keep the passphrase with you, not in the file.")
+            } catch (err) {
+              setError(errorText(err))
+            } finally {
+              setBusy(false)
+            }
+          })()}>Download backup</button>
+          <button type="button" disabled={busy} onClick={() => document.getElementById("backup-file")?.click()}>Restore from file</button>
+          <input id="backup-file" type="file" accept=".tcgaio-backup,application/json" hidden onChange={(event) => {
+            const file = event.target.files?.[0]
+            event.target.value = ""
+            if (!file) return
+            setBusy(true)
+            setError("")
+            void file.text().then((text) => unwrap(window.aio.backup.restoreFile(passphrase, text))).then(() => {
+              setPassphrase("")
+              setMessage("Backup restored on this PC. Phone pairing was left as it was.")
+              return unwrap(window.aio.settings.get())
+            }).then((next) => {
+              if (!next) return
+              setPayload(next)
+              setForm(next.settings)
+              applyTheme(next.settings)
+            }).catch((err) => setError(errorText(err))).finally(() => setBusy(false))
+          }} />
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.backup.saveToken({ action: backupToken ? "replace" : "clear", token: backupToken })).then((status) => {
+            setHasBackupToken(status.hasToken)
+            setBackupToken("")
+            setMessage(status.hasToken ? "Backup token saved on this PC." : "Backup token removed.")
+          }).catch((err) => setError(errorText(err)))}>{backupToken ? "Save upload token" : "Remove upload token"}</button>
+          <button type="button" disabled={busy} onClick={() => void (async () => {
+            setBusy(true)
+            setError("")
+            try {
+              await unwrap(window.aio.settings.save(form))
+              await unwrap(window.aio.backup.upload(passphrase))
+              setPassphrase("")
+              setMessage("Encrypted backup uploaded. The host received ciphertext only.")
+            } catch (err) {
+              setError(errorText(err))
+            } finally {
+              setBusy(false)
+            }
+          })()}>Upload</button>
+          <button type="button" disabled={busy} onClick={() => void (async () => {
+            setBusy(true)
+            setError("")
+            try {
+              await unwrap(window.aio.backup.download(passphrase))
+              const next = await unwrap(window.aio.settings.get())
+              setPayload(next)
+              setForm(next.settings)
+              applyTheme(next.settings)
+              setPassphrase("")
+              setMessage("Encrypted backup downloaded and restored.")
+            } catch (err) {
+              setError(errorText(err))
+            } finally {
+              setBusy(false)
+            }
+          })()}>Download from URL</button>
+        </div>
+      </form>
       <form className="card stack" onSubmit={(event) => {
         event.preventDefault()
         setBusy(true)

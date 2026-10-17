@@ -15,8 +15,8 @@ Test mode, from Settings or a task, runs the real monitor, cart, address, shippi
 - **Proxies** — import `host:port` or `host:port:user:pass` lists and test them.
 - **Accounts** — per-store logins. Passwords and browser sessions are encrypted.
 - **Stores** — one settings page per store, with recommended defaults, reset, and JSON presets. A task override wins over the store, which wins over global Settings. The same page is on the phone, in English or Spanish.
-- **Settings** — Discord webhook, Target monitor delay, store ID, ZIP, and state, and read-only IMAP mailboxes. An email address fills the server settings. Google and Microsoft can sign in; iCloud and Yahoo use an app password. The same mail screen is on the phone, in English or Spanish.
-- **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. Card numbers and passwords stay on the PC.
+- **Settings** — Discord webhook, Target monitor delay, store ID, ZIP, and state, and read-only IMAP mailboxes. An email address fills the server settings. Google and Microsoft can sign in; iCloud and Yahoo use an app password. The same mail screen is on the phone, in English or Spanish. An encrypted backup uses a passphrase you keep. The optional cloud copy is the same sealed file.
+- **Phone** — pair an iOS or Android app with a one-time QR code, then start, stop, edit, and watch tasks from the phone. One phone can switch among several PCs. Card numbers and passwords stay on the PC.
 - **Session Sync** — a Chrome or Edge extension that sends your own store sign-in to this PC. You link each account. It does not read other sites.
 
 On Windows, card numbers, CVVs, passwords, and sessions are encrypted with **Windows DPAPI** through Electron `safeStorage`. If DPAPI is unavailable (for example a Linux dev machine), the app falls back to AES-256-GCM with a key file in the app data folder. The Settings page shows which method is active. Secrets are not written to the task log or the Discord webhook. The card is sent only to `carts.target.com` during Target payment, only to `www.walmart.com` during Walmart payment, and only to `www.bestbuy.com` during Best Buy payment. Pokémon Center payment fetches a CyberSource Flex capture context with a GET that does not include the card, then posts the encrypted card only to `flex.cybersource.com`. Crunchyroll payment posts the card form only to `api.stripe.com` and sends the store a `pm_` id plus a masked card. Amazon checkout uses the address and payment already saved on the Amazon account and does not send the card number or CVV. Walmart's PIE key is fetched with a GET that does not include the card.
@@ -69,7 +69,7 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on the stores in the catalog (Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer). It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.16.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.17.zip` next to the Windows installer and the phone APK.
 
 Analytics can check a win against the public TCGplayer market price and the public eBay sold search, show profit, and copy a listing draft. It does not post the listing. Inventory lists those purchases, the current value you enter, total profit, and a CSV export.
 

@@ -10,6 +10,7 @@ import { parseBulkTasks } from "../engine/bulk"
 import { defaultHttp } from "../engine/http"
 import { lookupResale } from "../engine/resale"
 import { inventoryCsv, inventoryReport } from "../engine/inventory"
+import { getBackup, putBackup } from "../engine/backup"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
@@ -268,6 +269,28 @@ export function registerIpc(
     return inventoryReport(db.listCheckouts())
   })
   handle(channels.inventoryCsv, () => ({ csv: inventoryCsv(db.listCheckouts()) }))
+  handle(channels.backupExport, (passphrase: string) => ({ file: db.backupFile(passphrase) }))
+  handle(channels.backupRestore, (passphrase: string, file: string) => {
+    db.restoreFile(file, passphrase)
+    onSettings?.(db.getSettings())
+    return { restored: true as const }
+  })
+  handle(channels.backupToken, (input: { action: "keep" | "replace" | "clear"; token: string }) => {
+    db.setBackupToken(input?.action ?? "keep", input?.token ?? "")
+    return { hasToken: db.hasBackupToken() }
+  })
+  handle(channels.backupUpload, async (passphrase: string) => {
+    const settings = db.getSettings()
+    await putBackup(defaultHttp, settings.backupUrl, db.backupToken(), db.backupFile(passphrase))
+    return { uploaded: true as const }
+  })
+  handle(channels.backupDownload, async (passphrase: string) => {
+    const settings = db.getSettings()
+    const file = await getBackup(defaultHttp, settings.backupUrl, db.backupToken())
+    db.restoreFile(file, passphrase)
+    onSettings?.(db.getSettings())
+    return { restored: true as const }
+  })
   handle(channels.imapGet, () => db.imapView())
   handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
   handle(channels.mailboxesGet, () => db.listMailboxes())

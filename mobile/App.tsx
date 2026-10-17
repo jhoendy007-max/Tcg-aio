@@ -7,7 +7,8 @@ import type { PhoneChallenge, PhoneSnapshot, PhoneTask, PhoneTaskDraft } from ".
 import { ChallengeCard } from "./src/ChallengeCard"
 import type { KeywordWatchInput, RestockRuleInput } from "../src/shared/types"
 import { ensureNotificationPermission, notify } from "./src/notify"
-import { clearLink, loadLink, saveLink } from "./src/storage"
+import { activeLink } from "../src/phone/links"
+import { clearLink, forgetPcLink, loadBook, loadLink, saveLink, selectPc } from "./src/storage"
 import type { StoreHealth } from "../src/shared/types"
 import { SwipeTask } from "./src/SwipeTask"
 import { MailPanel } from "./src/MailPanel"
@@ -93,6 +94,7 @@ export default function App() {
   const [scanning, setScanning] = useState(false)
   const [banner, setBanner] = useState("")
   const [noticeImage, setNoticeImage] = useState("")
+  const [links, setLinks] = useState<SavedPhoneLink[]>([])
   const seen = useRef(new Map<string, string>())
   const [permission, requestPermission] = useCameraPermissions()
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -144,9 +146,16 @@ export default function App() {
       await ensureNotificationPermission()
     } catch (err) {
       if (err instanceof PhoneRevoked) {
-        await clearLink()
-        setScreen("pair")
+        const book = await forgetPcLink(link.pcId)
+        setLinks(book.links)
+        const next = activeLink(book)
         setError(err.message)
+        if (next) {
+          setPcName(next.pcName)
+          void connect(next)
+          return
+        }
+        setScreen("pair")
         return
       }
       setOnline(false)
@@ -166,7 +175,9 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    void loadLink().then((link) => {
+    void loadBook().then((book) => {
+      setLinks(book.links)
+      const link = activeLink(book)
       if (!link) {
         setScreen("pair")
         return
@@ -191,7 +202,8 @@ export default function App() {
       const next = new PhoneSession()
       bind(next)
       const link = await next.pair(payload, deviceName)
-      await saveLink(link)
+      const book = await saveLink(link)
+      setLinks(book.links)
       setPcName(link.pcName)
       setScreen("dash")
       setScanning(false)
@@ -204,10 +216,28 @@ export default function App() {
   async function forget() {
     if (retry.current) clearTimeout(retry.current)
     session.current?.close()
-    await clearLink()
+    const book = await clearLink()
+    setLinks(book.links)
+    const next = activeLink(book)
     setSnap(null)
     setOnline(false)
+    if (next) {
+      setPcName(next.pcName)
+      void connect(next)
+      return
+    }
     setScreen("pair")
+  }
+
+  async function switchPc(pcId: string) {
+    if (retry.current) clearTimeout(retry.current)
+    const book = await selectPc(pcId)
+    setLinks(book.links)
+    const next = activeLink(book)
+    if (!next) return
+    setPcName(next.pcName)
+    setSnap(null)
+    void connect(next)
   }
 
   async function run(action: () => Promise<{ ok: boolean; error?: string; errors?: { id: string; error: string }[]; csv?: string; created?: number }>) {
@@ -246,6 +276,10 @@ export default function App() {
           <Text style={styles.label}>Or paste the pairing code</Text>
           <TextInput style={[styles.input, styles.paste]} value={paste} onChangeText={setPaste} multiline autoCapitalize="none" placeholder='{"v":1,...}' placeholderTextColor={theme.muted} />
           <Pressable style={styles.secondary} onPress={() => void pairFrom(paste)}><Text style={styles.secondaryText}>Pair</Text></Pressable>
+          {links.length ? <Text style={styles.label}>Saved PCs</Text> : null}
+          {links.map((item) => (
+            <Pressable key={item.pcId} onPress={() => void switchPc(item.pcId)}><Text style={styles.link}>{item.pcName}</Text></Pressable>
+          ))}
           {scanning ? (
             <View style={styles.cameraBox}>
               {permission?.granted ? (
@@ -351,6 +385,13 @@ export default function App() {
                 </SwipeTask>
               ))}
               {snap && snap.tasks.length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
+              {links.length > 1 ? (
+                <View style={styles.row}>
+                  {links.map((item) => (
+                    <Pressable key={item.pcId} onPress={() => void switchPc(item.pcId)}><Text style={styles.pill}>{item.pcName}</Text></Pressable>
+                  ))}
+                </View>
+              ) : null}
               <Pressable onPress={() => void forget()}><Text style={styles.link}>Forget this PC</Text></Pressable>
             </>
           )}

@@ -12,6 +12,7 @@ import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
+import { openBackup, sealBackup, type BackupAccount, type BackupDocument, type BackupProfile } from "./backup"
 import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent } from "./monitor"
 import { vaultFlag } from "./vault"
 import { parseAstLocal } from "./time"
@@ -132,6 +133,7 @@ interface DbFile {
   schedules?: DropSchedule[]
   checkouts?: CheckoutRecord[]
   updates?: UpdateFile
+  backup?: { tokenSecret?: string }
   stockLog?: RestockEvent[]
   monitorSamples?: MonitorSample[]
   templates?: TaskTemplate[]
@@ -198,6 +200,7 @@ export class Database {
       schedules: normalizeSchedules(parsed.schedules),
       checkouts: normalizeCheckouts(parsed.checkouts),
       updates: normalizeUpdates(parsed.updates),
+      backup: normalizeBackup(parsed.backup),
       stockLog: Array.isArray(parsed.stockLog) ? parsed.stockLog.slice(0, 400) : [],
       monitorSamples: Array.isArray(parsed.monitorSamples) ? parsed.monitorSamples.slice(0, 500) : [],
       templates: Array.isArray(parsed.templates) ? parsed.templates : [],
@@ -905,6 +908,218 @@ export class Database {
   updateToken(): string {
     const secret = this.data.updates?.tokenSecret
     return secret ? this.cipher.decrypt(secret) : ""
+  }
+
+  setBackupToken(action: "keep" | "replace" | "clear", token: string): void {
+    if (!this.data.backup) this.data.backup = {}
+    if (action === "clear") this.data.backup.tokenSecret = undefined
+    if (action === "replace") {
+      const trimmed = token.trim()
+      if (trimmed.length < 8 || /[\r\n\s]/.test(trimmed)) throw new AppError("Backup token is invalid.")
+      this.data.backup.tokenSecret = this.cipher.encrypt(trimmed)
+    }
+    this.flush()
+  }
+
+  hasBackupToken(): boolean {
+    return Boolean(this.data.backup?.tokenSecret)
+  }
+
+  backupToken(): string {
+    const secret = this.data.backup?.tokenSecret
+    return secret ? this.cipher.decrypt(secret) : ""
+  }
+
+  backupFile(passphrase: string): string {
+    return sealBackup(this.backupDocument(), passphrase)
+  }
+
+  restoreFile(file: string, passphrase: string): void {
+    this.restoreBackup(openBackup(file, passphrase))
+  }
+
+  backupDocument(): BackupDocument {
+    return {
+      v: 1,
+      settings: this.getSettings(),
+      tasks: this.listTasks().map((task) => {
+        const active = isActiveStatus(task.status)
+        return {
+          ...cloneTask(task),
+          status: active ? "paused" : task.status,
+          detail: active ? "Paused for backup." : task.detail,
+          logs: task.logs.slice(-20).map((line) => ({ ...line, message: redact(line.message).slice(0, 240) }))
+        }
+      }),
+      profiles: this.data.profiles.map((record) => {
+        const card = this.decryptCard(record)
+        return {
+          id: record.id,
+          name: record.name,
+          email: record.email,
+          phone: record.phone,
+          shipping: record.shipping,
+          billing: record.billing,
+          cardName: record.cardName,
+          last4: record.last4,
+          expMonth: record.expMonth,
+          expYear: record.expYear,
+          card
+        }
+      }),
+      accounts: this.data.accounts.map((record) => ({
+        id: record.id,
+        store: record.store,
+        label: record.label,
+        username: record.username,
+        password: record.passwordSecret ? this.cipher.decrypt(record.passwordSecret) : undefined,
+        session: record.sessionSecret ? (JSON.parse(this.cipher.decrypt(record.sessionSecret)) as SessionCookies) : undefined,
+        proxyGroupId: record.proxyGroupId ?? null,
+        sessionState: record.sessionState ?? "missing",
+        lastWarmAt: record.lastWarmAt ?? null
+      })),
+      proxyGroups: this.listProxyGroups(),
+      schedules: this.listSchedules(),
+      templates: this.listTemplates()
+    }
+  }
+
+  restoreBackup(doc: BackupDocument): void {
+    if (!doc || doc.v !== 1) throw new AppError("This backup was written by a newer TCGAIO version.")
+    const snapshot = structuredClone(this.data)
+    try {
+      const keptPc = this.data.pcId
+      const devices = this.data.devices.map((device) => ({ ...device }))
+      const updates = this.data.updates ? { ...this.data.updates } : undefined
+      const backup = this.data.backup ? { ...this.data.backup } : undefined
+      const checkouts = (this.data.checkouts ?? []).map((row) => ({ ...row }))
+      this.data.settings = cleanSettings({ ...DEFAULT_SETTINGS, ...doc.settings })
+      this.data.profiles = (doc.profiles ?? []).slice(0, 200).map((profile) => this.profileFromBackup(profile))
+      this.data.accounts = (doc.accounts ?? []).slice(0, 200).map((account) => this.accountFromBackup(account))
+      this.data.proxyGroups = (doc.proxyGroups ?? []).slice(0, 50).map((group) => cleanBackupProxy(group))
+      const knownProxies = new Set(this.data.proxyGroups.map((group) => group.id))
+      for (const account of this.data.accounts) {
+        if (account.proxyGroupId && !knownProxies.has(account.proxyGroupId)) account.proxyGroupId = null
+      }
+      const tasks: PublicTask[] = []
+      this.data.tasks = []
+      for (const raw of (doc.tasks ?? []).slice(0, 400)) {
+        if (!raw || typeof raw.id !== "string") throw new AppError("A task in the backup is incomplete.")
+        const input = taskInputFromBackup(raw)
+        if (input.proxyGroupId && !knownProxies.has(input.proxyGroupId)) input.proxyGroupId = null
+        if (input.monitorProxyGroupId && !knownProxies.has(input.monitorProxyGroupId)) input.monitorProxyGroupId = null
+        const stub: PublicTask = {
+          ...raw,
+          status: "idle",
+          detail: "Restored from backup.",
+          logs: Array.isArray(raw.logs) ? raw.logs.slice(-20) : [],
+          createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
+        }
+        tasks.push(this.taskFrom(input, stub))
+      }
+      this.data.tasks = tasks
+      for (const task of tasks) this.syncLinks(task)
+      const schedules = normalizeSchedules(doc.schedules)
+      const taskIds = new Set(tasks.map((task) => task.id))
+      this.data.schedules = schedules.map((schedule) => ({
+        ...schedule,
+        taskIds: schedule.taskIds.filter((id) => taskIds.has(id))
+      })).filter((schedule) => schedule.taskIds.length || schedule.group)
+      this.data.templates = (doc.templates ?? []).slice(0, 50).map((template) => this.templateFromBackup(template))
+      this.data.pcId = keptPc
+      this.data.devices = devices
+      this.data.updates = updates
+      this.data.backup = backup
+      this.data.checkouts = checkouts
+      this.flush()
+    } catch (err) {
+      this.data = snapshot
+      throw err
+    }
+  }
+
+  private profileFromBackup(input: BackupProfile): ProfileRecord {
+    if (!input?.card) throw new AppError("A profile in the backup is missing its card.")
+    const shipping = cleanAddress(input.shipping, "Shipping")
+    const billing = cleanAddress(input.billing, "Billing")
+    const name = (input.name ?? "").trim()
+    if (!name) throw new AppError("Profile name is required.")
+    const card = cleanCard(
+      { cardName: input.card.name, cardNumber: input.card.number, expMonth: input.card.expMonth, expYear: input.card.expYear, cvv: input.card.cvv },
+      name
+    )
+    return {
+      id: safeId(input.id),
+      name,
+      email: cleanEmail(input.email),
+      phone: cleanPhone(input.phone),
+      shipping,
+      billing,
+      cardName: card.name,
+      last4: card.last4,
+      expMonth: card.expMonth,
+      expYear: card.expYear,
+      cardSecret: this.cipher.encrypt(JSON.stringify(cardSecretFrom(card)))
+    }
+  }
+
+  private accountFromBackup(input: BackupAccount): AccountRecord {
+    const store = assertStore(input.store)
+    const label = (input.label ?? "").trim()
+    if (!label) throw new AppError("Account label is required.")
+    const passwordSecret = input.password ? this.cipher.encrypt(input.password) : undefined
+    const sessionSecret = input.session ? this.cipher.encrypt(JSON.stringify(parseSession(JSON.stringify(input.session)))) : undefined
+    return {
+      id: safeId(input.id),
+      store,
+      label,
+      username: cleanEmail(input.username),
+      passwordSecret,
+      sessionSecret,
+      proxyGroupId: input.proxyGroupId || null,
+      sessionState: sessionSecret ? input.sessionState === "expired" ? "expired" : "saved" : "missing",
+      lastWarmAt: typeof input.lastWarmAt === "number" ? input.lastWarmAt : null
+    }
+  }
+
+  private templateFromBackup(input: TaskTemplate): TaskTemplate {
+    const name = (input?.name ?? "").trim()
+    if (!name) throw new AppError("Template name is required.")
+    const store = input.store ? assertStore(input.store) : ""
+    const profileIds = [...new Set((input.profileIds ?? []).filter(Boolean))]
+    const accountIds = [...new Set((input.accountIds ?? []).filter(Boolean))]
+    if (!profileIds.length || !accountIds.length) throw new AppError("A template in the backup needs a profile and an account.")
+    for (const id of profileIds) this.requireProfile(id)
+    for (const id of accountIds) {
+      const account = this.requireAccount(id)
+      if (store && account.store !== store) throw new AppError("A template account does not match its store.")
+    }
+    if (input.proxyGroupId && !this.data.proxyGroups.some((group) => group.id === input.proxyGroupId)) {
+      input = { ...input, proxyGroupId: null }
+    }
+    const quantity = Math.round(Number(input.quantity))
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
+    const sku = (input.sku ?? "").trim().slice(0, 180)
+    const keywords = (input.keywords ?? "").trim().slice(0, 200)
+    if (!sku && !keywords) throw new AppError("A template needs a SKU or keywords.")
+    return {
+      id: safeId(input.id),
+      name: name.slice(0, 80),
+      enabled: input.enabled !== false,
+      store,
+      sku,
+      keywords,
+      profileIds,
+      accountIds,
+      proxyGroupId: input.proxyGroupId || null,
+      monitorProxyGroupId: input.monitorProxyGroupId || null,
+      quantity,
+      maxPrice: input.maxPrice === null || input.maxPrice === undefined ? null : Number(input.maxPrice),
+      testMode: input.testMode === true,
+      confirmPurchase: input.confirmPurchase === true,
+      group: (input.group ?? "").trim().slice(0, 40),
+      lastFiredAt: typeof input.lastFiredAt === "number" ? input.lastFiredAt : 0
+    }
   }
 
   saveUpdateNotice(notice: { desktopVersion: string | null; phoneVersion: string | null; notes: string }): void {
@@ -1858,6 +2073,67 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 function cloneTask(task: PublicTask): PublicTask {
   const role = normalizeRole(task)
   return { ...task, ...role, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: role.kind === "monitor" || task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, overrides: task.overrides ? { ...task.overrides } : undefined, logs: task.logs.map((line) => ({ ...line })) }
+}
+
+function normalizeBackup(value: { tokenSecret?: string } | undefined): { tokenSecret?: string } | undefined {
+  if (!value || typeof value !== "object") return undefined
+  return { tokenSecret: typeof value.tokenSecret === "string" ? value.tokenSecret : undefined }
+}
+
+function safeId(id: string | undefined): string {
+  return typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id) ? id : randomUUID()
+}
+
+function cleanBackupProxy(group: ProxyGroup): ProxyGroup {
+  if (!group || typeof group.name !== "string" || !group.name.trim()) throw new AppError("A proxy group in the backup is incomplete.")
+  const proxies = (group.proxies ?? []).slice(0, 200).map((proxy) => {
+    const port = Math.round(Number(proxy.port))
+    if (!proxy.host || !Number.isInteger(port) || port < 1 || port > 65535) throw new AppError("A proxy in the backup is incomplete.")
+    return {
+      id: safeId(proxy.id),
+      host: String(proxy.host).slice(0, 200),
+      port,
+      username: proxy.username ? String(proxy.username).slice(0, 200) : undefined,
+      password: proxy.password ? String(proxy.password).slice(0, 200) : undefined
+    }
+  })
+  if (!proxies.length) throw new AppError("A proxy group in the backup has no proxies.")
+  return {
+    id: safeId(group.id),
+    name: group.name.trim().slice(0, 80),
+    network: group.network === "residential" ? "residential" : "datacenter",
+    proxies
+  }
+}
+
+function taskInputFromBackup(task: PublicTask): TaskInput {
+  return {
+    id: task.id,
+    store: task.store,
+    sku: task.sku,
+    quantity: task.quantity,
+    profileId: task.profileId,
+    accountId: task.accountId,
+    proxyGroupId: task.proxyGroupId,
+    monitorProxyGroupId: task.monitorProxyGroupId,
+    confirmPurchase: task.confirmPurchase,
+    testMode: task.testMode,
+    group: task.group,
+    imageUrl: task.imageUrl,
+    monitorOnly: task.monitorOnly,
+    overrides: task.overrides,
+    kind: task.kind,
+    keywords: task.keywords,
+    priceCap: task.priceCap,
+    webhook: task.webhook,
+    activeHours: task.activeHours,
+    linkedCheckoutIds: task.linkedCheckoutIds,
+    checkoutDelayMs: task.checkoutDelayMs,
+    maxPrice: task.maxPrice,
+    startMode: task.startMode,
+    linkedMonitorId: task.linkedMonitorId,
+    jitterPct: task.jitterPct
+  }
 }
 
 function emptyUpdates(): UpdateFile {
