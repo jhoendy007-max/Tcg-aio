@@ -82,6 +82,18 @@ export function cleanSettings(input: Settings): Settings {
   if (!Number.isFinite(monitorJitterPct) || monitorJitterPct < 0 || monitorJitterPct > 40) {
     throw new AppError("Monitor jitter must be between 0 and 40 percent.")
   }
+  const blockRetries = Math.round(Number(input.blockRetries ?? DEFAULT_SETTINGS.blockRetries))
+  if (!Number.isInteger(blockRetries) || blockRetries < 1 || blockRetries > 8) {
+    throw new AppError("Block retries must be from 1 to 8.")
+  }
+  const monitorFastDelayMs = Math.round(Number(input.monitorFastDelayMs ?? DEFAULT_SETTINGS.monitorFastDelayMs))
+  if (!Number.isFinite(monitorFastDelayMs) || monitorFastDelayMs < 250 || monitorFastDelayMs > 60000) {
+    throw new AppError("Fast monitor delay must be from 250 to 60000 ms.")
+  }
+  const dropWindows = (input.dropWindows ?? "").trim()
+  if (dropWindows) parseWindowLines(dropWindows)
+  const monitorZips = cleanZipList(input.monitorZips ?? "")
+  const monitorStoreIds = cleanStoreIdList(input.monitorStoreIds ?? "")
   return {
     discordWebhook: input.discordWebhook.trim(),
     monitorDelayMs,
@@ -95,8 +107,49 @@ export function cleanSettings(input: Settings): Settings {
     challengeTimeoutSec,
     sessionWarmup: input.sessionWarmup === true,
     sessionWarmupMin,
-    monitorJitterPct
+    monitorJitterPct,
+    blockRetries,
+    monitorFastDelayMs,
+    dropWindows,
+    monitorZips,
+    monitorStoreIds,
+    alertPrice: input.alertPrice !== false,
+    alertNewOffer: input.alertNewOffer !== false,
+    alertAvailable: input.alertAvailable !== false,
+    alertRetailer: input.alertRetailer !== false
   }
+}
+
+function parseWindowLines(text: string): void {
+  for (const raw of text.split(/\n+/)) {
+    const line = raw.trim()
+    if (!line) continue
+    const match = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(line)
+    if (!match) throw new AppError("Drop windows use Atlantic Time like 09:00-09:30, one per line.")
+    const startH = Number(match[1])
+    const startM = Number(match[2])
+    const endH = Number(match[3])
+    const endM = Number(match[4])
+    if (startH > 23 || endH > 23 || startM > 59 || endM > 59 || startH * 60 + startM === endH * 60 + endM) {
+      throw new AppError("Drop windows use Atlantic Time like 09:00-09:30, one per line.")
+    }
+  }
+}
+
+function cleanZipList(value: string): string {
+  const zips = value.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean)
+  for (const zip of zips) {
+    if (!/^\d{5}(?:-\d{4})?$/.test(zip)) throw new AppError("Monitor ZIPs must be 5-digit US ZIPs.")
+  }
+  return zips.join(", ")
+}
+
+function cleanStoreIdList(value: string): string {
+  const ids = value.split(/[\s,]+/).map((part) => part.trim()).filter(Boolean)
+  for (const id of ids) {
+    if (!/^\d{3,8}$/.test(id)) throw new AppError("Monitor store ids must be 3 to 8 digits.")
+  }
+  return ids.join(", ")
 }
 
 export function cleanRelayUrl(value: string): string {

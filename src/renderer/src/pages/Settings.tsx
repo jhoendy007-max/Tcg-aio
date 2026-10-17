@@ -90,9 +90,40 @@ export function SettingsPage() {
         <Field label="Challenge timeout (seconds)" hint="How long a person has to solve a store challenge before the task pauses. 30–600.">
           <TextInput type="number" min={30} max={600} value={form.challengeTimeoutSec} onChange={(event) => setForm({ ...form, challengeTimeoutSec: Number(event.target.value) })} required />
         </Field>
-        <Field label="Monitor delay (ms)" hint="How long to wait between stock checks. 1000–60000.">
+        <Field label="Monitor delay (ms)" hint="Wait between stock checks outside a drop window. 1000–60000.">
           <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
         </Field>
+        <Field label="Fast delay (ms)" hint="Used inside a drop window. Each store still waits at least its own gap.">
+          <TextInput type="number" min={250} max={60000} value={form.monitorFastDelayMs} onChange={(event) => setForm({ ...form, monitorFastDelayMs: Number(event.target.value) })} required />
+        </Field>
+        <Field label="Block retries" hint="After HTTP 403, 412, 429, or 435, rotate to the next proxy and reload the account browser. 1–8.">
+          <TextInput type="number" min={1} max={8} value={form.blockRetries} onChange={(event) => setForm({ ...form, blockRetries: Number(event.target.value) })} required />
+        </Field>
+        <Field className="span-2" label="Drop windows" hint="Atlantic Time, one range per line, like 09:00-09:20. Scheduled drops are windows too.">
+          <TextInput value={form.dropWindows} onChange={(event) => setForm({ ...form, dropWindows: event.target.value })} placeholder="09:00-09:20" />
+        </Field>
+        <Field label="Extra monitor ZIPs" hint="Target checks each ZIP. Other stores use the signed-in location.">
+          <TextInput value={form.monitorZips} onChange={(event) => setForm({ ...form, monitorZips: event.target.value })} placeholder="10001, 90210" />
+        </Field>
+        <Field label="Extra store ids" hint="Paired with the ZIPs above for Target.">
+          <TextInput value={form.monitorStoreIds} onChange={(event) => setForm({ ...form, monitorStoreIds: event.target.value })} placeholder="1881, 3244" />
+        </Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.alertPrice} onChange={(event) => setForm({ ...form, alertPrice: event.target.checked })} />
+          <span>Alert when the price changes.</span>
+        </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.alertNewOffer} onChange={(event) => setForm({ ...form, alertNewOffer: event.target.checked })} />
+          <span>Alert when a new offer id appears.</span>
+        </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.alertAvailable} onChange={(event) => setForm({ ...form, alertAvailable: event.target.checked })} />
+          <span>Alert when an item changes from unavailable to add-to-cart.</span>
+        </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.alertRetailer} onChange={(event) => setForm({ ...form, alertRetailer: event.target.checked })} />
+          <span>Alert when the retailer starts selling the item.</span>
+        </label>
         <Field label="Target store ID"><TextInput value={form.targetStoreId} onChange={(event) => setForm({ ...form, targetStoreId: event.target.value })} required /></Field>
         <Field label="Target ZIP"><TextInput value={form.targetZip} onChange={(event) => setForm({ ...form, targetZip: event.target.value })} required /></Field>
         <Field label="Target state"><TextInput value={form.targetState} maxLength={2} onChange={(event) => setForm({ ...form, targetState: event.target.value })} required /></Field>

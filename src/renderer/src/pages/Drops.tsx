@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { DropSchedule, PublicTask } from "../../../shared/types"
+import type { AnalyticsReport, DropSchedule, PublicTask } from "../../../shared/types"
 import { countdown, formatAst, toAstInput } from "../../../engine/time"
 import { Banner, Field, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
@@ -21,6 +21,7 @@ export function DropsPage() {
   const [form, setForm] = useState(blank)
   const [now, setNow] = useState(() => Date.now())
   const [error, setError] = useState("")
+  const [hints, setHints] = useState<AnalyticsReport["restockHints"]>([])
 
   async function reload() {
     const [nextSchedules, nextTasks] = await Promise.all([
@@ -29,6 +30,8 @@ export function DropsPage() {
     ])
     setSchedules(nextSchedules)
     setTasks(nextTasks)
+    const report = await unwrap(window.aio.analytics.get())
+    setHints(report.restockHints)
   }
 
   useEffect(() => {
@@ -65,6 +68,12 @@ export function DropsPage() {
         </div>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
+      {hints.length ? (
+        <div className="card">
+          <h2>Learned restock times</h2>
+          {hints.map((hint) => <p key={`${hint.store}:${hint.sku}:${hint.hourAst}`} className="hint">{hint.detail}</p>)}
+        </div>
+      ) : null}
       <form className="card form-grid" onSubmit={save}>
         <Field label="Name"><TextInput value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></Field>
         <Field label="Warm-up (minutes before)" hint="0 skips the pre-drop Session Keeper pass. 0–180.">

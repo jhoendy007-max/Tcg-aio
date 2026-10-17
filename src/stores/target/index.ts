@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto"
+import { attachSession } from "../../engine/block-recovery"
+import { monitorKey, monitorPlaces, noteWatch, sharedCall } from "../../engine/monitor"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
@@ -94,6 +96,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     state: ctx.settings.targetState.trim().toUpperCase() || "NY"
   }
   const jar = new CookieJar()
+  attachSession(ctx, (cookies) => jar.load(cookies))
   const sessionResult = await ensureSession(ctx, jar, key)
   if (sessionResult) {
     note(ctx, "session", "fail", "reason" in sessionResult ? sessionResult.reason : "Session check failed.")
@@ -106,7 +109,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
   let oosPolls = 0
 
   while (!ctx.signal.aborted) {
-    const stock = await readStock(ctx, key, tcin, location)
+    const stock = await readStockPlaces(ctx, key, tcin)
     if (stock.kind === "paused") return { outcome: "paused", reason: stock.reason }
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
@@ -241,6 +244,20 @@ async function recoverAuth(ctx: StoreRunContext, jar: CookieJar, key: string): P
   return true
 }
 
+async function readStockPlaces(ctx: StoreRunContext, key: string, tcin: string): Promise<Step<StockReading>> {
+  const places = monitorPlaces(ctx.settings)
+  let last: Step<StockReading> | undefined
+  for (const place of places) {
+    const stock = await readStock(ctx, key, tcin, { ...place, state: ctx.settings.targetState.trim().toUpperCase() || "NY" })
+    if (stock.kind === "paused" || stock.kind === "retry") return stock
+    if (stock.kind !== "ok") return stock
+    last = stock
+    if (stock.value.inStock) break
+  }
+  if (last?.kind === "ok") noteWatch(ctx, last.value)
+  return last ?? { kind: "retry", reason: "No monitor location is configured." }
+}
+
 async function readStock(
   ctx: StoreRunContext,
   key: string,
@@ -256,7 +273,7 @@ async function readStock(
   summary.searchParams.set("state", location.state)
   summary.searchParams.set("channel", "WEB")
   summary.searchParams.set("page", `/p/A-${tcin}`)
-  const primary = await call(ctx, { method: "GET", url: summary.toString(), headers: monitorHeaders(tcin) })
+  const primary = await sharedCall(ctx, monitorKey("target", tcin, `${location.zip}:${location.storeId}`, ctx.proxy), () => call(ctx, { method: "GET", url: summary.toString(), headers: monitorHeaders(tcin) }))
   const primaryStep = interpretMonitor(primary)
   if (primaryStep.kind === "paused") return primaryStep
   if (primaryStep.kind === "ok" && primaryStep.value.status !== "UNKNOWN" && primaryStep.value.status !== "NOT_FOUND") {

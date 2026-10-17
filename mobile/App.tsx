@@ -403,6 +403,7 @@ function StatsPanel({ snap, session, onRun, onBack }: {
     <View style={styles.card}>
       <Text style={styles.h2}>Analytics</Text>
       <Text style={styles.p}>Win rate {Math.round((stats?.winRate ?? 0) * 100)}% · spend ${ (stats?.spend ?? 0).toFixed(2) } · {stats?.success ?? 0} success · {stats?.failure ?? 0} failed · {stats?.paused ?? 0} paused · {stats?.tested ?? 0} tested</Text>
+      <Text style={styles.p}>Monitor {stats?.monitorSamples ?? 0} reads · avg {stats?.monitorAvgMs ?? 0} ms · block rate {Math.round((stats?.monitorBlockRate ?? 0) * 100)}%</Text>
       {(stats?.byStore ?? []).map((row) => (
         <Text key={row.store} style={styles.p}>{row.storeName} · {row.success} won · {row.failure} failed · ${row.spend.toFixed(2)}</Text>
       ))}

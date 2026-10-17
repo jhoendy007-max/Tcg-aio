@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto"
+import { attachSession } from "../../engine/block-recovery"
+import { monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
@@ -80,6 +82,7 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => jar.load(cookies))
   ctx.log("info", "Using the saved Best Buy session.")
   note(ctx, "session", "pass", "Saved Best Buy session loaded.")
   const probe = await probeCart(ctx, jar)
@@ -181,12 +184,15 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
 }
 
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, pageUrl: string): Promise<Step<StockReading>> {
-  const response = await call(ctx, { method: "GET", url: pageUrl, headers: pageHeaders(jar, pageUrl) })
+  const response = await sharedCall(ctx, monitorKey("bestbuy", sku, "page", ctx.proxy), () => call(ctx, { method: "GET", url: pageUrl, headers: pageHeaders(jar, pageUrl) }))
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: BESTBUY_PAUSE }
   if (isUnauthorized(response.status, response.body)) return { kind: "unauthorized", reason: "Unauthorized" }
   if (response.status === 429 || response.status >= 500) return { kind: "retry", reason: `Monitor request returned HTTP ${response.status}. Retrying.` }
   const reading = readStock(response.body, sku)
-  if (reading) return { kind: "ok", value: reading }
+  if (reading) {
+    noteWatch(ctx, reading)
+    return { kind: "ok", value: reading }
+  }
   if (response.status === 404) return { kind: "ok", value: { inStock: false, status: "NOT_FOUND", sku, reason: "SKU was not found." } }
   return { kind: "retry", reason: `Monitor returned HTTP ${response.status} without a stock reading.` }
 }

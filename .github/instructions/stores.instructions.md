@@ -22,3 +22,5 @@ Register the host in the challenge helper, Session Keeper home, health probe, ke
 Do not port cookie banks, sensor cookies, TLS impersonation, captcha solvers, or account generation. Read a retailer page only to copy the requests the site’s own frontend already makes. Prefer a fixture trimmed from a real JSON response over a live call in tests.
 
 Polite gaps live in `src/engine/polite.ts`. New stores use a gap of at least a few seconds. Health checks are one read-only GET.
+
+Monitor reads use the lightest public endpoint the module already has. Share that read with `sharedCall` or `sharedValue` and `monitorKey`. Call `noteWatch` when a reading is parsed. Multi-ZIP belongs only where the endpoint accepts a ZIP or store id. Do not add a location cookie. Checkout keeps using `ctx.proxy`, which the runner switches off the monitor pool after `phase("in_stock")`.

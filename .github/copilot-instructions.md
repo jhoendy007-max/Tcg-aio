@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.6 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.7 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -34,6 +34,22 @@ To add a store:
 
 Shipping state is a two-letter US code from `src/engine/validate.ts`. Puerto Rico is not in that set. ZIP is `^\d{5}(?:-\d{4})?$`.
 
+## Monitor
+
+Stock checks go through `MonitorHub` in `src/engine/monitor.ts`. Tasks watching the same store, SKU, location, and proxy share one in-flight request. The lightest endpoint already used by each module stays the monitor read: Target Redsky JSON, Walmart seller-offers GraphQL (the product page is only a fallback), Pokémon Center search JSON, Crunchyroll and Premium Bandai product JSON, Amazon’s offer fragment before the full product page, and Best Buy’s product or search page. Do not add a second request that this network cannot confirm.
+
+Outside a drop window the wait is `monitorDelayMs`. Inside a user window (`HH:MM-HH:MM` Atlantic Time) or a scheduled drop, it is `monitorFastDelayMs`, then jitter, and never under the store gap in `src/engine/polite.ts`.
+
+Target repeats the Redsky read for each configured ZIP and store id (at most four). Walmart, Amazon, Best Buy, Pokémon Center, Crunchyroll, and Premium Bandai keep the signed-in or national location. Do not invent a location cookie.
+
+A stock reading can notify on price, new offer id, unavailable-to-purchasable, and retailer-offer changes. The first reading is a baseline. Two restocks in the same Atlantic hour suggest a 15-minute Session Keeper warm-up.
+
+`monitorProxyGroupId` is the stock-check pool. `proxyGroupId` is checkout. Blank monitor pool uses the checkout pool for both.
+
+A block (HTTP 403, 412, 429, or 435, except a real product queue) backs off, rotates within the current pool, and reloads the account browser to copy cookies the site set. After `blockRetries` the task pauses. Place-order requests are not retried. A person still solves a challenge in the existing handoff. Do not open a second solver.
+
+Monitor sample counts, average time, and block rate are on the analytics report.
+
 ## Commands
 
 From the repo root, with Node 22:
@@ -54,6 +70,8 @@ Phone:
 Use the local binaries (`./node_modules/.bin/tsc`, `./node_modules/.bin/vitest`) from the repo root. Do not run `npx tsc` from another directory.
 
 CI is `.github/workflows/windows.yml`. Pushes to `main` and `cursor/**`, pull requests, and tags `v*` run test, then Windows and Android. The installer, `latest.yml`, blockmap, and APK publish only when the ref is a `v*` tag. Do not move an existing release tag to pick up docs.
+
+The desktop app is Windows only. Do not add a macOS disk image, a `macos-latest` job, Mac signing, or notarization. The phone app keeps its iOS TestFlight path: `mobile/eas.json` production profile (`ios.distribution: store`), then `npx eas build -p ios --profile production` and `npx eas submit -p ios --profile production`. GitHub Actions does not build that iOS binary.
 
 Bump versions together when shipping a beta: root `package.json`, `mobile/package.json`, `mobile/app.json` (`version` and `android.versionCode`), `src/shared/version.ts`, `mobile/src/version.ts`, and the version fields in `mobile/package-lock.json`.
 

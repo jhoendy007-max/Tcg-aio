@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto"
+import { attachSession } from "../../engine/block-recovery"
+import { monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
 import { finishTest, note } from "../../engine/test-mode"
 import { proxyLabel } from "../../shared/proxy"
 import { redact } from "../../shared/redact"
@@ -99,6 +101,7 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => jar.load(cookies))
   ctx.log("info", "Using the saved Walmart session.")
   note(ctx, "session", "pass", "Saved Walmart session loaded.")
   const probe = await probeCart(ctx, jar)
@@ -202,13 +205,14 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
 }
 
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, itemId: string): Promise<Step<StockReading>> {
-  const response = await call(ctx, {
+  const response = await sharedCall(ctx, monitorKey("walmart", `${ctx.account.id}:${itemId}`, "offers", ctx.proxy), () => call(ctx, {
     method: "POST",
     url: endpoint("home", "GetAllSellerOffers", OFFERS_HASH),
     headers: gqlHeaders(jar, "GetAllSellerOffers", "query", itemId),
     body: JSON.stringify({ variables: { itemId, isSubscriptionEligible: false } })
-  })
+  }))
   const primary = interpretMonitor(response)
+  if (primary.kind === "ok") noteWatch(ctx, primary.value)
   if (primary.kind === "paused" || primary.kind === "ok") return primary
   if (response.status === 429 || response.status >= 500) return primary
   const page = await call(ctx, {
@@ -221,7 +225,10 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, itemId: string): 
     return { kind: "retry", reason: `Product page returned HTTP ${page.status}. Retrying.` }
   }
   const reading = readStock(page.body)
-  if (reading) return { kind: "ok", value: reading }
+  if (reading) {
+    noteWatch(ctx, reading)
+    return { kind: "ok", value: reading }
+  }
   if (page.status === 404) {
     return { kind: "ok", value: { inStock: false, status: "NOT_FOUND", reason: "Item was not found." } }
   }

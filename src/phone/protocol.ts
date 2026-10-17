@@ -112,6 +112,10 @@ export interface PhoneAnalytics {
   spend: number
   byStore: { store: StoreId; storeName: string; success: number; failure: number; paused: number; spend: number }[]
   recent: { at: number; storeName: string; sku: string; outcome: string; price: number | null }[]
+  monitorSamples?: number
+  monitorBlocked?: number
+  monitorBlockRate?: number
+  monitorAvgMs?: number
 }
 
 export interface PhoneUpdates {

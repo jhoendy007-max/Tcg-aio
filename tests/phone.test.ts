@@ -91,7 +91,8 @@ function task(partial: Partial<PublicTask> = {}): PublicTask {
     detail: partial.detail ?? "",
     logs: partial.logs ?? [],
     createdAt: 1,
-    ...partial
+    ...partial,
+    monitorProxyGroupId: partial.monitorProxyGroupId ?? null
   }
 }
 

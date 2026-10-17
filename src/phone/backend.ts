@@ -73,7 +73,11 @@ export function createPhoneHost(
       winRate: report.winRate,
       spend: report.spend,
       byStore: report.byStore.map((row) => ({ store: row.store, storeName: row.storeName, success: row.success, failure: row.failure, paused: row.paused, spend: row.spend })),
-      recent: report.recent.slice(0, 8).map((row) => ({ at: row.at, storeName: storeName(row.store), sku: row.sku, outcome: row.outcome, price: row.price }))
+      recent: report.recent.slice(0, 8).map((row) => ({ at: row.at, storeName: storeName(row.store), sku: row.sku, outcome: row.outcome, price: row.price })),
+      monitorSamples: report.monitor.samples,
+      monitorBlocked: report.monitor.blocked,
+      monitorBlockRate: report.monitor.blockRate,
+      monitorAvgMs: report.monitor.avgMs
     }
   }
   const updates = (): PhoneUpdates => db.updateNotice()

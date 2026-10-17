@@ -1,3 +1,5 @@
+import { attachSession } from "../../engine/block-recovery"
+import { monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { finishTest, note } from "../../engine/test-mode"
 import type { SessionCookies } from "../../shared/types"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -98,6 +100,7 @@ async function runBandai(ctx: StoreRunContext): Promise<StoreRunResult> {
 
   const jar = new CookieJar()
   jar.load(ctx.account.session)
+  attachSession(ctx, (cookies) => jar.load(cookies))
   const member = await store(ctx, jar, { method: "GET", url: `${ORIGIN}/api/context/member`, headers: apiHeaders(jar, `${ORIGIN}/us`) })
   if (member.kind !== "ok") return asResult(member)
   if (isChallenge(member.value.status, member.value.body)) return pause(BANDAI_PAUSE)
@@ -173,7 +176,7 @@ async function runBandai(ctx: StoreRunContext): Promise<StoreRunResult> {
 }
 
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page: string): Promise<Step<StockReading>> {
-  const response = await store(ctx, jar, { method: "GET", url: productApiUrl(sku), headers: apiHeaders(jar, page) })
+  const response = await sharedValue(ctx, monitorKey("bandai", sku, "product", ctx.proxy), () => store(ctx, jar, { method: "GET", url: productApiUrl(sku), headers: apiHeaders(jar, page) }))
   if (response.kind !== "ok") return response
   if (isChallenge(response.value.status, response.value.body)) return { kind: "paused", reason: BANDAI_PAUSE }
   if (response.value.status === 401) return { kind: "unauthorized", reason: EXPIRED_PAUSE }
@@ -181,7 +184,10 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
     return { kind: "retry", reason: `Monitor request returned HTTP ${response.value.status}. Retrying.` }
   }
   const reading = readStock(response.value.body, sku)
-  if (reading) return { kind: "ok", value: reading }
+  if (reading) {
+    noteWatch(ctx, reading)
+    return { kind: "ok", value: reading }
+  }
   if (response.value.status === 404) {
     return { kind: "ok", value: { inStock: false, status: "NOT_FOUND", sku, maxQuantity: 1, reason: "Product was not found." } }
   }

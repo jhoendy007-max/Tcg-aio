@@ -11,6 +11,7 @@ import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
+import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent } from "./monitor"
 import { parseAstLocal } from "./time"
 import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
 import { redact } from "../shared/redact"
@@ -114,6 +115,8 @@ interface DbFile {
   schedules?: DropSchedule[]
   checkouts?: CheckoutRecord[]
   updates?: UpdateFile
+  stockLog?: RestockEvent[]
+  monitorSamples?: MonitorSample[]
 }
 
 export class Database {
@@ -146,7 +149,9 @@ export class Database {
       hygiene: normalizeHygiene(parsed.hygiene),
       schedules: normalizeSchedules(parsed.schedules),
       checkouts: normalizeCheckouts(parsed.checkouts),
-      updates: normalizeUpdates(parsed.updates)
+      updates: normalizeUpdates(parsed.updates),
+      stockLog: Array.isArray(parsed.stockLog) ? parsed.stockLog.slice(0, 400) : [],
+      monitorSamples: Array.isArray(parsed.monitorSamples) ? parsed.monitorSamples.slice(0, 500) : []
     }
     let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices)
     for (const task of this.data.tasks) {
@@ -543,6 +548,7 @@ export class Database {
     const account = this.requireAccount(input.accountId)
     if (account.store !== store) throw new AppError("Choose an account for the same store as the task.")
     if (input.proxyGroupId) this.getProxyGroup(input.proxyGroupId)
+    if (input.monitorProxyGroupId) this.getProxyGroup(input.monitorProxyGroupId)
     return {
       id: existing?.id ?? randomUUID(),
       store,
@@ -551,6 +557,7 @@ export class Database {
       profileId: input.profileId,
       accountId: input.accountId,
       proxyGroupId: input.proxyGroupId || null,
+      monitorProxyGroupId: input.monitorProxyGroupId === undefined ? existing?.monitorProxyGroupId ?? null : input.monitorProxyGroupId || null,
       confirmPurchase: Boolean(input.confirmPurchase),
       testMode: input.testMode === true,
       group: (input.group ?? existing?.group ?? "").trim().slice(0, 40),
@@ -637,7 +644,24 @@ export class Database {
   }
 
   analytics(): AnalyticsReport {
-    return summarize(this.data.checkouts ?? [])
+    const report = summarize(this.data.checkouts ?? [])
+    report.monitor = summarizeMonitor(this.data.monitorSamples ?? [])
+    report.restockHints = suggestWarmups(this.data.stockLog ?? [])
+    return report
+  }
+
+  recordMonitor(sample: MonitorSample): void {
+    if (!this.data.monitorSamples) this.data.monitorSamples = []
+    this.data.monitorSamples.unshift(sample)
+    this.data.monitorSamples = this.data.monitorSamples.slice(0, 500)
+    this.flush()
+  }
+
+  recordRestock(event: RestockEvent): void {
+    if (!this.data.stockLog) this.data.stockLog = []
+    this.data.stockLog.unshift(event)
+    this.data.stockLog = this.data.stockLog.slice(0, 400)
+    this.flush()
   }
 
   checkoutCsv(): string {
@@ -937,6 +961,8 @@ function emptyDb(): DbFile {
     hygiene: emptyHygiene(),
     schedules: [],
     checkouts: [],
+    stockLog: [],
+    monitorSamples: [],
     updates: emptyUpdates()
   }
 }
@@ -994,7 +1020,7 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 }
 
 function cloneTask(task: PublicTask): PublicTask {
-  return { ...task, group: task.group ?? "", testMode: task.testMode === true, logs: task.logs.map((line) => ({ ...line })) }
+  return { ...task, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, logs: task.logs.map((line) => ({ ...line })) }
 }
 
 function emptyUpdates(): UpdateFile {
