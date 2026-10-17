@@ -196,7 +196,7 @@ describe("target module", () => {
 describe("store registry", () => {
   it("implements every catalog store", () => {
     const registry = createRegistry()
-    expect([...registry.keys()].sort()).toEqual(["amazon", "bandai", "bestbuy", "crunchyroll", "pokemon-center", "target", "walmart"])
+    expect([...registry.keys()].sort()).toEqual(["amazon", "bandai", "barnes-noble", "bestbuy", "costco", "crunchyroll", "gamestop", "pokemon-center", "sams", "target", "tcgplayer", "walmart"])
     expect(registry.get("target")?.implemented).toBe(true)
     expect(registry.get("walmart")?.implemented).toBe(true)
     expect(registry.get("walmart")?.skuHint).toBe("Item ID or product URL")
@@ -210,6 +210,11 @@ describe("store registry", () => {
     expect(registry.get("amazon")?.skuHint).toBe("ASIN or product URL")
     expect(registry.get("bandai")?.implemented).toBe(true)
     expect(registry.get("bandai")?.skuHint).toBe("Product code or p-bandai.com item URL")
+    expect(registry.get("gamestop")?.skuHint).toBe("Product URL or GameStop product id")
+    expect(registry.get("barnes-noble")?.skuHint).toBe("Product URL or ISBN")
+    expect(registry.get("costco")?.skuHint).toBe("Product URL or Costco item number")
+    expect(registry.get("sams")?.skuHint).toBe("Product URL or Sam's Club item number")
+    expect(registry.get("tcgplayer")?.skuHint).toBe("Product id or tcgplayer.com product URL")
     for (const module of registry.values()) expect(module.implemented).toBe(true)
   })
 })

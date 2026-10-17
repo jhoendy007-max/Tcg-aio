@@ -1,4 +1,6 @@
 import { parseSku as parseBandai } from "../stores/bandai/parse"
+import { BARNES_NOBLE, COSTCO, GAMESTOP, SAMS, parsePageSku } from "../stores/page/parse"
+import { parseProductId } from "../stores/tcgplayer/parse"
 import { parseAsin } from "../stores/amazon/parse"
 import { parseSku as parseBestBuy } from "../stores/bestbuy/parse"
 import { parseSku as parseCrunchyroll } from "../stores/crunchyroll/parse"
@@ -93,6 +95,11 @@ function storeOf(value: string): StoreId | null {
   if (host.endsWith("amazon.com")) return "amazon"
   if (host.endsWith("crunchyroll.com")) return "crunchyroll"
   if (host.endsWith("p-bandai.com") || host.endsWith("premiumbandai.com")) return "bandai"
+  if (host.endsWith("gamestop.com")) return "gamestop"
+  if (host.endsWith("barnesandnoble.com")) return "barnes-noble"
+  if (host === "costco.com" || host.endsWith(".costco.com")) return "costco"
+  if (host.endsWith("samsclub.com")) return "sams"
+  if (host.endsWith("tcgplayer.com")) return "tcgplayer"
   return null
 }
 
@@ -103,5 +110,12 @@ function skuOf(store: StoreId, value: string): string | null {
   if (store === "pokemon-center") return parsePokemon(value)
   if (store === "amazon") return parseAsin(value)
   if (store === "bandai") return parseBandai(value)
-  return parseCrunchyroll(value)
+  if (store === "crunchyroll") return parseCrunchyroll(value)
+  if (store === "gamestop") return parsePageSku(GAMESTOP, value)
+  if (store === "barnes-noble") return parsePageSku(BARNES_NOBLE, value)
+  if (store === "costco") return parsePageSku(COSTCO, value)
+  if (store === "sams") return parsePageSku(SAMS, value)
+  if (store === "tcgplayer") return parseProductId(value)
+  const _exhaustive: never = store
+  return _exhaustive
 }

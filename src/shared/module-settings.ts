@@ -11,7 +11,12 @@ export const MODULE_RATE_FLOOR: Record<StoreId, number> = {
   "pokemon-center": 400,
   amazon: 400,
   crunchyroll: 250,
-  bandai: 400
+  bandai: 400,
+  gamestop: 400,
+  "barnes-noble": 400,
+  costco: 400,
+  sams: 400,
+  tcgplayer: 400
 }
 
 export const MODULE_FIELDS = [
@@ -92,7 +97,12 @@ const RECOMMENDED: Record<StoreId, ModulePace> = {
   "pokemon-center": { monitorDelayMs: 5000, retryDelayMs: 8000, rateLimitMs: 400, endpoint: "product", zips: "", storeIds: "", queue: "wait", atcMode: "standard", soldBy: "retailer", sessionRefreshMin: 30, maxRetries: 2, testMode: false, blockBackoffMs: 8000 },
   amazon: { monitorDelayMs: 3500, retryDelayMs: 6000, rateLimitMs: 400, endpoint: "offers", zips: "", storeIds: "", queue: "wait", atcMode: "fast", soldBy: "retailer", sessionRefreshMin: 20, maxRetries: 3, testMode: false, blockBackoffMs: 6000 },
   crunchyroll: { monitorDelayMs: 2500, retryDelayMs: 5000, rateLimitMs: 250, endpoint: "product", zips: "", storeIds: "", queue: "wait", atcMode: "fast", soldBy: "retailer", sessionRefreshMin: 40, maxRetries: 3, testMode: false, blockBackoffMs: 4000 },
-  bandai: { monitorDelayMs: 4000, retryDelayMs: 8000, rateLimitMs: 400, endpoint: "product-api", zips: "", storeIds: "", queue: "wait", atcMode: "standard", soldBy: "retailer", sessionRefreshMin: 30, maxRetries: 3, testMode: false, blockBackoffMs: 8000 }
+  bandai: { monitorDelayMs: 4000, retryDelayMs: 8000, rateLimitMs: 400, endpoint: "product-api", zips: "", storeIds: "", queue: "wait", atcMode: "standard", soldBy: "retailer", sessionRefreshMin: 30, maxRetries: 3, testMode: false, blockBackoffMs: 8000 },
+  gamestop: { monitorDelayMs: 4000, retryDelayMs: 8000, rateLimitMs: 400, endpoint: "page", zips: "", storeIds: "", queue: "wait", atcMode: "standard", soldBy: "retailer", sessionRefreshMin: 30, maxRetries: 3, testMode: false, blockBackoffMs: 8000 },
+  "barnes-noble": { monitorDelayMs: 4000, retryDelayMs: 8000, rateLimitMs: 400, endpoint: "page", zips: "", storeIds: "", queue: "wait", atcMode: "standard", soldBy: "retailer", sessionRefreshMin: 30, maxRetries: 3, testMode: false, blockBackoffMs: 8000 },
+  costco: { monitorDelayMs: 4000, retryDelayMs: 8000, rateLimitMs: 400, endpoint: "page", zips: "", storeIds: "", queue: "wait", atcMode: "standard", soldBy: "retailer", sessionRefreshMin: 30, maxRetries: 3, testMode: false, blockBackoffMs: 8000 },
+  sams: { monitorDelayMs: 4000, retryDelayMs: 8000, rateLimitMs: 400, endpoint: "page", zips: "", storeIds: "", queue: "wait", atcMode: "standard", soldBy: "retailer", sessionRefreshMin: 30, maxRetries: 3, testMode: false, blockBackoffMs: 8000 },
+  tcgplayer: { monitorDelayMs: 3000, retryDelayMs: 6000, rateLimitMs: 400, endpoint: "catalog", zips: "", storeIds: "", queue: "wait", atcMode: "standard", soldBy: "retailer", sessionRefreshMin: 30, maxRetries: 3, testMode: false, blockBackoffMs: 6000 }
 }
 
 export const MODULE_ENDPOINTS: Record<StoreId, readonly string[]> = {
@@ -102,7 +112,12 @@ export const MODULE_ENDPOINTS: Record<StoreId, readonly string[]> = {
   "pokemon-center": ["product"],
   amazon: ["offers", "page"],
   crunchyroll: ["product"],
-  bandai: ["product-api"]
+  bandai: ["product-api"],
+  gamestop: ["page"],
+  "barnes-noble": ["page"],
+  costco: ["page"],
+  sams: ["page"],
+  tcgplayer: ["catalog"]
 }
 
 const GLOBAL_FIELDS = new Set<ModuleField>([

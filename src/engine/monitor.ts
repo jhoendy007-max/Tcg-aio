@@ -126,7 +126,7 @@ export function noteWatch(
   reading: { inStock: boolean; title?: string; price?: number; offerId?: string; seller?: string; imageUrl?: string; url?: string }
 ): void {
   const seller = (reading.seller ?? "").trim().toLowerCase()
-  const namedRetailer = /walmart|target|best buy|amazon\.com|^amazon$|pokemon|crunchyroll|bandai/.test(seller)
+  const namedRetailer = /walmart|target|best buy|amazon\.com|^amazon$|pokemon|crunchyroll|bandai|gamestop|barnes|costco|sam's club|tcgplayer direct/.test(seller)
   ctx.observe?.({
     inStock: reading.inStock,
     price: typeof reading.price === "number" ? reading.price : null,

@@ -94,9 +94,9 @@ describe("session sync policy", () => {
     expect(policy.pairsFromHeader("accessToken=own; forged name=no; =missing").map((pair) => pair.name)).toEqual(["accessToken"])
   })
 
-  it("limits the manifest to the seven store sites", () => {
+  it("limits the manifest to the store sites", () => {
     const manifest = JSON.parse(readFileSync(join("extension", "manifest.json"), "utf8"))
-    const sites = ["target.com", "walmart.com", "bestbuy.com", "pokemoncenter.com", "amazon.com", "crunchyroll.com", "p-bandai.com"]
+    const sites = ["target.com", "walmart.com", "bestbuy.com", "pokemoncenter.com", "amazon.com", "crunchyroll.com", "p-bandai.com", "gamestop.com", "barnesandnoble.com", "costco.com", "samsclub.com", "tcgplayer.com"]
     expect(manifest.permissions).toEqual(["cookies", "storage", "alarms", "scripting"])
     expect(JSON.stringify(manifest.host_permissions)).not.toContain("all_urls")
     for (const pattern of manifest.host_permissions) {

@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, and Amazon by ASIN or product URL, adds the item to your own cart, and places a **ship-to-home** order with a saved profile. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
+Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 monitors Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, Amazon by ASIN or product URL, and Premium Bandai by product code. GameStop, Barnes & Noble, Costco, and Sam's Club watch the product page with your saved session and stop so you can add the item in that browser. TCGplayer Direct watches the public catalog. Pokémon Center and Premium Bandai remain the official US preorder sources. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.
 
 Retailer terms often restrict automated purchasing. TCGAIO uses the account, proxies, and card you provide. It does not send challenges to a solving service. If a store shows a challenge or block, the task pauses and a Discord notification is sent so you can sign in yourself.
 
@@ -67,9 +67,9 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 ## Session Sync
 
-Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai. It does not collect other sites, share a session with anyone else, or create cookies.
+Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on the stores in the catalog (Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer). It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.13.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.14.zip` next to the Windows installer and the phone APK.
 
 The Android home screen can show a TCGAIO widget with wins and active tasks. iOS widgets are not in this beta. The phone still follows the desktop theme, and each task can be swiped or tapped.
 

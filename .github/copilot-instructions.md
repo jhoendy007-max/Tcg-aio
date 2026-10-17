@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.13 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.14 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -32,6 +32,12 @@ To add a store:
 3. Add the place-order request to `isFinalSubmit` in `src/engine/test-mode.ts`. Payment tokenization is not a final submit.
 4. Set the polite gap, Session Keeper home, challenge host and page, health probe, listing search, and bulk/restock parsers.
 5. Add fixtures and tests. A missing session must not call the store. A guest session must not add to cart. Test mode must end as `tested` and must not call the place-order URL.
+
+GameStop, Barnes & Noble, Costco, and Sam's Club read the product page with the saved session cookies. Purchasable means schema.org InStock, LimitedAvailability, PreOrder, or PreSale, or a visible Add to Cart control. A challenge page pauses for a person. These four modules do not add to cart: an in-stock checkout pauses and tells the user to add it in the account browser. Test mode ends as `tested` without a cart or place-order POST. Costco's product JSON often says OutOfStock when the page is only a default. No add control means the task keeps watching, and the log does not invent a warehouse count. Do not call `ecom-api.costco.com` or replay a client id from the page bundle.
+
+TCGplayer Direct uses the public catalog: GET `mp-search-api.tcgplayer.com/v1/product/{id}/details` and POST that host's `/listings` search. A missing session may still make those catalog requests. Direct stock means `directListing` or `directInventory` on a listing with quantity. A Direct-enrolled seller with neither is not Direct stock. Sold by any seller accepts any listing with quantity. The module does not POST a cart or an order. Keyword search stays a GET of the public search URL. Do not reverse the cart microfrontend.
+
+Official US Pokémon Center preorders stay on the Pokémon Center module (`PRE_ORDER` / `PREORDER` are buyable). Official Premium Bandai preorders, including One Piece card-shop drops, stay on the Premium Bandai module (`PRE_ORDER` and `preOrderStatus` InProgress). Do not add a second store for those. Japan Pokémon Center is out of scope.
 
 Shipping state is a two-letter US code from `src/engine/validate.ts`. Puerto Rico is not in that set. ZIP is `^\d{5}(?:-\d{4})?$`.
 
@@ -97,7 +103,7 @@ The phone can set autopilot and pause every running task. The desktop app stays 
 
 `extension/` is a Manifest V3 extension named TCGAIO Session Sync. It pairs with the same one-time QR the Phone page already shows, over the local WebSocket, and keeps a per-device token. Revoke that device on the desktop and the token stops working.
 
-Host permissions are only the seven store sites. The user links each account explicitly. The extension reads cookies, and the allowlisted localStorage keys in `extension/policy.mjs`, only for a linked account. A push is stored with `updateSession(..., quiet)` so it does not echo back. Two-way is off until the user turns it on. A two-way pull or `vault.session` writes cookie pairs the desktop already saved. It does not invent cookie names.
+Host permissions are only the store sites in the catalog. The user links each account explicitly. The extension reads cookies, and the allowlisted localStorage keys in `extension/policy.mjs`, only for a linked account. A push is stored with `updateSession(..., quiet)` so it does not echo back. Two-way is off until the user turns it on. A two-way pull or `vault.session` writes cookie pairs the desktop already saved. It does not invent cookie names.
 
 The desktop Session Sync page shows expiry, last used, and a flag. It does not show the cookie. A one-minute check uses the saved expiry. It does not open store login pages. Logged-out and expiring-soon notices go to Discord and the phone at most once per day. The cookie never goes in the phone snapshot or a broadcast to every device.
 

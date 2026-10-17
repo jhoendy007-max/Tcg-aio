@@ -56,7 +56,22 @@ export function isFinalSubmit(store: StoreId, request: Pick<HttpRequest, "method
       return false
     }
   }
-  return false
+  if (store === "gamestop") return postPath(method, url, /CheckoutServices-PlaceOrder$/)
+  if (store === "barnes-noble") return postPath(method, url, /\/checkout\/api\/place-order$/)
+  if (store === "costco") return postPath(method, url, /\/ebusiness\/order\/v1\/orders\/place$/)
+  if (store === "sams") return postPath(method, url, /\/checkout\/placeorder$/)
+  if (store === "tcgplayer") return postPath(method, url, /\/checkout\/place-order$/)
+  const _exhaustive: never = store
+  return _exhaustive
+}
+
+function postPath(method: string, url: string, pattern: RegExp): boolean {
+  if (method !== "POST") return false
+  try {
+    return pattern.test(new URL(url).pathname)
+  } catch {
+    return false
+  }
 }
 
 /** Wraps the task HTTP client. In test mode the inner client is never asked to send a place-order request. */
