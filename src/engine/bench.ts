@@ -176,7 +176,7 @@ export async function benchmarkStores(options: {
 
 export function summarizeBench(store: StoreId, proxy: string, samples: BenchSample[]): BenchStoreReport {
   const success = samples.filter((sample) => sample.ok)
-  const times = success.map((sample) => sample.totalMs)
+  const times = samples.filter((sample) => sample.totalMs > 0).map((sample) => sample.totalMs)
   return {
     store,
     proxy,

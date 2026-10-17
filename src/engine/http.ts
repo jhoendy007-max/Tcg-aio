@@ -45,6 +45,7 @@ interface TimingBag {
 
 const timings = new AsyncLocalStorage<TimingBag>()
 const agents = new Map<string, Dispatcher>()
+const h1Agents = new Map<string, Dispatcher>()
 let hooked = false
 
 function hookTiming(): void {
@@ -96,6 +97,19 @@ function directAgent(): Dispatcher {
   return agent
 }
 
+function h1AgentFor(proxy?: ProxyEndpoint): Dispatcher {
+  const key = proxy ? `h1:${proxyToUrl(proxy)}` : "h1:direct"
+  let agent = h1Agents.get(key)
+  if (!agent) {
+    const options = { ...pool, allowH2: false as const }
+    agent = proxy
+      ? new ProxyAgent({ ...options, uri: proxyToUrl(proxy), requestTls: { lookup: timedLookup }, proxyTls: { lookup: timedLookup } })
+      : new Agent(options)
+    h1Agents.set(key, agent)
+  }
+  return agent
+}
+
 function agentFor(proxy?: ProxyEndpoint): Dispatcher {
   if (!proxy) return directAgent()
   const key = proxyToUrl(proxy)
@@ -122,36 +136,54 @@ export async function undiciRequest(input: HttpRequest): Promise<HttpResponse> {
     const onAbort = () => controller.abort()
     input.signal?.addEventListener("abort", onAbort)
     try {
-      const res = await undiciRaw(input.url, {
-        method: input.method,
-        headers: input.headers,
-        body: input.body,
-        maxRedirections: input.redirect === "manual" ? 0 : 5,
-        signal: controller.signal,
-        dispatcher: agentFor(input.proxy)
-      })
-      if (!bag.ttfbMs) bag.ttfbMs = performance.now() - started
-      const body = await res.body.text()
-      const headers: Record<string, string | string[] | undefined> = {}
-      for (const [key, value] of Object.entries(res.headers)) {
-        if (value !== undefined) headers[key] = value
-      }
-      return {
-        status: res.statusCode,
-        headers,
-        body,
-        timing: {
-          dnsMs: Math.round(bag.dnsMs),
-          connectMs: Math.round(bag.connectMs),
-          ttfbMs: Math.round(bag.ttfbMs),
-          totalMs: Math.round(performance.now() - started)
-        }
+      try {
+        return await readResponse(input, agentFor(input.proxy), controller.signal, bag, started)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : ""
+        const retry = !input.signal?.aborted && /NGHTTP2|ERR_HTTP2|HTTP\/2|HEADERS_TIMEOUT|BODY_TIMEOUT|Headers Timeout|Body Timeout/i.test(message)
+        if (!retry) throw err
+        bag.dnsMs = 0
+        bag.connectStart = 0
+        bag.connectMs = 0
+        bag.sentAt = 0
+        bag.ttfbMs = 0
+        return await readResponse(input, h1AgentFor(input.proxy), controller.signal, bag, performance.now())
       }
     } finally {
       clearTimeout(timeout)
       input.signal?.removeEventListener("abort", onAbort)
     }
   })
+}
+
+async function readResponse(input: HttpRequest, dispatcher: Dispatcher, signal: AbortSignal, bag: TimingBag, started: number): Promise<HttpResponse> {
+  const res = await undiciRaw(input.url, {
+    method: input.method,
+    headers: input.headers,
+    body: input.body,
+    maxRedirections: input.redirect === "manual" ? 0 : 5,
+    headersTimeout: 8_000,
+    bodyTimeout: 12_000,
+    signal,
+    dispatcher
+  })
+  if (!bag.ttfbMs) bag.ttfbMs = performance.now() - started
+  const body = await res.body.text()
+  const headers: Record<string, string | string[] | undefined> = {}
+  for (const [key, value] of Object.entries(res.headers)) {
+    if (value !== undefined) headers[key] = value
+  }
+  return {
+    status: res.statusCode,
+    headers,
+    body,
+    timing: {
+      dnsMs: Math.round(bag.dnsMs),
+      connectMs: Math.round(bag.connectMs),
+      ttfbMs: Math.round(bag.ttfbMs),
+      totalMs: Math.round(performance.now() - started)
+    }
+  }
 }
 
 export const defaultHttp: HttpClient = { request: undiciRequest }

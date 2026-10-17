@@ -16,6 +16,7 @@ async function main(): Promise<void> {
   }
   const reports = await benchmarkStores({ n: Number.isFinite(count) ? count : 5, proxy: proxy ?? undefined })
   console.log("store            proxy          n  ok   rate    p50    p95")
+  console.log("p50 and p95 are completed request times, including blocks. Success is a readable 2xx or 3xx.")
   for (const row of reports) {
     const rate = `${Math.round(row.successRate * 100)}%`.padStart(4)
     console.log(
