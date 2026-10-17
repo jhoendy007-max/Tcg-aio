@@ -71,6 +71,8 @@ Use the local binaries (`./node_modules/.bin/tsc`, `./node_modules/.bin/vitest`)
 
 CI is `.github/workflows/windows.yml`. Pushes to `main` and `cursor/**`, pull requests, and tags `v*` run test, then Windows and Android. The installer, `latest.yml`, blockmap, and APK publish only when the ref is a `v*` tag. Do not move an existing release tag to pick up docs.
 
+The desktop app is Windows only. Do not add a macOS disk image, a `macos-latest` job, Mac signing, or notarization. The phone app keeps its iOS TestFlight path: `mobile/eas.json` production profile (`ios.distribution: store`), then `npx eas build -p ios --profile production` and `npx eas submit -p ios --profile production`. GitHub Actions does not build that iOS binary.
+
 Bump versions together when shipping a beta: root `package.json`, `mobile/package.json`, `mobile/app.json` (`version` and `android.versionCode`), `src/shared/version.ts`, `mobile/src/version.ts`, and the version fields in `mobile/package-lock.json`.
 
 ## Conventions
