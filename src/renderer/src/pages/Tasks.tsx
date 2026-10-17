@@ -464,6 +464,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
               <div>
                 <div>{storeName(task.store)}{task.kind === "monitor" ? <span className="pill">MONITOR</span> : null}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
                 <div className="sku">{task.sku}</div>
+                {taskView === "compact" ? bindingCell(task, accounts, groups, lang).summary : null}
                 {typeof task.monitorMs === "number" ? <div className="detail">{task.monitorMs} ms last read{typeof task.detectToCartMs === "number" ? ` · ${task.detectToCartMs} ms to cart` : ""}</div> : null}
               </div>
             </div>
@@ -509,19 +510,29 @@ function bindingCell(task: PublicTask, accounts: PublicAccount[], groups: ProxyG
     ? consistencyText(lang, "fromNone")
     : binding.accountLabel || "Missing"
   const proxyLabel = binding.proxyLabel || consistencyText(lang, "fromDirect")
-  const source = binding.proxySource === "account" ? "fromAccount" : binding.proxySource === "task" ? "fromTask" : "fromDirect"
+  const proxySource = binding.proxySource === "account" ? "fromAccount" : binding.proxySource === "task" ? "fromTask" : "fromDirect"
+  const accountSource = binding.accountSource === "task" ? "fromAccount" : "fromNone"
+  const profileSource = binding.profileSource === "account" ? "fromAccount" : "fromNone"
+  const profileLabel = binding.profileLabel || consistencyText(lang, "fromNone")
   return {
+    summary: (
+      <>
+        <div className="detail">{taskText(lang, "account")}: {accountLabel} · {consistencyText(lang, accountSource)}</div>
+        <div className="detail">{consistencyText(lang, "profile")}: {profileLabel} · {consistencyText(lang, profileSource)}</div>
+        <div className="detail">{consistencyText(lang, "stickyProxy")}: {proxyLabel} · {consistencyText(lang, proxySource)}</div>
+      </>
+    ),
     account: (
       <>
         <div>{accountLabel}</div>
-        {binding.profileSource === "account" ? <div className="detail">{consistencyText(lang, "profile")} · {binding.profileLabel}</div> : null}
-        <div className="detail">{consistencyText(lang, binding.accountSource === "task" ? "fromAccount" : "fromNone")}</div>
+        <div className="detail">{consistencyText(lang, "profile")}: {profileLabel}</div>
+        <div className="detail">{consistencyText(lang, accountSource)} · {consistencyText(lang, profileSource)}</div>
       </>
     ),
     proxy: (
       <>
         <div>{proxyLabel}</div>
-        <div className="detail">{consistencyText(lang, source)}</div>
+        <div className="detail">{consistencyText(lang, proxySource)}</div>
         {binding.warnings.map((warning) => <div key={warning} className="detail">{consistencyText(lang, warning === "sticky" ? "stickyWarning" : "monitorWarning")}</div>)}
       </>
     )
@@ -706,7 +717,9 @@ function BindingNote({ form, accounts, groups, lang }: { form: TaskInput; accoun
   })
   return (
     <div className="span-2">
-      <p className="hint">{consistencyText(lang, "effective")}: {binding.accountSource === "none" ? consistencyText(lang, "fromNone") : binding.accountLabel} · {binding.profileLabel || consistencyText(lang, "fromNone")} · {binding.proxyLabel || consistencyText(lang, "fromDirect")} ({consistencyText(lang, binding.proxySource === "account" ? "fromAccount" : binding.proxySource === "task" ? "fromTask" : "fromDirect")})</p>
+      <p className="hint">{taskText(lang, "account")}: {binding.accountSource === "none" ? consistencyText(lang, "fromNone") : binding.accountLabel} · {consistencyText(lang, binding.accountSource === "task" ? "fromAccount" : "fromNone")}</p>
+      <p className="hint">{consistencyText(lang, "profile")}: {binding.profileLabel || consistencyText(lang, "fromNone")} · {consistencyText(lang, binding.profileSource === "account" ? "fromAccount" : "fromNone")}</p>
+      <p className="hint">{consistencyText(lang, "stickyProxy")}: {binding.proxyLabel || consistencyText(lang, "fromDirect")} · {consistencyText(lang, binding.proxySource === "account" ? "fromAccount" : binding.proxySource === "task" ? "fromTask" : "fromDirect")}</p>
       {binding.warnings.map((warning) => <Banner key={warning} tone="info">{consistencyText(lang, warning === "sticky" ? "stickyWarning" : "monitorWarning")}</Banner>)}
     </div>
   )
@@ -721,7 +734,7 @@ function freshTask(settings: Settings | null): TaskInput {
 function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings: Settings; onChange: (next: TaskInput) => void }) {
   const lang = settings.language === "es" ? "es" : "en"
   const resolved = resolveModule(form.store, moduleScope(settings), form.overrides)
-  function setNumber(key: "monitorDelayMs" | "retryDelayMs" | "maxRetries" | "blockBackoffMs", raw: string) {
+  function setNumber(key: "monitorDelayMs" | "retryDelayMs" | "rateLimitMs" | "maxRetries" | "blockBackoffMs", raw: string) {
     const overrides = { ...form.overrides }
     if (!raw.trim()) delete overrides[key]
     else overrides[key] = Math.round(Number(raw))
@@ -730,7 +743,7 @@ function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings
   return (
     <div className="span-2">
       <h2>{moduleText(lang, "overrides")}</h2>
-      <p>{moduleText(lang, "overrideHint")} {moduleText(lang, "monitorDelayMs")}: {resolved.monitorDelayMs.value} ms · {sourceLabel(lang, resolved.monitorDelayMs.source)}. {moduleText(lang, "maxRetries")}: {resolved.maxRetries.value} · {sourceLabel(lang, resolved.maxRetries.source)}.</p>
+      <p>{moduleText(lang, "overrideHint")} {moduleText(lang, "rateLimitMs")}: {resolved.rateLimitMs.value} ms · {sourceLabel(lang, resolved.rateLimitMs.source)}. {moduleText(lang, "maxRetries")}: {resolved.maxRetries.value} · {sourceLabel(lang, resolved.maxRetries.source)}. {taskText(lang, "jitter")}: {form.jitterPct ?? settings.monitorJitterPct}% · {sourceLabel(lang, form.jitterPct === null || form.jitterPct === undefined ? "global" : "task")}.</p>
       <div className="form-grid">
         <Field label={moduleText(lang, "monitorDelayMs")}>
           <TextInput value={form.overrides?.monitorDelayMs ?? ""} placeholder={String(resolved.monitorDelayMs.value)} onChange={(event) => setNumber("monitorDelayMs", event.target.value)} />
@@ -738,13 +751,16 @@ function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings
         <Field label={moduleText(lang, "retryDelayMs")}>
           <TextInput value={form.overrides?.retryDelayMs ?? ""} placeholder={String(resolved.retryDelayMs.value)} onChange={(event) => setNumber("retryDelayMs", event.target.value)} />
         </Field>
+        <Field label={moduleText(lang, "rateLimitMs")} hint={taskText(lang, "inherit")}>
+          <TextInput value={form.overrides?.rateLimitMs ?? ""} placeholder={String(resolved.rateLimitMs.value)} onChange={(event) => setNumber("rateLimitMs", event.target.value)} />
+        </Field>
         <Field label={moduleText(lang, "maxRetries")}>
           <TextInput value={form.overrides?.maxRetries ?? ""} placeholder={String(resolved.maxRetries.value)} onChange={(event) => setNumber("maxRetries", event.target.value)} />
         </Field>
         <Field label={moduleText(lang, "blockBackoffMs")}>
           <TextInput value={form.overrides?.blockBackoffMs ?? ""} placeholder={String(resolved.blockBackoffMs.value)} onChange={(event) => setNumber("blockBackoffMs", event.target.value)} />
         </Field>
-        <Field label={taskText(lang, "jitter")}>
+        <Field label={taskText(lang, "jitter")} hint={taskText(lang, "jitterHint")}>
           <TextInput type="number" min={0} max={40} value={form.jitterPct ?? ""} placeholder={String(settings.monitorJitterPct)} onChange={(event) => onChange({ ...form, jitterPct: event.target.value === "" ? null : Number(event.target.value) })} />
         </Field>
         <Field label={taskText(lang, "zip")}>
