@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { DEFAULT_SETTINGS, type Settings, type SettingsPayload } from "../../../shared/types"
+import { DEFAULT_SETTINGS, type LicenseView, type Settings, type SettingsPayload } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { MailSettings } from "./MailSettings"
 import { applyTheme } from "../theme"
@@ -16,6 +16,12 @@ export function SettingsPage() {
   const [passphrase, setPassphrase] = useState("")
   const [backupToken, setBackupToken] = useState("")
   const [hasBackupToken, setHasBackupToken] = useState(false)
+  const [license, setLicense] = useState<LicenseView | null>(null)
+  const [licenseKey, setLicenseKey] = useState("")
+  const [adminToken, setAdminToken] = useState("")
+  const [holder, setHolder] = useState("")
+  const [seats, setSeats] = useState(1)
+  const [minted, setMinted] = useState("")
 
   useEffect(() => {
     void unwrap(window.aio.settings.get())
@@ -26,6 +32,7 @@ export function SettingsPage() {
       .catch((err) => setError(errorText(err)))
     void unwrap(window.aio.updates.get()).then((status) => setHasToken(status.hasToken)).catch(() => undefined)
     void unwrap(window.aio.backup.saveToken({ action: "keep", token: "" })).then((status) => setHasBackupToken(status.hasToken)).catch(() => undefined)
+    void unwrap(window.aio.license.get()).then(setLicense).catch(() => undefined)
   }, [])
 
   async function save(event: React.FormEvent) {
@@ -235,6 +242,16 @@ export function SettingsPage() {
         <Field label="Target store ID"><TextInput value={form.targetStoreId} onChange={(event) => setForm({ ...form, targetStoreId: event.target.value })} required /></Field>
         <Field label="Target ZIP"><TextInput value={form.targetZip} onChange={(event) => setForm({ ...form, targetZip: event.target.value })} required /></Field>
         <Field label="Target state"><TextInput value={form.targetState} maxLength={2} onChange={(event) => setForm({ ...form, targetState: event.target.value })} required /></Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.licenseRequired} onChange={(event) => setForm({ ...form, licenseRequired: event.target.checked })} />
+          <span>Require a license before tasks start. Leave this off for personal use. The license server never receives card, password, or session data.</span>
+        </label>
+        <Field className="span-2" label="License server" hint="Optional https URL, or http://127.0.0.1 when the server is this PC. No token in the URL.">
+          <TextInput value={form.licenseServerUrl} onChange={(event) => setForm({ ...form, licenseServerUrl: event.target.value })} placeholder="https://licenses.example.com" autoComplete="off" />
+        </Field>
+        <Field className="span-2" label="License public key" hint="The seller's public key. Not a secret. The private key stays on the PC that mints keys.">
+          <TextInput value={form.licensePublicKey} onChange={(event) => setForm({ ...form, licensePublicKey: event.target.value })} autoComplete="off" />
+        </Field>
         <Field className="span-2" label="Backup URL" hint="Optional https link you control. The file stored there is ciphertext. Do not put the token in the URL.">
           <TextInput value={form.backupUrl} onChange={(event) => setForm({ ...form, backupUrl: event.target.value })} placeholder="https://example.com/tcgaio-backup" autoComplete="off" />
         </Field>
@@ -335,6 +352,52 @@ export function SettingsPage() {
             }
           })()}>Download from URL</button>
         </div>
+      </form>
+      <form className="card stack" onSubmit={(event) => event.preventDefault()}>
+        <div>
+          <h2>License</h2>
+          <p className="hint">Optional. This PC is {license?.machineId ?? "…"}. Activation sends the license key, this machine id, and the app version. It does not send cards, passwords, cookies, or sessions. Leave required off unless you are distributing the app.</p>
+        </div>
+        <Field label="License key">
+          <TextInput type="password" autoComplete="off" value={licenseKey} onChange={(event) => setLicenseKey(event.target.value)} />
+        </Field>
+        <p className="hint">{license?.activated ? `Activated for ${license.holder}.` : "This PC is not activated."}</p>
+        <div className="actions">
+          <button type="button" disabled={busy} onClick={() => void (async () => {
+            setBusy(true)
+            setError("")
+            try {
+              await unwrap(window.aio.settings.save(form))
+              const next = await unwrap(window.aio.license.activate(licenseKey))
+              setLicense(next)
+              setLicenseKey("")
+              setMessage("This PC is activated.")
+            } catch (err) {
+              setError(errorText(err))
+            } finally {
+              setBusy(false)
+            }
+          })()}>Activate this PC</button>
+        </div>
+        <Field label="Admin token" hint={license?.hasAdmin ? "An admin token is saved on this PC." : "Set one before minting or starting the local server."}>
+          <TextInput type="password" autoComplete="off" value={adminToken} onChange={(event) => setAdminToken(event.target.value)} />
+        </Field>
+        <Field label="Holder"><TextInput value={holder} onChange={(event) => setHolder(event.target.value)} /></Field>
+        <Field label="Seats"><TextInput type="number" min={1} max={50} value={seats} onChange={(event) => setSeats(Number(event.target.value))} /></Field>
+        <div className="actions">
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.saveAdmin({ action: adminToken ? "replace" : "clear", token: adminToken })).then((next) => { setLicense(next); setAdminToken(""); setMessage(next.hasAdmin ? "Admin token saved on this PC." : "Admin token removed.") }).catch((err) => setError(errorText(err)))}>{adminToken ? "Save admin token" : "Remove admin token"}</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.generate()).then((next) => { setLicense(next); setForm((current) => ({ ...current, licensePublicKey: next.publicKey })); setMessage("License identity created. Copy the public key to other PCs. The private key stays here.") }).catch((err) => setError(errorText(err)))}>Create identity</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.mint({ holder, seats, expiresAt: null })).then((next) => { setLicense(next); setMinted(next.key); setMessage("License key created. Copy it now. It is not a card number.") }).catch((err) => setError(errorText(err)))}>Mint key</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.serve({ action: "start", port: 8756 })).then((next) => setMessage(next.url ? `License server listening on ${next.url}. Other PCs need an https address in front of it.` : "License server stopped.")).catch((err) => setError(errorText(err)))}>Start local server</button>
+          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.license.serve({ action: "stop" })).then(() => setMessage("License server stopped.")).catch((err) => setError(errorText(err)))}>Stop server</button>
+        </div>
+        {minted ? <p className="hint">New key: {minted}</p> : null}
+        {(license?.issued ?? []).map((row) => (
+          <div key={row.id} className="actions">
+            <span>{row.holder} · {row.seats} seats · {row.machines.length} PCs{row.revoked ? " · revoked" : ""}</span>
+            <button type="button" disabled={busy || row.revoked} onClick={() => void unwrap(window.aio.license.revoke(row.id)).then(setLicense).catch((err) => setError(errorText(err)))}>Revoke</button>
+          </div>
+        ))}
       </form>
       <form className="card stack" onSubmit={(event) => {
         event.preventDefault()

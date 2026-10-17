@@ -11,6 +11,8 @@ import { defaultHttp } from "../engine/http"
 import { lookupResale } from "../engine/resale"
 import { inventoryCsv, inventoryReport } from "../engine/inventory"
 import { getBackup, putBackup } from "../engine/backup"
+import { activateRemote, listenLicense, type LicenseStore } from "../engine/license"
+import { APP_VERSION } from "../shared/version"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
@@ -291,6 +293,42 @@ export function registerIpc(
     onSettings?.(db.getSettings())
     return { restored: true as const }
   })
+  handle(channels.licenseGet, () => db.licenseView())
+  handle(channels.licenseIdentity, () => {
+    db.generateLicenseIdentity()
+    onSettings?.(db.getSettings())
+    return db.licenseView()
+  })
+  handle(channels.licenseAdmin, (input: { action: "keep" | "replace" | "clear"; token: string }) => {
+    db.setLicenseAdmin(input?.action ?? "keep", input?.token ?? "")
+    return db.licenseView()
+  })
+  handle(channels.licenseMint, (input: { holder: string; seats: number; expiresAt: number | null }) => {
+    const minted = db.mintLicense({ holder: input?.holder ?? "", seats: Number(input?.seats), expiresAt: input?.expiresAt ?? null })
+    return { ...db.licenseView(), key: minted.key }
+  })
+  handle(channels.licenseRevoke, (id: string) => {
+    db.revokeLicense(id)
+    return db.licenseView()
+  })
+  handle(channels.licenseActivate, async (key: string) => {
+    const settings = db.getSettings()
+    if (settings.licenseServerUrl) {
+      const status = await activateRemote(defaultHttp, settings.licenseServerUrl, key, db.pcId(), APP_VERSION)
+      db.saveRemoteActivation(key, status)
+    } else {
+      db.activateLicense(key)
+    }
+    return db.licenseView()
+  })
+  handle(channels.licenseServe, async (input: { action: "start" | "stop"; port?: number }) => {
+    if (input?.action === "stop") {
+      await stopLicense()
+      return { url: "" }
+    }
+    const url = await startLicense(db, Math.round(Number(input?.port ?? 8756)))
+    return { url }
+  })
   handle(channels.imapGet, () => db.imapView())
   handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
   handle(channels.mailboxesGet, () => db.listMailboxes())
@@ -338,6 +376,38 @@ export function registerIpc(
     db.setVaultTwoWay(deviceId, accountId, twoWay)
     return db.listVault()
   })
+}
+
+let licenseServer: { url: string; close(): Promise<void> } | null = null
+
+function licenseStore(db: Database): LicenseStore {
+  return {
+    publicKey: () => db.licensePublicKey(),
+    adminOk: (token) => Boolean(token) && token === db.licenseAdminToken(),
+    findToken: (key) => db.findLicenseToken(key),
+    remember: (record, key) => db.rememberLicense(record, key),
+    list: () => db.licenseView().issued,
+    mint: (input) => {
+      const minted = db.mintLicense(input)
+      const record = db.licenseView().issued.find((row) => row.id === minted.id)
+      if (!record) throw new Error("License was not stored.")
+      return { token: minted.key, record }
+    },
+    revoke: (id) => db.revokeLicense(id)
+  }
+}
+
+async function startLicense(db: Database, port: number): Promise<string> {
+  await stopLicense()
+  licenseServer = await listenLicense(port, licenseStore(db))
+  return licenseServer.url
+}
+
+async function stopLicense(): Promise<void> {
+  if (!licenseServer) return
+  const current = licenseServer
+  licenseServer = null
+  await current.close()
 }
 
 function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {

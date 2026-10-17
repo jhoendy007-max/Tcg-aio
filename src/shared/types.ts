@@ -390,6 +390,12 @@ export interface Settings {
   microsoftMailClientId: string
   /** https URL the user owns. The upload token is not stored here. */
   backupUrl: string
+  /** Optional https license server. Loopback http is allowed only for this PC. */
+  licenseServerUrl: string
+  /** When on, tasks do not start until this PC has an unexpired license. */
+  licenseRequired: boolean
+  /** Seller's public key. Not a secret. The private key is not stored here. */
+  licensePublicKey: string
   /** Per-store defaults. Missing stores use the recommended values. */
   modules: Partial<Record<StoreId, ModuleRecord>>
 }
@@ -441,6 +447,9 @@ export const DEFAULT_SETTINGS: Settings = {
   googleMailClientId: "",
   microsoftMailClientId: "",
   backupUrl: "",
+  licenseServerUrl: "",
+  licenseRequired: false,
+  licensePublicKey: "",
   modules: {}
 }
 
@@ -452,6 +461,18 @@ export interface SecurityInfo {
 export interface SettingsPayload {
   settings: Settings
   security: SecurityInfo
+}
+
+export interface LicenseView {
+  machineId: string
+  publicKey: string
+  hasPrivateKey: boolean
+  hasAdmin: boolean
+  activated: boolean
+  holder: string
+  expiresAt: number | null
+  seats: number
+  issued: Array<{ id: string; holder: string; seats: number; expiresAt: number | null; revoked: boolean; machines: string[] }>
 }
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string }

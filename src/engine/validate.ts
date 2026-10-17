@@ -3,6 +3,7 @@ import { cleanModules } from "../shared/module-settings"
 import { AppError } from "../shared/errors"
 import { isStoreId } from "../shared/stores"
 import { assertBackupUrl } from "./backup"
+import { assertLicenseUrl, cleanPublicKey } from "./license"
 import { assertDiscordWebhook } from "./discord"
 import type { Address, Settings } from "../shared/types"
 import { DEFAULT_SETTINGS } from "../shared/types"
@@ -143,6 +144,9 @@ export function cleanSettings(input: Settings): Settings {
     googleMailClientId: cleanClientId(input.googleMailClientId),
     microsoftMailClientId: cleanClientId(input.microsoftMailClientId),
     backupUrl: assertBackupUrl(input.backupUrl ?? ""),
+    licenseServerUrl: assertLicenseUrl(input.licenseServerUrl ?? ""),
+    licenseRequired: input.licenseRequired === true,
+    licensePublicKey: cleanPublicKey(input.licensePublicKey),
     modules: cleanModules(input.modules)
   }
 }

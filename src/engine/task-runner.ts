@@ -44,6 +44,7 @@ export class TaskService {
 
   start(id: string, options?: { test?: boolean }): void {
     if (this.inflight.has(id)) return
+    if (!this.db.licenseAllows()) throw new Error("This PC is not activated. Add a license key in Settings.")
     const task = this.db.getTask(id)
     const testMode = options?.test === true || task.testMode === true || this.db.getSettings().testMode === true
     if (!testMode && !task.confirmPurchase && task.monitorOnly !== true && task.kind !== "monitor") {
