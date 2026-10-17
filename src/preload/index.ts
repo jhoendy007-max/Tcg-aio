@@ -123,6 +123,12 @@ const api: AioApi = {
     imap: () => ipcRenderer.invoke(channels.imapGet),
     saveImap: (input) => ipcRenderer.invoke(channels.imapSave, input)
   },
+  mail: {
+    list: () => ipcRenderer.invoke(channels.mailboxesGet),
+    save: (input) => ipcRenderer.invoke(channels.mailboxSave, input),
+    delete: (id) => ipcRenderer.invoke(channels.mailboxDelete, id),
+    test: (id) => ipcRenderer.invoke(channels.mailboxTest, id)
+  },
   vault: {
     list: () => ipcRenderer.invoke(channels.vaultList),
     unlink: (deviceId: string, accountId: string) => ipcRenderer.invoke(channels.vaultUnlink, deviceId, accountId),

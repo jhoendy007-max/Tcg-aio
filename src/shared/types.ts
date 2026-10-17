@@ -511,6 +511,51 @@ export interface ImapInput {
   passwordAction: "keep" | "replace" | "clear"
 }
 
+export type MailProvider = "gmail" | "outlook" | "icloud" | "yahoo" | "custom"
+
+export interface MailboxView {
+  id: string
+  name: string
+  enabled: boolean
+  provider: MailProvider
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  mailbox: string
+  hasPassword: boolean
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+  lastOkAt: number | null
+  lastError: string
+  folders: string[]
+}
+
+export interface MailboxInput {
+  id?: string
+  name: string
+  enabled: boolean
+  provider: MailProvider
+  host: string
+  port: number
+  secure: boolean
+  user: string
+  mailbox: string
+  password: string
+  passwordAction: "keep" | "replace" | "clear"
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+}
+
+export interface MailboxStatus {
+  accounts: number
+  enabled: number
+  ready: number
+  lastError: string
+}
+
 export interface RestockRule {
   id: string
   name: string

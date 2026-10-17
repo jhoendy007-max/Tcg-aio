@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.10 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.11 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, and Premium Bandai (One Piece and other card-shop drops).
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -65,7 +65,13 @@ Self-healing runs only while autopilot is on. A task with no log for `stuckMinut
 
 Windows launch at boot is opt-in (`launchOnBoot`). A clean quit marks running tasks stopped. A crash leaves them active, and the next launch resumes them when `resumeOnLaunch` is on. An uncaught error can relaunch the process at most once a minute.
 
-Order rows are stored after a win. A later GET of that account's order page, plus an optional IMAP mailbox the user connects, can mark the order cancelled or record a tracking number. The mail password is encrypted with the same cipher as the other secrets.
+Order rows are stored after a win. A later GET of that account's order page, plus mail from Settings, can mark the order cancelled or record a tracking number.
+
+## Mail
+
+Settings stores several IMAP mailboxes. Each one has a host, port, SSL/TLS or STARTTLS, username, folder, and an app password encrypted with the same cipher as the other secrets. Presets fill Gmail, Outlook, iCloud, and Yahoo and tell the user where to create an app password. Test connection logs in, lists folders, and logs out. A missing STARTTLS reply never sends the password.
+
+Access is read-only. Do not APPEND, STORE, EXPUNGE, COPY, or MOVE, and do not send mail. A message counts only when its From domain is one of that store's sender domains in `src/shared/mail.ts`. Sign-in codes are filled into the user's own account during session refresh, or posted only when Amazon's page already has an OTP form. The digits are not written to the log, Discord, or the phone. Order mail updates tracking. Restock and newsletter mail is an optional alert and does not start checkout. The phone snapshot shows how many mailboxes are on and ready. It does not include the password. `PHONE_PROTOCOL` stays 1.
 
 The daily report uses `healthReportTime` in `healthReportZone` (the host zone when the field is blank) and goes to Discord and the phone.
 

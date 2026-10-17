@@ -14,7 +14,9 @@ import type { TaskService } from "../engine/task-runner"
 import type { PhoneServer } from "../phone/server"
 import { encodePairingPayload } from "../phone/protocol"
 import { channels } from "../shared/ipc"
-import type { ImapInput, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
+import { openMailbox, testMailbox } from "../engine/imap"
+import { AppError } from "../shared/errors"
+import type { ImapInput, MailboxInput, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
 import { listStores } from "../stores/registry"
 import type { StoreId } from "../shared/types"
 import type { StoreModule } from "../stores/module"
@@ -228,6 +230,28 @@ export function registerIpc(
   handle(channels.ordersList, () => db.listOrders())
   handle(channels.imapGet, () => db.imapView())
   handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
+  handle(channels.mailboxesGet, () => db.listMailboxes())
+  handle(channels.mailboxSave, (input: MailboxInput) => db.saveMailbox(input))
+  handle(channels.mailboxDelete, (id: string) => {
+    db.deleteMailbox(id)
+    return { id }
+  })
+  handle(channels.mailboxTest, async (id: string) => {
+    const login = db.mailboxSecret(id)
+    if (!login) throw new AppError("Save the mailbox and an app password before testing the connection.")
+    try {
+      const socket = await openMailbox({ host: login.host, port: login.port, secure: login.secure })
+      const folders = await testMailbox(socket, { user: login.user, password: login.password })
+      db.noteMailbox(id, { ok: true, error: "", folders })
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "The connection failed."
+      db.noteMailbox(id, { ok: false, error })
+      throw new AppError(error)
+    }
+    const view = db.listMailboxes().find((row) => row.id === id)
+    if (!view) throw new AppError("Mailbox not found.")
+    return view
+  })
   handle(channels.vaultList, () => db.listVault())
   handle(channels.vaultUnlink, (deviceId: string, accountId: string) => {
     db.unlinkVault(deviceId, accountId)

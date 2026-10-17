@@ -18,6 +18,6 @@ Release APK: `mobile/scripts/assemble-release.sh`. It restores the existing uplo
 
 iOS stays TestFlight-ready. `mobile/eas.json` production sets `ios.distribution` to `store`. From `mobile/`, `npx eas build -p ios --profile production` then `npx eas submit -p ios --profile production`. Keep the `preview` profile. Do not add a macOS desktop build from this app.
 
-The phone can turn Autopilot on or off and pause every running task. Those commands do not carry a card, password, or proxy password.
+The phone can turn Autopilot on or off and pause every running task. Those commands do not carry a card, password, or proxy password. The snapshot `imap` field is a status line (how many mailboxes are on and ready, plus the last error). It has no app password. Adding a mailbox stays on the desktop.
 
 The phone paints from the snapshot `brand` (name, theme, accent, success sound). It does not receive the desktop logo. Task rows can be swiped; the same actions stay on visible buttons. `mobile/plugins/withWidgets.js` adds an Android home widget during prebuild. Do not add an iOS WidgetKit target unless there is a checked-in Xcode project to test. The TestFlight path stays as it is.

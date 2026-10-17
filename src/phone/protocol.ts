@@ -137,6 +137,13 @@ export interface PhoneKeeper {
   expired: number
 }
 
+export interface PhoneImap {
+  accounts: number
+  enabled: number
+  ready: number
+  lastError: string
+}
+
 export interface PhoneSnapshot {
   pcName: string
   testMode: boolean
@@ -151,6 +158,7 @@ export interface PhoneSnapshot {
   analytics: PhoneAnalytics
   updates: PhoneUpdates
   keeper: PhoneKeeper
+  imap?: PhoneImap
   autopilot?: boolean
   brand?: { appName: string; theme: "dark" | "light"; accent: "gold" | "blue" | "green" | "rose"; successSound: boolean }
 }

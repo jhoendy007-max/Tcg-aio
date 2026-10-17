@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { DEFAULT_SETTINGS, type Settings, type SettingsPayload } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
+import { MailSettings } from "./MailSettings"
 import { applyTheme } from "../theme"
 import { errorText, unwrap } from "../lib"
 
@@ -238,6 +239,7 @@ export function SettingsPage() {
           <button type="button" onClick={() => void testWebhook()} disabled={busy}>Send test webhook</button>
         </div>
       </form>
+      <MailSettings />
       <form className="card stack" onSubmit={(event) => {
         event.preventDefault()
         setBusy(true)

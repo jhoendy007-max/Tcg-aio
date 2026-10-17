@@ -217,6 +217,45 @@ export function pickupOnly(body: string): boolean {
   return pickup && !shipping
 }
 
+export interface OtpForm {
+  action: string
+  field: string
+  fields: Record<string, string>
+}
+
+/** An OTP form the store already rendered. A captcha form is not an OTP form. */
+export function readOtpForm(body: string): OtpForm | undefined {
+  const forms = [...body.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)]
+  for (const form of forms) {
+    const attrs = form[1] ?? ""
+    const inner = form[2] ?? ""
+    const action = decode(attrs.match(/action="([^"]+)"/i)?.[1] ?? "")
+    if (!action || /captcha|validatecaptcha/i.test(`${action}\n${inner}`)) continue
+    const fields: Record<string, string> = {}
+    let field = ""
+    for (const input of inner.matchAll(/<input\b([^>]*)>/gi)) {
+      const tag = input[1] ?? ""
+      const name = decode(tag.match(/name="([^"]+)"/i)?.[1] ?? "")
+      if (!name) continue
+      const type = (tag.match(/type="([^"]+)"/i)?.[1] ?? "text").toLowerCase()
+      if (type === "submit" || type === "button" || type === "image") continue
+      const value = decode(tag.match(/value="([^"]*)"/i)?.[1] ?? "")
+      if (type === "hidden") {
+        fields[name] = value
+        continue
+      }
+      const auto = tag.match(/autocomplete="([^"]+)"/i)?.[1] ?? ""
+      if (/one-time-code/i.test(auto) || /otp/i.test(name) || /^(code|mfacode|verificationcode)$/i.test(name)) {
+        field = name
+        fields[name] = ""
+      }
+    }
+    if (!field) continue
+    return { action, field, fields }
+  }
+  return undefined
+}
+
 export function readPlaceOrder(body: string): PlaceOrderForm | undefined {
   const forms = [...body.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)]
   for (const form of forms) {

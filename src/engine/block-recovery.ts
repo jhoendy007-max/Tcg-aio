@@ -14,6 +14,9 @@ export interface SessionRefreshRequest {
   existing?: SessionCookies
   signal: AbortSignal
   onChallenge: (message: string) => void
+  /** Read a code from the user's mailbox. The digits stay in the browser fill. */
+  lookupCode?: () => Promise<string | null>
+  onMailFilled?: () => void
 }
 
 export interface SessionRefreshResult {

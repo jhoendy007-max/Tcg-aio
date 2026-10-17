@@ -1,5 +1,6 @@
 import { app, BrowserWindow, session, type Session } from "electron"
 import { pageLooksLikeChallenge, type SessionRefreshRequest, type SessionRefreshResult } from "./block-recovery"
+import { otpFillScript } from "./otp"
 import { parseSession } from "./session"
 import { sessionPartition } from "./session-care"
 import type { ProxyEndpoint, SessionCookies } from "../shared/types"
@@ -43,6 +44,7 @@ export async function refreshStoreSession(input: SessionRefreshRequest): Promise
   app.on("login", onLogin)
   try {
     await loadHome(win, input.homeUrl, input.signal)
+    await fillMailboxCode(win, input.lookupCode, input.onMailFilled)
     const challenged = await challengeVisible(win)
     if (challenged) {
       input.onChallenge("The store is showing a check. Solve it in the account browser on this PC. TCGAIO does not send challenges to a solving service.")
@@ -113,6 +115,27 @@ async function loadHome(win: BrowserWindow, homeUrl: string, signal: AbortSignal
     signal.addEventListener("abort", onAbort, { once: true })
     void win.loadURL(homeUrl).catch(() => done())
   })
+}
+
+async function fillMailboxCode(
+  win: BrowserWindow,
+  lookup: SessionRefreshRequest["lookupCode"],
+  onFilled: SessionRefreshRequest["onMailFilled"]
+): Promise<void> {
+  if (!lookup || win.isDestroyed()) return
+  let code: string | null = null
+  try {
+    code = await lookup()
+  } catch {
+    code = null
+  }
+  if (!code || !/^\d{4,8}$/.test(code)) return
+  try {
+    const filled = await win.webContents.executeJavaScript(otpFillScript(code), true)
+    if (filled === true) onFilled?.()
+  } catch {
+    // The page had no code field.
+  }
 }
 
 async function challengeVisible(win: BrowserWindow): Promise<boolean> {

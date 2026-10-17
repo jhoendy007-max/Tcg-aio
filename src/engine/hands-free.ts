@@ -1,7 +1,10 @@
 import { learnedDue, planTemplateStart, replacementAccount, stuckIds } from "./autopilot"
 import type { Database } from "./database"
 import type { HttpClient } from "./http"
-import { fetchRecentMail, type LineSocket } from "./imap"
+import type { LineSocket } from "./imap"
+import { readOrderMail } from "./mail-read"
+import { fetchMailbox } from "./imap"
+import { looksLikeStoreAlert, mailAlertDetail, storeForSender } from "../shared/mail"
 import { orderStatusUrl, readOrderUpdate } from "./orders"
 import { dayKey } from "./limits"
 import { cookieHeader } from "./challenge"
@@ -26,7 +29,7 @@ export class HandsFree {
     private readonly warm: (accountId: string) => Promise<{ expired: boolean }>,
     private readonly notify: (notice: Notice) => Promise<boolean>,
     private readonly http: HttpClient,
-    private readonly connectMail: (host: string, port: number) => Promise<LineSocket> = async () => {
+    private readonly connectMail: (input: { host: string; port: number; secure: boolean }) => Promise<LineSocket> = async () => {
       throw new Error("Mail is not connected.")
     }
   ) {}
@@ -153,6 +156,7 @@ export class HandsFree {
   }
 
   async track(now = Date.now()): Promise<void> {
+    const mailByStore = new Map<string, string>()
     for (const order of this.db.listOrders()) {
       if (order.status === "cancelled" || order.status === "shipped") continue
       if (order.checkedAt && now - order.checkedAt < ORDER_GAP_MS) continue
@@ -175,7 +179,11 @@ export class HandsFree {
           text = ""
         }
       }
-      const mail = await this.mailText(now)
+      let mail = mailByStore.get(order.store)
+      if (mail === undefined) {
+        mail = await readOrderMail(this.db, this.connectMail, order.store, now)
+        mailByStore.set(order.store, mail)
+      }
       const update = readOrderUpdate(`${text}\n${mail}`, order.orderId)
       if (!update) {
         this.db.touchOrder(order.id)
@@ -209,14 +217,28 @@ export class HandsFree {
     await this.notify({ kind: "health", storeName: "Daily report", sku: "Health", profileName: "TCGAIO", detail: text })
   }
 
-  private async mailText(now: number): Promise<string> {
-    const login = this.db.imapLogin()
-    if (!login) return ""
-    try {
-      const socket = await this.connectMail(login.host, login.port)
-      return await fetchRecentMail(socket, { user: login.user, password: login.password, mailbox: login.mailbox, since: new Date(now - 3 * 24 * 60 * 60 * 1000) })
-    } catch {
-      return ""
+  async watchMail(now = Date.now()): Promise<void> {
+    const since = new Date(now - 2 * 24 * 60 * 60 * 1000)
+    for (const login of this.db.mailboxLogins("alerts")) {
+      try {
+        const socket = await this.connectMail({ host: login.host, port: login.port, secure: login.secure })
+        const messages = await fetchMailbox(socket, { user: login.user, password: login.password, mailbox: login.mailbox, since })
+        this.db.noteMailbox(login.id, { ok: true, error: "" })
+        for (const message of messages) {
+          const store = storeForSender(message.from)
+          if (!store || !looksLikeStoreAlert(message.subject, message.text)) continue
+          if (!this.db.claimMailAlert(login.id, message.uid || message.subject)) continue
+          await this.notify({
+            kind: "alert",
+            storeName: store,
+            sku: "Mail",
+            profileName: "Mail",
+            detail: mailAlertDetail(message.subject)
+          })
+        }
+      } catch (err) {
+        this.db.noteMailbox(login.id, { ok: false, error: err instanceof Error ? err.message : "Mail could not be read." })
+      }
     }
   }
 }

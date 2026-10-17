@@ -49,6 +49,7 @@ export function createPhoneHost(
       analytics: analytics(),
       updates: updates(),
       keeper: keeper(),
+      imap: db.mailboxStatus(),
       autopilot: settings.autopilot,
       brand: {
         appName: settings.appName,
