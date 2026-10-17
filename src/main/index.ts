@@ -7,7 +7,7 @@ import { AlertService, relayRestockUrl as relayUrl } from "../engine/alerts"
 import { warmTaskMonitors } from "../engine/bench"
 import { defaultHttp } from "../engine/http"
 import { refreshStoreSession } from "../engine/store-browser"
-import { postDiscord } from "../engine/discord"
+import { postDiscord, postGroupDiscord } from "../engine/discord"
 import { ChallengeGate } from "../engine/challenge-gate"
 import { TaskService } from "../engine/task-runner"
 import { channels } from "../shared/ipc"
@@ -128,10 +128,14 @@ if (gotLock) void app.whenReady().then(async () => {
       inStock: notice.inStock,
       ts: Date.now()
     })
-    const webhook = db.getSettings().discordWebhook
-    if (!webhook) return false
-    await postDiscord(webhook, notice)
-    return true
+    const settings = db.getSettings()
+    let delivered = false
+    if (settings.discordWebhook) {
+      await postDiscord(settings.discordWebhook, notice)
+      delivered = true
+    }
+    await postGroupDiscord(settings, notice)
+    return delivered
   }
   runner = new TaskService(
     db,

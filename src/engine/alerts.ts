@@ -165,7 +165,10 @@ export class AlertService {
           storeName: storeName(signal.store),
           sku: signal.sku,
           profileName: "Alerts",
-          detail: `${rule.name}: ${decision.reason}${signal.title ? ` ${signal.title}` : ""}`
+          detail: `${rule.name}: ${decision.reason}${signal.title ? ` ${signal.title}` : ""}`,
+          inStock: signal.inStock,
+          price: signal.price,
+          url: signal.url
         })
       } catch (err) {
         const reason = err instanceof Error ? err.message : "Could not start the task."
@@ -334,7 +337,10 @@ export class AlertService {
               storeName: storeName(watch.store),
               sku: listing.sku,
               profileName: "Autopilot",
-              detail: launched.reason
+              detail: launched.reason,
+              inStock: true,
+              price: listing.price,
+              url: listing.url
             })
           }
           continue
@@ -345,7 +351,10 @@ export class AlertService {
           storeName: storeName(watch.store),
           sku: listing.sku,
           profileName: "Alerts",
-          detail: `${watch.name}: ${listing.title || listing.sku} matches. Auto-start is off.`
+          detail: `${watch.name}: ${listing.title || listing.sku} matches. Auto-start is off.`,
+          inStock: true,
+          price: listing.price,
+          url: listing.url
         })
         continue
       }
@@ -369,7 +378,10 @@ export class AlertService {
           storeName: storeName(watch.store),
           sku: listing.sku,
           profileName: "Alerts",
-          detail: `${watch.name}: ${decision.reason} ${listing.title}`.trim() + (taskId ? ` Task ${taskId.slice(0, 8)}.` : "")
+          detail: `${watch.name}: ${decision.reason} ${listing.title}`.trim() + (taskId ? ` Task ${taskId.slice(0, 8)}.` : ""),
+          inStock: true,
+          price: listing.price,
+          url: listing.url
         })
       } catch (err) {
         this.logLine("keyword", watch.store, listing.sku, listing.title, err instanceof Error ? err.message : "Could not start the task.")

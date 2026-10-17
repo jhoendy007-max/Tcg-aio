@@ -316,6 +316,10 @@ export type TaskOverrides = Omit<ModuleRecord, "useGlobal">
 
 export interface Settings {
   discordWebhook: string
+  /** Opt-in feed for a shared server. Off until the user turns it on. */
+  groupDiscord: boolean
+  /** Separate from the personal webhook. Empty posts nowhere. */
+  groupWebhook: string
   monitorDelayMs: number
   targetStoreId: string
   targetZip: string
@@ -402,6 +406,8 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   discordWebhook: "",
+  groupDiscord: false,
+  groupWebhook: "",
   monitorDelayMs: 3500,
   targetStoreId: "1881",
   targetZip: "10001",

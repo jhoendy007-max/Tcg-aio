@@ -1,6 +1,6 @@
 # TCGAIO
 
-Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.18 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
+Windows Electron checkout app plus an Expo phone companion. The PC runs checkout. The phone watches and controls tasks. v0.2.19 monitors Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer Direct.
 
 Retailer terms often restrict automated purchasing. Use only an account, proxy, and card the user provides.
 
@@ -52,6 +52,10 @@ Settings can export a `.tcgaio-backup` file sealed with a passphrase the user ty
 ## Licenses
 
 Licensing is off until `licenseRequired` is turned on. A seller PC creates an Ed25519 identity. The public key is copied to other PCs. The private key stays encrypted on the seller PC and is not in a backup, the phone snapshot, or a license request. Minted keys are signed tokens. Activation sends only the key, this PC's id, and the app version. A license server response that includes a card, password, cookie, or session is rejected and not stored. Seat limits are enforced by the optional server. The local server binds to 127.0.0.1. A remote server URL must be https. Redirects are not followed. Task start is refused when a license is required and this PC is not activated. This is optional seat tracking for selling or sharing. It does not add anti-bot behavior.
+
+## Group Discord
+
+`groupDiscord` is off by default. The group webhook is separate from the personal webhook. When it is on, an in-stock restock or keyword alert and a successful checkout are posted there. Failures, tests, pauses, and challenges stay on the personal webhook only. The group post drops the profile name and strips emails, card numbers, CVVs, passwords, tokens, and proxy userinfo. It does not post a listing to a marketplace.
 
 Shipping state is a two-letter US code from `src/engine/validate.ts`. Puerto Rico is not in that set. ZIP is `^\d{5}(?:-\d{4})?$`.
 
