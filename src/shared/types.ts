@@ -849,6 +849,33 @@ export interface AnalyticsReport {
   restockHints: { store: StoreId; sku: string; hourAst: number; samples: number; warmupMin: number; detail: string }[]
 }
 
+export interface ResaleQuery {
+  title: string
+  /** Total paid. Null when the user has not entered a cost. */
+  cost: number | null
+  quantity: number
+  /** Percent of the sale price kept back for fees. Zero means fees are not subtracted. */
+  feePct: number
+  tcgProductId: string
+}
+
+export interface ResaleQuote {
+  title: string
+  cost: number | null
+  quantity: number
+  feePct: number
+  tcgMarket: number | null
+  tcgNote: string
+  ebayMedian: number | null
+  ebayCount: number
+  ebayNote: string
+  tcgProfit: number | null
+  ebayProfit: number | null
+  draft: string
+  /** Always false. The quote is a draft and is not sent to a marketplace. */
+  posted: false
+}
+
 export interface BulkShared {
   store: StoreId
   quantity: number

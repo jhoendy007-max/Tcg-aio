@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
-import type { AnalyticsReport } from "../../../shared/types"
+import type { AnalyticsReport, CheckoutRecord, ResaleQuote } from "../../../shared/types"
 import { formatAst } from "../../../engine/time"
 import { SpeedChart, SpendChart, WinChart } from "../components/charts"
-import { Banner } from "../components/ui"
+import { Banner, Field } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
 const empty: AnalyticsReport = {
@@ -135,6 +135,7 @@ export function AnalyticsPage() {
           </tbody>
         </table>
       </div>
+      <ResaleCard wins={report.recent.filter((row) => row.outcome === "success")} />
       <div className="table-wrap card">
         <table>
           <thead><tr><th>When</th><th>Store</th><th>Product</th><th>Price</th><th>Result</th></tr></thead>
@@ -147,4 +148,102 @@ export function AnalyticsPage() {
       </div>
     </section>
   )
+}
+
+function ResaleCard({ wins }: { wins: CheckoutRecord[] }) {
+  const [picked, setPicked] = useState("")
+  const [title, setTitle] = useState("")
+  const [cost, setCost] = useState("")
+  const [quantity, setQuantity] = useState("1")
+  const [feePct, setFeePct] = useState("0")
+  const [tcgProductId, setTcgProductId] = useState("")
+  const [quote, setQuote] = useState<ResaleQuote | null>(null)
+  const [error, setError] = useState("")
+  const [copied, setCopied] = useState(false)
+
+  function applyWin(id: string) {
+    setPicked(id)
+    const row = wins.find((item) => item.id === id)
+    if (!row) return
+    setTitle(row.product || row.sku)
+    setCost(row.price === null ? "" : String(row.price))
+    setQuantity(String(row.quantity && row.quantity > 0 ? row.quantity : 1))
+    setTcgProductId(row.store === "tcgplayer" ? tcgId(row.sku) : "")
+    setQuote(null)
+  }
+
+  async function check() {
+    setError("")
+    setCopied(false)
+    const paid = cost.trim() === "" ? null : Number(cost)
+    if (paid !== null && !Number.isFinite(paid)) throw new Error("Cost must be a dollar amount.")
+    const next = await unwrap(window.aio.resale.quote({
+      title,
+      cost: paid,
+      quantity: Number(quantity) || 1,
+      feePct: Number(feePct) || 0,
+      tcgProductId
+    }))
+    setQuote(next)
+  }
+
+  async function copyDraft() {
+    if (!quote) return
+    await navigator.clipboard.writeText(quote.draft)
+    setCopied(true)
+  }
+
+  return (
+    <div className="card">
+      <h2>Resale</h2>
+      <p className="hint">After a win, this reads the public TCGplayer market price and the public eBay sold search, then drafts a listing. It does not post the listing.</p>
+      {error ? <Banner tone="error">{error}</Banner> : null}
+      <div className="form-grid">
+        <Field label="Win" hint="Fills the name and recorded price. You can edit both.">
+          <select value={picked} onChange={(event) => applyWin(event.target.value)}>
+            <option value="">Custom</option>
+            {wins.map((row) => <option key={row.id} value={row.id}>{row.product || row.sku}</option>)}
+          </select>
+        </Field>
+        <Field label="Product name">
+          <input value={title} onChange={(event) => setTitle(event.target.value)} />
+        </Field>
+        <Field label="Cost" hint="Total you paid. Leave blank if the win did not record a price.">
+          <input value={cost} onChange={(event) => setCost(event.target.value)} inputMode="decimal" />
+        </Field>
+        <Field label="Quantity">
+          <input value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="numeric" />
+        </Field>
+        <Field label="Fee percent" hint="Zero leaves fees out of the profit. This is not an eBay or TCGplayer fee quote.">
+          <input value={feePct} onChange={(event) => setFeePct(event.target.value)} inputMode="decimal" />
+        </Field>
+        <Field label="TCGplayer product" hint="Product id or tcgplayer.com/product URL. The catalog is public.">
+          <input value={tcgProductId} onChange={(event) => setTcgProductId(event.target.value)} />
+        </Field>
+      </div>
+      <button type="button" onClick={() => void check().catch((err) => setError(errorText(err)))}>Check prices</button>
+      {quote ? (
+        <div>
+          <p className="hint">{quote.tcgNote}{quote.tcgMarket === null ? "" : ` $${quote.tcgMarket.toFixed(2)}.`}</p>
+          <p className="hint">{quote.ebayNote}{quote.ebayMedian === null ? "" : ` $${quote.ebayMedian.toFixed(2)}.`}</p>
+          <p className="hint">TCGplayer profit: {money(quote.tcgProfit)} · eBay profit: {money(quote.ebayProfit)}</p>
+          <Field label="Listing draft">
+            <textarea readOnly rows={8} value={quote.draft} />
+          </Field>
+          <button type="button" onClick={() => void copyDraft().catch((err) => setError(errorText(err)))}>{copied ? "Copied" : "Copy draft"}</button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function money(value: number | null): string {
+  return value === null ? "—" : `$${value.toFixed(2)}`
+}
+
+function tcgId(sku: string): string {
+  const text = sku.trim()
+  if (/^\d{3,12}$/.test(text)) return text
+  const match = text.match(/\/product\/(\d{3,12})/)
+  return match?.[1] ?? ""
 }

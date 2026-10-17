@@ -134,6 +134,9 @@ const api: AioApi = {
     signIn: (input) => ipcRenderer.invoke(channels.mailboxOAuth, input),
     open: (url) => ipcRenderer.invoke(channels.mailOpen, url)
   },
+  resale: {
+    quote: (input) => ipcRenderer.invoke(channels.resaleQuote, input)
+  },
   vault: {
     list: () => ipcRenderer.invoke(channels.vaultList),
     unlink: (deviceId: string, accountId: string) => ipcRenderer.invoke(channels.vaultUnlink, deviceId, accountId),

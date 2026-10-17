@@ -33,6 +33,8 @@ import type {
   TaskTemplate,
   TaskTemplateInput,
   OrderRecord,
+  ResaleQuery,
+  ResaleQuote,
   ImapView,
   ImapInput,
   MailboxInput,
@@ -150,6 +152,9 @@ export interface AioApi {
     test: (id: string) => Promise<Result<MailboxView>>
     signIn: (input: { provider: "gmail" | "outlook"; user: string }) => Promise<Result<MailboxView>>
     open: (url: string) => Promise<Result<{ opened: true }>>
+  }
+  resale: {
+    quote: (input: ResaleQuery) => Promise<Result<ResaleQuote>>
   }
   vault: {
     list: () => Promise<Result<PublicVault[]>>

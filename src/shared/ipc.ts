@@ -68,6 +68,7 @@ export const channels = {
   templatesSave: "templates:save",
   templatesDelete: "templates:delete",
   ordersList: "orders:list",
+  resaleQuote: "resale:quote",
   imapGet: "imap:get",
   imapSave: "imap:save",
   mailboxesGet: "mail:list",
