@@ -23,6 +23,7 @@ import { createChallengeController } from "./challenge-window"
 import { createSessionBrowser, type SessionBrowser } from "./session-window"
 import { createUpdateController } from "./auto-update"
 import { planDrops, tasksForSchedule } from "../engine/drops"
+import { rehearsalDue, rehearseDrop } from "../engine/rehearsal"
 import { dueRefreshes, dueWarmups, SessionWindowQueue } from "../shared/consistency"
 import { HandsFree } from "../engine/hands-free"
 import { openMailbox } from "../engine/imap"
@@ -335,6 +336,7 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
     }
     if (plans.length) desktop.publishSnapshot()
     await preDropCare(db)
+    await runRehearsals(db, publish)
   } finally {
     dropBusy = false
   }
@@ -361,6 +363,36 @@ async function preDropCare(db: Database): Promise<void> {
       started += 1
       void warmTracked(db, step.accountId)
     }
+  }
+}
+
+async function runRehearsals(db: Database, publish: (notice: Notice) => Promise<boolean>): Promise<void> {
+  const now = Date.now()
+  const settings = db.getSettings()
+  const tasks = db.listTasks()
+  const accounts = db.listAccounts()
+  const profiles = db.listProfiles()
+  const scores = db.proxyScores()
+  const lang = settings.language === "es" ? "es" : "en"
+  for (const schedule of db.listSchedules()) {
+    if (!rehearsalDue(schedule, now)) continue
+    const report = rehearseDrop({
+      tasks: tasksForSchedule(schedule, tasks),
+      accounts,
+      profiles,
+      scores,
+      now,
+      freshMin: settings.sessionWarmupMin,
+      lang
+    })
+    db.markRehearsal(schedule.id, now)
+    await publish({
+      kind: "drop",
+      storeName: "Rehearsal",
+      sku: schedule.name,
+      profileName: "Drop",
+      detail: report.detail
+    })
   }
 }
 

@@ -15,6 +15,8 @@ export interface LimitCheck {
   price: number | null
   now: number
   dropStart: number | null
+  /** Card last four. A per-card cap refuses the order when this is missing. */
+  last4?: string
 }
 
 export function allowCheckout(settings: Settings, checkouts: CheckoutRecord[], check: LimitCheck): { ok: true } | { ok: false; reason: string } {
@@ -48,6 +50,30 @@ export function allowCheckout(settings: Settings, checkouts: CheckoutRecord[], c
     const qty = todayRows.filter((record) => record.accountId === check.accountId).length
     if (qty + 1 > settings.maxPerAccount) {
       return { ok: false, reason: `Account limit is ${settings.maxPerAccount} orders today. This account already has ${qty}.` }
+    }
+  }
+  if (settings.accountDailySpend > 0) {
+    if (spend === null) return { ok: false, reason: "Account daily spend is set and this checkout has no price, so the order was not placed." }
+    const used = sum(todayRows.filter((record) => record.accountId === check.accountId))
+    if (used + spend > settings.accountDailySpend) {
+      return { ok: false, reason: `Account daily spend is ${money(settings.accountDailySpend)}. This account would reach ${money(used + spend)}, so the order was not placed.` }
+    }
+  }
+  const last4 = cardLast4(check.last4)
+  if (settings.cardDailySpend > 0 || settings.cardDailyOrders > 0) {
+    if (!last4) return { ok: false, reason: "A per-card limit is set and this profile has no card last four, so the order was not placed." }
+  }
+  if (settings.cardDailySpend > 0 && last4) {
+    if (spend === null) return { ok: false, reason: "Card daily spend is set and this checkout has no price, so the order was not placed." }
+    const used = sum(todayRows.filter((record) => record.last4 === last4))
+    if (used + spend > settings.cardDailySpend) {
+      return { ok: false, reason: `Card ${last4} daily spend is ${money(settings.cardDailySpend)}. It would reach ${money(used + spend)}, so the order was not placed.` }
+    }
+  }
+  if (settings.cardDailyOrders > 0 && last4) {
+    const qty = todayRows.filter((record) => record.last4 === last4).length
+    if (qty + 1 > settings.cardDailyOrders) {
+      return { ok: false, reason: `Card ${last4} is limited to ${settings.cardDailyOrders} orders today. It already has ${qty}, so the order was not placed.` }
     }
   }
   const storeLimit = storeLimits(settings.storePurchaseLimits).get(check.store)
@@ -122,4 +148,8 @@ function round(value: number): number {
 
 function money(value: number): string {
   return `$${value.toFixed(2)}`
+}
+
+function cardLast4(value: string | undefined): string {
+  return value && /^\d{4}$/.test(value) ? value : ""
 }

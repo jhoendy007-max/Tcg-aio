@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { consistencyText } from "../../../shared/consistency"
+import { dropOpsText } from "../../../shared/drop-ops"
 import { DEFAULT_SETTINGS, type LicenseView, type Settings, type SettingsPayload } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { MailSettings } from "./MailSettings"
@@ -224,6 +225,15 @@ export function SettingsPage() {
         </Field>
         <Field label="Max per account" hint="Successful orders per account per day. 0 means no cap.">
           <TextInput type="number" min={0} max={99} value={form.maxPerAccount} onChange={(event) => setForm({ ...form, maxPerAccount: Number(event.target.value) })} />
+        </Field>
+        <Field label={dropOpsText(form.language, "accountSpend")} hint={dropOpsText(form.language, "accountSpendHint")}>
+          <TextInput type="number" min={0} value={form.accountDailySpend} onChange={(event) => setForm({ ...form, accountDailySpend: Number(event.target.value) })} />
+        </Field>
+        <Field label={dropOpsText(form.language, "cardSpend")} hint={dropOpsText(form.language, "cardSpendHint")}>
+          <TextInput type="number" min={0} value={form.cardDailySpend} onChange={(event) => setForm({ ...form, cardDailySpend: Number(event.target.value) })} />
+        </Field>
+        <Field label={dropOpsText(form.language, "cardOrders")} hint={dropOpsText(form.language, "cardOrdersHint")}>
+          <TextInput type="number" min={0} max={99} value={form.cardDailyOrders} onChange={(event) => setForm({ ...form, cardDailyOrders: Number(event.target.value) })} />
         </Field>
         <Field className="span-2" label="Store purchase limits" hint="One line per store, like target:1. That is the most of one SKU an account can win today.">
           <TextInput value={form.storePurchaseLimits} onChange={(event) => setForm({ ...form, storePurchaseLimits: event.target.value })} placeholder="target:1" />

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { consistencyText, effectiveBinding } from "../../../shared/consistency"
+import { dropOpsText } from "../../../shared/drop-ops"
 import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type Settings, type StartMode, type StoreHealth, type StoreInfo, type TaskInput, type TaskKind, type TaskStatus } from "../../../shared/types"
 import { moduleScope, moduleText, resolveModule, sourceLabel } from "../../../shared/module-settings"
 import { taskText } from "../../../shared/task-role"
@@ -46,6 +47,7 @@ export function TasksPage() {
   const [healthError, setHealthError] = useState("")
   const [globalTest, setGlobalTest] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [cloneIds, setCloneIds] = useState<string[]>([])
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [challenge, setChallenge] = useState<PublicChallenge | null>(null)
@@ -402,6 +404,28 @@ export function TasksPage() {
           </tbody>
         </table>
       </div>
+      {selected ? (
+        <div className="card stack">
+          <h2>{dropOpsText(lang, "cloneTitle")}</h2>
+          <p className="hint">{dropOpsText(lang, "cloneHint")}</p>
+          <div className="choices">
+            {accounts.filter((account) => account.store === selected.store).map((account) => (
+              <label key={account.id} className="check">
+                <input type="checkbox" checked={cloneIds.includes(account.id)} onChange={() => setCloneIds((current) => current.includes(account.id) ? current.filter((id) => id !== account.id) : [...current, account.id])} />
+                <span>{account.label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="actions">
+            <button type="button" className="primary" disabled={!cloneIds.length} onClick={() => {
+              void unwrap(window.aio.bulk.clone(selected.id, cloneIds)).then(async () => {
+                setCloneIds([])
+                await reload()
+              }).catch((err) => setError(errorText(err)))
+            }}>{dropOpsText(lang, "cloneButton")}</button>
+          </div>
+        </div>
+      ) : null}
       <div className="card log-card">
         <div className="log-head">
           <h2>Status log</h2>

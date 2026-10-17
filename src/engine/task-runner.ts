@@ -238,7 +238,8 @@ export class TaskService {
             quantity: task.quantity,
             price,
             now: Date.now(),
-            dropStart: activeDropStart(this.db.listSchedules(), Date.now())
+            dropStart: activeDropStart(this.db.listSchedules(), Date.now()),
+            last4: profile.last4
           })
         },
         profile,
@@ -405,7 +406,8 @@ export class TaskService {
                 quantity: task.quantity,
                 price,
                 now: Date.now(),
-                dropStart: activeDropStart(this.db.listSchedules(), Date.now())
+                dropStart: activeDropStart(this.db.listSchedules(), Date.now()),
+                last4: profile.last4
               })
               if (!decision.ok) throw new SpendLimitError(decision.reason)
             }
@@ -434,7 +436,7 @@ export class TaskService {
           }
           return
         }
-        await this.finishResult(update, result, task, module.displayName, profile.name)
+        await this.finishResult(update, result, { store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4 }, module.displayName, profile.name)
         return
       }
     } catch (err) {
@@ -537,7 +539,7 @@ export class TaskService {
   private async finishResult(
     update: (patch: Parameters<Database["patchTask"]>[1]) => void,
     result: StoreRunResult,
-    task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number },
+    task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string },
     storeNameText: string,
     profileNameText: string
   ): Promise<void> {
@@ -606,7 +608,7 @@ export class TaskService {
     })
   }
 
-  private remember(task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string): void {
+  private remember(task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string): void {
     this.db.recordCheckout({
       store: task.store,
       sku: task.sku,
@@ -617,7 +619,8 @@ export class TaskService {
       orderId,
       accountId: task.accountId,
       profileId: task.profileId,
-      quantity: task.quantity
+      quantity: task.quantity,
+      last4: task.last4
     })
   }
 

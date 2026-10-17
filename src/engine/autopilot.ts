@@ -36,6 +36,7 @@ export function pickRotation(input: {
   quantity: number
   price: number | null
   now: number
+  profiles?: { id: string; last4: string }[]
 }): { ok: true; accountId: string; profileId: string } | { ok: false; reason: string } {
   const limits = storeLimits(input.settings.storePurchaseLimits)
   const zone = input.settings.healthReportZone.trim() || "UTC"
@@ -59,7 +60,8 @@ export function pickRotation(input: {
     quantity: input.quantity,
     price: input.price,
     now: input.now,
-    dropStart: null
+    dropStart: null,
+    last4: input.profiles?.find((profile) => profile.id === profileId)?.last4
   })
   if (!gate.ok) return gate
   return { ok: true, accountId: account.id, profileId }
@@ -72,6 +74,7 @@ export function planTemplateStart(input: {
   checkouts: CheckoutRecord[]
   settings: Settings
   now: number
+  profiles?: { id: string; last4: string }[]
 }): { ok: true; task: TaskInput; templateId: string } | { ok: false; reason: string } {
   const quantity = input.template.quantity
   const pick = pickRotation({
@@ -83,7 +86,8 @@ export function planTemplateStart(input: {
     sku: input.signal.sku,
     quantity,
     price: input.signal.price,
-    now: input.now
+    now: input.now,
+    profiles: input.profiles
   })
   if (!pick.ok) return pick
   const testMode = input.template.testMode || input.settings.testMode

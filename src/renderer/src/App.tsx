@@ -13,6 +13,8 @@ import { AutopilotPage } from "./pages/Autopilot"
 import { VaultPage } from "./pages/Vault"
 import { DashboardPage } from "./pages/Dashboard"
 import { ModulesPage } from "./pages/Modules"
+import { ShipmentsPage } from "./pages/Shipments"
+import { dropOpsText } from "../../shared/drop-ops"
 import { Wizard } from "./pages/Wizard"
 import { SuccessScreen, type WinCard } from "./components/Success"
 import { moduleText } from "../../shared/module-settings"
@@ -29,6 +31,7 @@ const PAGES = [
   { id: "vault", label: "Session Sync" },
   { id: "drops", label: "Drops" },
   { id: "stats", label: "Analytics" },
+  { id: "ship", label: "Shipments" },
   { id: "alerts", label: "Alerts" },
   { id: "autopilot", label: "Autopilot" },
   { id: "profiles", label: "Profiles" },
@@ -147,7 +150,7 @@ export function App() {
         <nav aria-label="Sections">
           {PAGES.map((item) => (
             <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined}>
-              {item.id === "stores" ? moduleText(settings.language === "es" ? "es" : "en", "nav") : item.label}
+              {item.id === "stores" ? moduleText(settings.language === "es" ? "es" : "en", "nav") : item.id === "ship" ? dropOpsText(settings.language === "es" ? "es" : "en", "navShip") : item.label}
             </a>
           ))}
         </nav>
@@ -178,6 +181,7 @@ export function App() {
         {!booting && !wizard && page === "vault" ? <VaultPage /> : null}
         {!booting && !wizard && page === "drops" ? <DropsPage /> : null}
         {!booting && !wizard && page === "stats" ? <AnalyticsPage /> : null}
+        {!booting && !wizard && page === "ship" ? <ShipmentsPage /> : null}
         {!booting && !wizard && page === "alerts" ? <AlertsPage /> : null}
         {!booting && !wizard && page === "autopilot" ? <AutopilotPage /> : null}
         {!booting && !wizard && page === "profiles" ? <ProfilesPage /> : null}

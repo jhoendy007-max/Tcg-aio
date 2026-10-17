@@ -69,7 +69,9 @@ GitHub Actions (`.github/workflows/windows.yml`) runs the tests, typecheck, and 
 
 Session Sync is a Chrome and Edge extension. It copies a store sign-in you already have in that browser into the encrypted vault on your PC. It reads cookies only for an account you link, and only on the stores in the catalog (Target, Walmart, Best Buy, Pokémon Center, Amazon, Crunchyroll, Premium Bandai, GameStop, Barnes & Noble, Costco, Sam's Club, and TCGplayer). It does not collect other sites, share a session with anyone else, or create cookies.
 
-A tagged release includes `TCGAIO-Session-Sync-0.2.21.zip` next to the Windows installer and the phone APK.
+A tagged release includes `TCGAIO-Session-Sync-0.2.22.zip` next to the Windows installer and the phone APK.
+
+The Drops page keeps a Pokémon and One Piece calendar. You can type a date or paste a JSON or ICS feed, then create the scheduled tasks in one click. A Discord bot you add can read the channels you choose and start the linked tasks. An allowlist and a dedupe window ignore repeats. Clone copies a task onto the accounts you select and keeps each account's sticky proxy and browser profile. A rehearsal before a drop checks the session, proxy, profile, and card and does not place an order. Shipping mail from a mailbox you connected shows a status for each order. Daily spend and order caps for an account or a card last-four are checked before place order.
 
 Analytics can check a win against the public TCGplayer market price and the public eBay sold search, show profit, and copy a listing draft. It does not post the listing. Inventory lists those purchases, the current value you enter, total profit, and a CSV export.
 
