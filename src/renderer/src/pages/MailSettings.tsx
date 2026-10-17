@@ -1,27 +1,25 @@
 import { useEffect, useState } from "react"
-import { MAIL_PRESETS, presetGuidance, type MailProvider } from "../../../shared/mail"
-import type { MailboxInput, MailboxView } from "../../../shared/types"
+import { detectMailbox, type MailLang, type MailProvider } from "../../../shared/mail"
+import { mailGuide, mailText, type MailTextKey } from "../../../shared/mail-text"
+import type { MailboxInput, MailboxView, Settings } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
-const empty = (provider: MailProvider = "gmail"): MailboxInput => {
-  const preset = provider === "custom" ? null : MAIL_PRESETS[provider]
-  return {
-    name: "",
-    enabled: true,
-    provider,
-    host: preset?.host ?? "",
-    port: preset?.port ?? 993,
-    secure: preset?.secure ?? true,
-    user: "",
-    mailbox: "INBOX",
-    password: "",
-    passwordAction: "keep",
-    orders: true,
-    alerts: false,
-    codes: true
-  }
-}
+const empty = (): MailboxInput => ({
+  name: "",
+  enabled: true,
+  provider: "gmail",
+  host: "",
+  port: 993,
+  secure: true,
+  user: "",
+  mailbox: "INBOX",
+  password: "",
+  passwordAction: "keep",
+  orders: true,
+  alerts: false,
+  codes: true
+})
 
 function fromView(view: MailboxView): MailboxInput {
   return {
@@ -45,29 +43,83 @@ function fromView(view: MailboxView): MailboxInput {
 export function MailSettings() {
   const [rows, setRows] = useState<MailboxView[]>([])
   const [form, setForm] = useState<MailboxInput | null>(null)
+  const [signedIn, setSignedIn] = useState(false)
+  const [guessed, setGuessed] = useState(false)
   const [folders, setFolders] = useState<string[]>([])
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [googleId, setGoogleId] = useState("")
+  const [microsoftId, setMicrosoftId] = useState("")
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
 
+  const lang: MailLang = settings?.language === "es" ? "es" : "en"
+  const t = (key: MailTextKey) => mailText(lang, key)
+
   async function load() {
-    const next = await unwrap(window.aio.mail.list())
+    const [next, payload] = await Promise.all([
+      unwrap(window.aio.mail.list()),
+      unwrap(window.aio.settings.get())
+    ])
     setRows(next)
+    setSettings(payload.settings)
+    setGoogleId(payload.settings.googleMailClientId)
+    setMicrosoftId(payload.settings.microsoftMailClientId)
   }
 
   useEffect(() => {
     void load().catch((err) => setError(errorText(err)))
   }, [])
 
+  function applyEmail(value: string) {
+    const found = detectMailbox(value)
+    setGuessed(Boolean(found?.guessed))
+    setForm((current) => {
+      if (!current) return current
+      if (!found) return { ...current, user: value }
+      return {
+        ...current,
+        user: found.user,
+        provider: found.provider,
+        host: found.host,
+        port: found.port,
+        secure: found.secure,
+        name: current.name || found.user
+      }
+    })
+  }
+
   function applyProvider(provider: MailProvider) {
-    const preset = provider === "custom" ? null : MAIL_PRESETS[provider]
+    const found = provider === "custom" ? null : detectMailbox(`person@${provider === "gmail" ? "gmail.com" : provider === "outlook" ? "outlook.com" : provider === "icloud" ? "icloud.com" : "yahoo.com"}`)
+    setGuessed(false)
     setForm((current) => current ? {
       ...current,
       provider,
-      host: preset?.host ?? current.host,
-      port: preset?.port ?? current.port,
-      secure: preset ? preset.secure : current.secure
+      host: found?.host ?? current.host,
+      port: found?.port ?? current.port,
+      secure: found ? found.secure : current.secure
     } : current)
+  }
+
+  async function saveLanguage(next: MailLang) {
+    if (!settings) return
+    const saved = await unwrap(window.aio.settings.save({ ...settings, language: next }))
+    setSettings(saved.settings)
+  }
+
+  async function saveClients() {
+    if (!settings) return
+    setBusy(true)
+    setError("")
+    try {
+      const saved = await unwrap(window.aio.settings.save({ ...settings, googleMailClientId: googleId, microsoftMailClientId: microsoftId }))
+      setSettings(saved.settings)
+      setMessage(t("clientsSaved"))
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function save(event: React.FormEvent) {
@@ -82,8 +134,9 @@ export function MailSettings() {
         passwordAction: form.password ? "replace" : "keep"
       }))
       setForm(fromView(saved))
+      setSignedIn(saved.auth === "xoauth2")
       setFolders(saved.folders)
-      setMessage("Mailbox saved. The app password stays on this PC.")
+      setMessage(t("saved"))
       await load()
     } catch (err) {
       setError(errorText(err))
@@ -104,12 +157,32 @@ export function MailSettings() {
       }))
       const tested = await unwrap(window.aio.mail.test(saved.id))
       setForm(fromView(tested))
+      setSignedIn(tested.auth === "xoauth2")
       setFolders(tested.folders.length ? tested.folders : ["INBOX"])
-      setMessage(tested.folders.length ? `Connected. ${tested.folders.length} folders.` : "Connected.")
+      setMessage(tested.folders.length ? t("connectedFolders") : t("connected"))
       await load()
     } catch (err) {
       setError(errorText(err))
       await load().catch(() => undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function signIn(provider: "gmail" | "outlook") {
+    if (!form) return
+    setBusy(true)
+    setError("")
+    setMessage("")
+    try {
+      const saved = await unwrap(window.aio.mail.signIn({ provider, user: form.user }))
+      setForm(fromView(saved))
+      setSignedIn(true)
+      setFolders(saved.folders)
+      setMessage(t("signedIn"))
+      await load()
+    } catch (err) {
+      setError(errorText(err))
     } finally {
       setBusy(false)
     }
@@ -121,7 +194,7 @@ export function MailSettings() {
     try {
       await unwrap(window.aio.mail.delete(id))
       if (form?.id === id) setForm(null)
-      setMessage("Mailbox removed.")
+      setMessage(t("removed"))
       await load()
     } catch (err) {
       setError(errorText(err))
@@ -130,86 +203,134 @@ export function MailSettings() {
     }
   }
 
+  async function openLink(href: string) {
+    setError("")
+    try {
+      await unwrap(window.aio.mail.open(href))
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
   const folderNames = folders.length ? folders : form?.mailbox ? [form.mailbox] : ["INBOX"]
+  const guide = form ? mailGuide(form.provider, lang) : null
 
   return (
     <section className="card stack">
       <div>
-        <h2>Mail</h2>
-        <p className="hint">Read-only IMAP for your own store mail. TCGAIO can read a sign-in code, order and shipping mail, and optional restock or newsletter alerts. It never sends mail. App passwords are encrypted on this PC. Messages count only when the sender is that store.</p>
+        <h2>{t("title")}</h2>
+        <p className="hint">{t("intro")}</p>
       </div>
+      <Field label={t("language")}>
+        <Select value={lang} onChange={(event) => void saveLanguage(event.target.value === "es" ? "es" : "en")}>
+          <option value="en">English</option>
+          <option value="es">Español</option>
+        </Select>
+      </Field>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {message ? <Banner tone="info">{message}</Banner> : null}
       {rows.length ? rows.map((row) => (
         <div key={row.id} className="row">
-          <span>{row.enabled ? "On" : "Off"} · {row.name} · {row.user} · {row.mailbox}{row.lastError ? ` · ${row.lastError}` : ""}</span>
-          <button type="button" onClick={() => { setForm(fromView(row)); setFolders(row.folders); setError(""); setMessage("") }}>Edit</button>
-          <button type="button" onClick={() => void remove(row.id)} disabled={busy}>Remove</button>
+          <span>{row.enabled ? t("on") : t("off")} · {row.name} · {row.user} · {row.auth === "xoauth2" ? t("oauth") : t("password")} · {row.mailbox}{row.lastError ? ` · ${row.lastError}` : ""}</span>
+          <button type="button" onClick={() => { setForm(fromView(row)); setSignedIn(row.auth === "xoauth2"); setFolders(row.folders); setGuessed(false); setError(""); setMessage("") }}>{t("edit")}</button>
+          <button type="button" onClick={() => void remove(row.id)} disabled={busy}>{t("remove")}</button>
         </div>
-      )) : <p>No mailboxes yet.</p>}
-      {!form ? <div className="actions"><button type="button" className="primary" onClick={() => { setForm(empty()); setFolders(["INBOX"]); setError(""); setMessage("") }}>Add mailbox</button></div> : null}
+      )) : <p>{t("none")}</p>}
+      {!form ? <div className="actions"><button type="button" className="primary" onClick={() => { setForm(empty()); setSignedIn(false); setFolders(["INBOX"]); setGuessed(false); setError(""); setMessage("") }}>{t("add")}</button></div> : null}
       {form ? (
         <form className="form-grid" onSubmit={save}>
-          <Field label="Provider">
+          <Field className="span-2" label={t("email")} hint={t("emailHint")}>
+            <TextInput value={form.user} onChange={(event) => applyEmail(event.target.value)} autoComplete="off" placeholder="ada@gmail.com" required />
+          </Field>
+          {guessed ? <p className="hint span-2">{t("guessed")}</p> : null}
+          <Field label={t("provider")}>
             <Select value={form.provider} onChange={(event) => applyProvider(event.target.value as MailProvider)}>
               <option value="gmail">Gmail</option>
               <option value="outlook">Outlook</option>
               <option value="icloud">iCloud</option>
               <option value="yahoo">Yahoo</option>
-              <option value="custom">Custom</option>
+              <option value="custom">{lang === "es" ? "Otro" : "Custom"}</option>
             </Select>
           </Field>
-          <Field label="Name">
-            <TextInput value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Personal Gmail" />
+          <Field label={t("name")}>
+            <TextInput value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={form.user || "Ada"} />
           </Field>
-          <p className="hint span-2">{presetGuidance(form.provider)}</p>
-          <Field label="Host">
-            <TextInput value={form.host} onChange={(event) => setForm({ ...form, host: event.target.value, provider: "custom" })} placeholder="imap.example.com" required />
+          {form.provider === "gmail" || form.provider === "outlook" ? (
+            <div className="actions span-2">
+              {form.provider === "gmail" ? <button type="button" className="primary" disabled={busy} onClick={() => void signIn("gmail")}>{t("signInGoogle")}</button> : null}
+              {form.provider === "outlook" ? <button type="button" className="primary" disabled={busy} onClick={() => void signIn("outlook")}>{t("signInMicrosoft")}</button> : null}
+              {signedIn ? <span>{t("signedIn")}</span> : null}
+            </div>
+          ) : null}
+          {guide && guide.steps.length ? (
+            <div className="span-2">
+              <h3>{t("steps")}</h3>
+              <ol>{guide.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+              <div className="actions">
+                {guide.links.map((link) => (
+                  <button key={link.href} type="button" onClick={() => void openLink(link.href)}>{link.label}</button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <Field label={t("host")}>
+            <TextInput value={form.host} onChange={(event) => setForm({ ...form, host: event.target.value })} placeholder="imap.example.com" required />
           </Field>
-          <Field label="Port">
+          <Field label={t("port")}>
             <TextInput type="number" min={1} max={65535} value={form.port} onChange={(event) => setForm({ ...form, port: Number(event.target.value) })} required />
           </Field>
           <label className="check span-2">
             <input type="checkbox" checked={form.secure} onChange={(event) => setForm({ ...form, secure: event.target.checked })} />
-            <span>SSL/TLS. On connects with implicit TLS. Off uses STARTTLS and will not send the password if the server does not upgrade.</span>
+            <span>{t("ssl")}</span>
           </label>
-          <Field label="Username">
-            <TextInput value={form.user} onChange={(event) => setForm({ ...form, user: event.target.value })} autoComplete="off" required />
-          </Field>
-          <Field label="App password" hint={form.id ? "Leave blank to keep the saved app password." : "An app password, not the account password when the provider offers one."}>
+          <Field className="span-2" label={t("appPassword")} hint={t("appPasswordHint")}>
             <TextInput type="password" autoComplete="off" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
           </Field>
-          <Field label="Folder" hint="Test the connection to load the folder list.">
+          <Field label={t("folder")} hint={t("folderHint")}>
             <Select value={form.mailbox} onChange={(event) => setForm({ ...form, mailbox: event.target.value })}>
               {folderNames.map((name) => <option key={name} value={name}>{name}</option>)}
             </Select>
           </Field>
-          <Field label="Folder name" hint="Use this if the folder is not in the list.">
+          <Field label={t("folderName")}>
             <TextInput value={form.mailbox} onChange={(event) => setForm({ ...form, mailbox: event.target.value })} />
           </Field>
           <label className="check span-2">
             <input type="checkbox" checked={form.codes} onChange={(event) => setForm({ ...form, codes: event.target.checked })} />
-            <span>Sign-in codes. Fill a verification code from this mailbox into your own store sign-in.</span>
+            <span>{t("codes")}</span>
           </label>
           <label className="check span-2">
             <input type="checkbox" checked={form.orders} onChange={(event) => setForm({ ...form, orders: event.target.checked })} />
-            <span>Order mail. Read confirmation, shipping, and cancellation messages for order tracking.</span>
+            <span>{t("orders")}</span>
           </label>
           <label className="check span-2">
             <input type="checkbox" checked={form.alerts} onChange={(event) => setForm({ ...form, alerts: event.target.checked })} />
-            <span>Restock and newsletter alerts. Optional. A match notifies you. It does not start checkout.</span>
+            <span>{t("alerts")}</span>
           </label>
           <label className="check span-2">
             <input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} />
-            <span>Use this mailbox.</span>
+            <span>{t("enabled")}</span>
           </label>
           <div className="actions span-2">
-            <button className="primary" type="submit" disabled={busy}>Save mailbox</button>
-            <button type="button" onClick={() => void testConnection()} disabled={busy}>Test connection</button>
-            <button type="button" onClick={() => setForm(null)} disabled={busy}>Close</button>
+            <button className="primary" type="submit" disabled={busy}>{t("save")}</button>
+            <button type="button" onClick={() => void testConnection()} disabled={busy}>{t("test")}</button>
+            <button type="button" onClick={() => setForm(null)} disabled={busy}>{t("close")}</button>
           </div>
         </form>
       ) : null}
+      <div className="form-grid">
+        <p className="hint span-2">{t("clientHint")}</p>
+        <Field label={t("clientGoogle")}>
+          <TextInput value={googleId} onChange={(event) => setGoogleId(event.target.value)} autoComplete="off" placeholder="….apps.googleusercontent.com" />
+        </Field>
+        <Field label={t("clientMicrosoft")}>
+          <TextInput value={microsoftId} onChange={(event) => setMicrosoftId(event.target.value)} autoComplete="off" />
+        </Field>
+        <div className="actions span-2">
+          <button type="button" onClick={() => void saveClients()} disabled={busy}>{t("saveClients")}</button>
+          <button type="button" onClick={() => void openLink("https://console.cloud.google.com/apis/credentials")}>{lang === "es" ? "Consola de Google" : "Google console"}</button>
+          <button type="button" onClick={() => void openLink("https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade")}>{lang === "es" ? "Portal de Microsoft" : "Microsoft portal"}</button>
+        </div>
+      </div>
     </section>
   )
 }

@@ -241,6 +241,22 @@ export class PhoneSession {
     return this.request({ type: "autopilot.set", req: rid(), conn: this.conn, enabled })
   }
 
+  setLanguage(language: "en" | "es"): Promise<PhoneCommandResult> {
+    return this.request({ type: "language.set", req: rid(), conn: this.conn, language })
+  }
+
+  saveMailbox(mailbox: import("./protocol").PhoneMailDraft): Promise<PhoneCommandResult> {
+    return this.request({ type: "mail.save", req: rid(), conn: this.conn, mailbox })
+  }
+
+  deleteMailbox(id: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "mail.delete", req: rid(), conn: this.conn, id })
+  }
+
+  signInMail(provider: "gmail" | "outlook", user: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "mail.oauth", req: rid(), conn: this.conn, provider, user })
+  }
+
   saveTask(task: PhoneTaskDraft): Promise<PhoneCommandResult> {
     return this.request({ type: "task.save", req: rid(), conn: this.conn, task })
   }

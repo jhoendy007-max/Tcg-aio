@@ -311,6 +311,11 @@ export interface Settings {
   successSound: boolean
   taskView: "compact" | "detailed"
   wizardDone: boolean
+  language: "en" | "es"
+  /** Public OAuth client id for Sign in with Google. Not a secret. */
+  googleMailClientId: string
+  /** Public OAuth client id for Sign in with Microsoft. Not a secret. */
+  microsoftMailClientId: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -355,7 +360,10 @@ export const DEFAULT_SETTINGS: Settings = {
   logoDataUrl: "",
   successSound: false,
   taskView: "detailed",
-  wizardDone: false
+  wizardDone: false,
+  language: "en",
+  googleMailClientId: "",
+  microsoftMailClientId: ""
 }
 
 export interface SecurityInfo {
@@ -527,6 +535,7 @@ export interface MailboxView {
   orders: boolean
   alerts: boolean
   codes: boolean
+  auth: "password" | "xoauth2"
   lastOkAt: number | null
   lastError: string
   folders: string[]

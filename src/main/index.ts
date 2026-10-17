@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, session } from "electron"
+import { app, BrowserWindow, safeStorage, session, shell } from "electron"
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
@@ -102,7 +102,7 @@ if (gotLock) void app.whenReady().then(async () => {
     current: () => challenge.current()
   }, {
     open: (id) => sessions!.open(id)
-  }), {
+  }, (url) => shell.openExternal(url)), {
     onDevices: () => {
       if (phone) window?.webContents.send(channels.phoneEvent, phone.status())
     }

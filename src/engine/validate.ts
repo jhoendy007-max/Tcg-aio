@@ -136,8 +136,18 @@ export function cleanSettings(input: Settings): Settings {
     logoDataUrl: cleanLogo(input.logoDataUrl),
     successSound: input.successSound === true,
     taskView: input.taskView === "compact" ? "compact" : "detailed",
-    wizardDone: input.wizardDone === true
+    wizardDone: input.wizardDone === true,
+    language: input.language === "es" ? "es" : "en",
+    googleMailClientId: cleanClientId(input.googleMailClientId),
+    microsoftMailClientId: cleanClientId(input.microsoftMailClientId)
   }
+}
+
+function cleanClientId(value: string | undefined): string {
+  const id = (value ?? "").trim()
+  if (!id) return ""
+  if (!/^[A-Za-z0-9._-]{8,200}$/.test(id)) throw new AppError("The mail sign-in client ID should be the public desktop client ID, or left blank.")
+  return id
 }
 
 function cleanAppName(value: string | undefined): string {

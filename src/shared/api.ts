@@ -144,6 +144,8 @@ export interface AioApi {
     save: (input: MailboxInput) => Promise<Result<MailboxView>>
     delete: (id: string) => Promise<Result<{ id: string }>>
     test: (id: string) => Promise<Result<MailboxView>>
+    signIn: (input: { provider: "gmail" | "outlook"; user: string }) => Promise<Result<MailboxView>>
+    open: (url: string) => Promise<Result<{ opened: true }>>
   }
   vault: {
     list: () => Promise<Result<PublicVault[]>>

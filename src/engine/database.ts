@@ -153,6 +153,8 @@ interface MailboxFile {
   user: string
   mailbox: string
   passwordSecret?: string
+  refreshSecret?: string
+  auth: "password" | "xoauth2"
   orders: boolean
   alerts: boolean
   codes: boolean
@@ -1343,7 +1345,7 @@ export class Database {
     if (!existing && boxes.length >= 8) throw new AppError("Save at most 8 mailboxes.")
     const row = existing ?? this.blankMailbox()
     this.applyPassword(row, input.password, input.passwordAction)
-    if (input.enabled && !row.passwordSecret) throw new AppError("Save the app password before turning this mailbox on.")
+    if (input.enabled && !row.passwordSecret && !row.refreshSecret) throw new AppError("Save the app password, or sign in, before turning this mailbox on.")
     row.name = name
     row.enabled = input.enabled === true
     row.provider = provider
@@ -1370,38 +1372,53 @@ export class Database {
     this.flush()
   }
 
+  saveOAuthMailbox(input: { user: string; provider: "gmail" | "outlook"; refreshToken: string; id?: string }): MailboxView {
+    const user = input.user.trim()
+    if (!user || !user.includes("@")) throw new AppError("Enter the email address before signing in.")
+    if (!input.refreshToken || /[\r\n]/.test(input.refreshToken)) throw new AppError("The sign-in did not return a usable token.")
+    const preset = input.provider === "gmail"
+      ? { host: "imap.gmail.com", port: 993 }
+      : { host: "outlook.office365.com", port: 993 }
+    const boxes = this.mailboxes()
+    const existing = (input.id ? boxes.find((row) => row.id === input.id) : undefined) ?? boxes.find((row) => row.user.toLowerCase() === user.toLowerCase() && row.provider === input.provider)
+    if (!existing && boxes.length >= 8) throw new AppError("Save at most 8 mailboxes.")
+    const row = existing ?? this.blankMailbox()
+    row.name = user.slice(0, 80)
+    row.enabled = true
+    row.provider = input.provider
+    row.host = preset.host
+    row.port = preset.port
+    row.secure = true
+    row.user = user.slice(0, 180)
+    row.mailbox = row.mailbox || "INBOX"
+    row.auth = "xoauth2"
+    row.passwordSecret = undefined
+    row.refreshSecret = this.cipher.encrypt(input.refreshToken)
+    row.orders = true
+    row.codes = true
+    row.lastError = ""
+    if (!existing) boxes.push(row)
+    this.syncLegacyImap()
+    this.flush()
+    return this.toMailboxView(row)
+  }
+
   mailboxLogins(purpose: "orders" | "alerts" | "codes"): MailboxLogin[] {
     const logins: MailboxLogin[] = []
     for (const row of this.mailboxes()) {
-      if (!row.enabled || !row.passwordSecret || !row.host || !row.user) continue
+      const login = this.loginFrom(row)
+      if (!login || !row.enabled) continue
       if (purpose === "orders" && !row.orders) continue
       if (purpose === "alerts" && !row.alerts) continue
       if (purpose === "codes" && !row.codes) continue
-      logins.push({
-        id: row.id,
-        host: row.host,
-        port: row.port,
-        secure: row.secure !== false,
-        user: row.user,
-        password: this.cipher.decrypt(row.passwordSecret),
-        mailbox: row.mailbox || "INBOX"
-      })
+      logins.push(login)
     }
     return logins
   }
 
   mailboxSecret(id: string): MailboxLogin | null {
     const row = this.mailboxes().find((item) => item.id === id)
-    if (!row?.passwordSecret || !row.host || !row.user) return null
-    return {
-      id: row.id,
-      host: row.host,
-      port: row.port,
-      secure: row.secure !== false,
-      user: row.user,
-      password: this.cipher.decrypt(row.passwordSecret),
-      mailbox: row.mailbox || "INBOX"
-    }
+    return row ? this.loginFrom(row) : null
   }
 
   noteMailbox(id: string, update: { ok: boolean; error?: string; folders?: string[] }): void {
@@ -1411,7 +1428,7 @@ export class Database {
       row.lastOkAt = Date.now()
       row.lastError = ""
     } else if (update.error) {
-      row.lastError = redact(update.error).replace(/\s+/g, " ").trim().slice(0, 180)
+      row.lastError = redact(update.error).replace(/\s+/g, " ").trim().slice(0, 280)
     }
     if (update.folders) row.folders = update.folders.map((name) => name.slice(0, 80)).filter(Boolean).slice(0, 80)
     this.flush()
@@ -1425,6 +1442,22 @@ export class Database {
     row.seenAlertIds = [key, ...row.seenAlertIds].slice(0, 200)
     this.flush()
     return true
+  }
+
+  private loginFrom(row: MailboxFile): MailboxLogin | null {
+    const secret = row.auth === "xoauth2" ? row.refreshSecret : row.passwordSecret
+    if (!secret || !row.host || !row.user) return null
+    return {
+      id: row.id,
+      host: row.host,
+      port: row.port,
+      secure: row.secure !== false,
+      user: row.user,
+      password: this.cipher.decrypt(secret),
+      mailbox: row.mailbox || "INBOX",
+      provider: row.provider,
+      auth: row.auth === "xoauth2" ? "xoauth2" : "password"
+    }
   }
 
   private mailboxes(): MailboxFile[] {
@@ -1443,6 +1476,7 @@ export class Database {
       secure: true,
       user: "",
       mailbox: "INBOX",
+      auth: "password",
       orders: true,
       alerts: false,
       codes: true,
@@ -1459,6 +1493,8 @@ export class Database {
     if (!password) throw new AppError("Enter the app password.")
     if (/[\r\n]/.test(password)) throw new AppError("The app password cannot contain a line break.")
     row.passwordSecret = this.cipher.encrypt(password)
+    row.refreshSecret = undefined
+    row.auth = "password"
   }
 
   private toMailboxView(row: MailboxFile): MailboxView {
@@ -1472,7 +1508,8 @@ export class Database {
       secure: row.secure !== false,
       user: row.user,
       mailbox: row.mailbox,
-      hasPassword: Boolean(row.passwordSecret),
+      hasPassword: Boolean(row.passwordSecret || row.refreshSecret),
+      auth: row.auth === "xoauth2" ? "xoauth2" : "password",
       orders: row.orders,
       alerts: row.alerts,
       codes: row.codes,
@@ -1570,6 +1607,8 @@ export interface MailboxLogin {
   user: string
   password: string
   mailbox: string
+  provider: MailProvider
+  auth: "password" | "xoauth2"
 }
 
 function loadMailboxes(value: DbFile["mailboxes"], legacy: DbFile["imap"]): MailboxFile[] {
@@ -1587,6 +1626,7 @@ function loadMailboxes(value: DbFile["mailboxes"], legacy: DbFile["imap"]): Mail
     user: imap.user,
     mailbox: imap.mailbox,
     passwordSecret: imap.passwordSecret,
+    auth: "password",
     orders: true,
     alerts: false,
     codes: true,
@@ -1611,6 +1651,8 @@ function normalizeMailbox(value: Partial<MailboxFile> | undefined): MailboxFile 
     user: typeof value?.user === "string" ? value.user : "",
     mailbox: typeof value?.mailbox === "string" && value.mailbox ? value.mailbox : "INBOX",
     passwordSecret: typeof value?.passwordSecret === "string" ? value.passwordSecret : undefined,
+    refreshSecret: typeof value?.refreshSecret === "string" ? value.refreshSecret : undefined,
+    auth: value?.auth === "xoauth2" ? "xoauth2" : "password",
     orders: value?.orders !== false,
     alerts: value?.alerts === true,
     codes: value?.codes !== false,

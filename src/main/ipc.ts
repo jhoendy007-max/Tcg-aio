@@ -1,4 +1,4 @@
-import { ipcMain, type BrowserWindow } from "electron"
+import { ipcMain, shell, type BrowserWindow } from "electron"
 import QRCode from "qrcode"
 import { relayRestockUrl, type AlertService } from "../engine/alerts"
 import type { ChallengeController } from "./challenge-window"
@@ -15,6 +15,9 @@ import type { PhoneServer } from "../phone/server"
 import { encodePairingPayload } from "../phone/protocol"
 import { channels } from "../shared/ipc"
 import { openMailbox, testMailbox } from "../engine/imap"
+import { completeMailSignIn } from "../engine/mail-oauth"
+import { imapCredential } from "../engine/mail-read"
+import { explainMailFailure, isMailHelpUrl } from "../shared/mail"
 import { AppError } from "../shared/errors"
 import type { ImapInput, MailboxInput, Result, Settings, TaskEvent, TaskTemplateInput } from "../shared/types"
 import { listStores } from "../stores/registry"
@@ -238,19 +241,33 @@ export function registerIpc(
   })
   handle(channels.mailboxTest, async (id: string) => {
     const login = db.mailboxSecret(id)
-    if (!login) throw new AppError("Save the mailbox and an app password before testing the connection.")
+    const lang = db.getSettings().language
+    if (!login) throw new AppError(lang === "es" ? "Guarda el buzón y una contraseña de aplicación, o inicia sesión, antes de probar." : "Save the mailbox and an app password, or sign in, before testing.")
     try {
+      const cred = await imapCredential(db, login)
       const socket = await openMailbox({ host: login.host, port: login.port, secure: login.secure })
-      const folders = await testMailbox(socket, { user: login.user, password: login.password })
+      const folders = await testMailbox(socket, cred)
       db.noteMailbox(id, { ok: true, error: "", folders })
     } catch (err) {
-      const error = err instanceof Error ? err.message : "The connection failed."
+      const raw = err instanceof Error ? err.message : "The connection failed."
+      const error = explainMailFailure(raw, login.provider, lang)
       db.noteMailbox(id, { ok: false, error })
       throw new AppError(error)
     }
     const view = db.listMailboxes().find((row) => row.id === id)
     if (!view) throw new AppError("Mailbox not found.")
     return view
+  })
+  handle(channels.mailboxOAuth, (input: { provider: "gmail" | "outlook"; user: string }) => {
+    if (input?.provider !== "gmail" && input?.provider !== "outlook") throw new AppError("Choose Google or Microsoft.")
+    return completeMailSignIn(db, { provider: input.provider, user: input?.user ?? "" }, {
+      open: (url) => shell.openExternal(url)
+    })
+  })
+  handle(channels.mailOpen, async (url: string) => {
+    if (!isMailHelpUrl(url)) throw new AppError(db.getSettings().language === "es" ? "Ese enlace no es una página de configuración del correo." : "That link is not a mail setup page.")
+    await shell.openExternal(url)
+    return { opened: true as const }
   })
   handle(channels.vaultList, () => db.listVault())
   handle(channels.vaultUnlink, (deviceId: string, accountId: string) => {

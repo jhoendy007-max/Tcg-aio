@@ -2,9 +2,9 @@ import { learnedDue, planTemplateStart, replacementAccount, stuckIds } from "./a
 import type { Database } from "./database"
 import type { HttpClient } from "./http"
 import type { LineSocket } from "./imap"
-import { readOrderMail } from "./mail-read"
+import { imapCredential, readOrderMail } from "./mail-read"
 import { fetchMailbox } from "./imap"
-import { looksLikeStoreAlert, mailAlertDetail, storeForSender } from "../shared/mail"
+import { explainMailFailure, looksLikeStoreAlert, mailAlertDetail, storeForSender } from "../shared/mail"
 import { orderStatusUrl, readOrderUpdate } from "./orders"
 import { dayKey } from "./limits"
 import { cookieHeader } from "./challenge"
@@ -221,8 +221,9 @@ export class HandsFree {
     const since = new Date(now - 2 * 24 * 60 * 60 * 1000)
     for (const login of this.db.mailboxLogins("alerts")) {
       try {
+        const cred = await imapCredential(this.db, login)
         const socket = await this.connectMail({ host: login.host, port: login.port, secure: login.secure })
-        const messages = await fetchMailbox(socket, { user: login.user, password: login.password, mailbox: login.mailbox, since })
+        const messages = await fetchMailbox(socket, { ...cred, mailbox: login.mailbox, since })
         this.db.noteMailbox(login.id, { ok: true, error: "" })
         for (const message of messages) {
           const store = storeForSender(message.from)
@@ -237,7 +238,8 @@ export class HandsFree {
           })
         }
       } catch (err) {
-        this.db.noteMailbox(login.id, { ok: false, error: err instanceof Error ? err.message : "Mail could not be read." })
+        const raw = err instanceof Error ? err.message : "Mail could not be read."
+        this.db.noteMailbox(login.id, { ok: false, error: explainMailFailure(raw, login.provider, this.db.getSettings().language) })
       }
     }
   }

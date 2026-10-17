@@ -137,11 +137,45 @@ export interface PhoneKeeper {
   expired: number
 }
 
+export interface PhoneMailbox {
+  id: string
+  name: string
+  user: string
+  provider: "gmail" | "outlook" | "icloud" | "yahoo" | "custom"
+  host: string
+  port: number
+  secure: boolean
+  mailbox: string
+  enabled: boolean
+  auth: "password" | "xoauth2"
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+  lastError: string
+}
+
+export interface PhoneMailDraft {
+  id?: string
+  user: string
+  provider: PhoneMailbox["provider"]
+  host: string
+  port: number
+  secure: boolean
+  mailbox: string
+  password: string
+  orders: boolean
+  alerts: boolean
+  codes: boolean
+}
+
 export interface PhoneImap {
   accounts: number
   enabled: number
   ready: number
   lastError: string
+  mailboxes?: PhoneMailbox[]
+  googleSignIn?: boolean
+  microsoftSignIn?: boolean
 }
 
 export interface PhoneSnapshot {
@@ -159,6 +193,7 @@ export interface PhoneSnapshot {
   updates: PhoneUpdates
   keeper: PhoneKeeper
   imap?: PhoneImap
+  language?: "en" | "es"
   autopilot?: boolean
   brand?: { appName: string; theme: "dark" | "light"; accent: "gold" | "blue" | "green" | "rose"; successSound: boolean }
 }
@@ -245,6 +280,10 @@ export type ClientMessage =
   | { type: "task.stopAll"; req: string; conn: string }
   | { type: "task.pauseAll"; req: string; conn: string }
   | { type: "autopilot.set"; req: string; conn: string; enabled: boolean }
+  | { type: "language.set"; req: string; conn: string; language: "en" | "es" }
+  | { type: "mail.save"; req: string; conn: string; mailbox: PhoneMailDraft }
+  | { type: "mail.delete"; req: string; conn: string; id: string }
+  | { type: "mail.oauth"; req: string; conn: string; provider: "gmail" | "outlook"; user: string }
   | { type: "task.save"; req: string; conn: string; task: PhoneTaskDraft }
   | { type: "task.delete"; req: string; conn: string; taskId: string }
   | { type: "rule.save"; req: string; conn: string; rule: RestockRuleInput }
@@ -485,6 +524,16 @@ export function asClientMessage(value: unknown): ClientMessage {
   }
   if (message.type === "task.startAll" || message.type === "task.stopAll" || message.type === "task.pauseAll") return { type: message.type, req: message.req, conn: message.conn }
   if (message.type === "autopilot.set") return { type: "autopilot.set", req: message.req, conn: message.conn, enabled: message.enabled === true }
+  if (message.type === "language.set") return { type: "language.set", req: message.req, conn: message.conn, language: message.language === "es" ? "es" : "en" }
+  if (message.type === "mail.delete") {
+    if (typeof message.id !== "string" || !message.id) throw new Error("Choose a mailbox.")
+    return { type: "mail.delete", req: message.req, conn: message.conn, id: message.id }
+  }
+  if (message.type === "mail.oauth") {
+    if (message.provider !== "gmail" && message.provider !== "outlook") throw new Error("Choose Google or Microsoft.")
+    return { type: "mail.oauth", req: message.req, conn: message.conn, provider: message.provider, user: typeof message.user === "string" ? message.user.slice(0, 180) : "" }
+  }
+  if (message.type === "mail.save") return { type: "mail.save", req: message.req, conn: message.conn, mailbox: parseMailDraft(message.mailbox) }
   if (message.type === "health.check") {
     const proxyGroupId = "proxyGroupId" in message && typeof message.proxyGroupId === "string" && message.proxyGroupId ? message.proxyGroupId : null
     return { type: "health.check", req: message.req, conn: message.conn, proxyGroupId }
@@ -569,6 +618,28 @@ export function asClientMessage(value: unknown): ClientMessage {
     }
   }
   throw new Error("Unknown phone request.")
+}
+
+export function parseMailDraft(value: unknown): PhoneMailDraft {
+  if (!value || typeof value !== "object") throw new Error("Mailbox is invalid.")
+  const input = value as Record<string, unknown>
+  const user = typeof input.user === "string" ? input.user.trim().slice(0, 180) : ""
+  if (!user.includes("@")) throw new Error("Enter an email address.")
+  const provider = input.provider === "gmail" || input.provider === "outlook" || input.provider === "icloud" || input.provider === "yahoo" || input.provider === "custom" ? input.provider : "custom"
+  const port = Math.round(Number(input.port))
+  return {
+    id: typeof input.id === "string" && input.id ? input.id : undefined,
+    user,
+    provider,
+    host: typeof input.host === "string" ? input.host.trim().slice(0, 253) : "",
+    port: Number.isInteger(port) ? port : 993,
+    secure: input.secure !== false,
+    mailbox: typeof input.mailbox === "string" && input.mailbox.trim() ? input.mailbox.trim().slice(0, 80) : "INBOX",
+    password: typeof input.password === "string" ? input.password.slice(0, 200) : "",
+    orders: input.orders !== false,
+    alerts: input.alerts === true,
+    codes: input.codes !== false
+  }
 }
 
 export function parseRuleInput(value: unknown): RestockRuleInput {

@@ -3,6 +3,13 @@ export interface ImapLogin {
   password: string
   mailbox: string
   since: Date
+  auth?: "password" | "xoauth2"
+}
+
+export interface MailAuth {
+  user: string
+  password: string
+  auth?: "password" | "xoauth2"
 }
 
 import { connect as connectNet, type Socket } from "node:net"
@@ -33,9 +40,15 @@ export interface MailPiece {
 
 /** Refuse any command that would change the mailbox. The password is never written by these checks. */
 export function assertReadOnly(line: string): void {
+  if (!line.trim()) return
   const parts = line.trim().split(/\s+/)
   const verb = (parts[1] ?? parts[0] ?? "").toUpperCase()
   if (WRITERS.has(verb)) throw new Error("TCGAIO only reads mail. It does not change the mailbox.")
+}
+
+/** SASL XOAUTH2 initial client response. The access token is not written to a log by this function. */
+export function xoauth2Initial(user: string, accessToken: string): string {
+  return Buffer.from(`user=${user}\u0001auth=Bearer ${accessToken}\u0001\u0001`, "utf8").toString("base64")
 }
 
 /** Read the greeting and require STARTTLS before any login. A refusal does not send the password. */
@@ -48,14 +61,12 @@ export async function beginStartTls(socket: LineSocket): Promise<void> {
   if (!/\bOK\b/i.test(reply)) throw new Error("The server does not offer STARTTLS. The password was not sent.")
 }
 
-/** LOGIN, LIST, LOGOUT. Returns folder names. Does not select or change mail. */
-export async function testMailbox(socket: LineSocket, login: { user: string; password: string }): Promise<string[]> {
+/** LOGIN or XOAUTH2, then LIST and LOGOUT. Returns folder names. Does not select or change mail. */
+export async function testMailbox(socket: LineSocket, login: MailAuth): Promise<string[]> {
   const send = guarded(socket)
   const greet = await socket.read()
   if (!greet.includes("OK")) throw new Error("The mail server did not greet.")
-  await send(`A1 LOGIN ${quote(login.user)} ${quote(login.password)}`)
-  const authed = await readTag(socket, "A1")
-  if (!/\bOK\b/i.test(authed)) throw new Error("The mail server refused the login. Check the username and app password.")
+  await authenticate(socket, send, login)
   await send(`A2 LIST "" "*"`)
   const listed = await readTag(socket, "A2")
   await send("A3 LOGOUT")
@@ -68,9 +79,7 @@ export async function fetchMailbox(socket: LineSocket, login: ImapLogin): Promis
   const send = guarded(socket)
   const greet = await socket.read()
   if (!greet.includes("OK")) throw new Error("The mail server did not greet.")
-  await send(`A1 LOGIN ${quote(login.user)} ${quote(login.password)}`)
-  const authed = await readTag(socket, "A1")
-  if (!/\bOK\b/i.test(authed)) throw new Error("The mail server refused the login.")
+  await authenticate(socket, send, login)
   await send(`A2 SELECT ${quote(login.mailbox || "INBOX")}`)
   const selected = await readTag(socket, "A2")
   if (!/\bOK\b/i.test(selected)) throw new Error("The mailbox could not be opened.")
@@ -174,6 +183,32 @@ function guarded(socket: LineSocket): (line: string) => Promise<void> {
     assertReadOnly(line)
     await socket.send(line)
   }
+}
+
+async function authenticate(socket: LineSocket, send: (line: string) => Promise<void>, login: MailAuth): Promise<void> {
+  if (login.auth === "xoauth2") {
+    await send(`A1 AUTHENTICATE XOAUTH2 ${xoauth2Initial(login.user, login.password)}`)
+    const authed = await readAuth(socket, "A1")
+    if (!/\bOK\b/i.test(authed)) throw new Error("The mail server refused the login.")
+    return
+  }
+  await send(`A1 LOGIN ${quote(login.user)} ${quote(login.password)}`)
+  const authed = await readTag(socket, "A1")
+  if (!/\bOK\b/i.test(authed)) throw new Error("The mail server refused the login. Check the username and app password.")
+}
+
+async function readAuth(socket: LineSocket, tag: string): Promise<string> {
+  const chunks: string[] = []
+  for (let i = 0; i < 40; i += 1) {
+    const line = await socket.read()
+    chunks.push(line)
+    if (line.startsWith("+")) {
+      await socket.send("")
+      continue
+    }
+    if (line.startsWith(`${tag} `)) return chunks.join("\n")
+  }
+  throw new Error("The mail server stopped responding.")
 }
 
 async function readTag(socket: LineSocket, tag: string): Promise<string> {
