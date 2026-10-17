@@ -1,7 +1,14 @@
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { createAesCipher } from "../src/engine/cipher"
+import { Database } from "../src/engine/database"
 import { PoliteLimiter, STORE_GAP_MS } from "../src/engine/polite"
 import { chooseSticky, noteScore } from "../src/engine/proxy-hygiene"
 import { storeHome } from "../src/engine/session-care"
+import { cleanSettings } from "../src/engine/validate"
+import { DEFAULT_SETTINGS } from "../src/shared/types"
 import {
   accountPartition,
   consistencyText,
@@ -47,6 +54,73 @@ describe("session consistency", () => {
     expect(held.choice.stickyOutside).toBe(true)
     expect(held.choice.heldProxyId).toBe("a")
     expect(held.pins.find((pin) => pin.accountId === "acct-1")?.proxyId).toBe("a")
+  })
+
+  it("keeps 20 accounts on distinct partitions and proxies", () => {
+    const pool = Array.from({ length: 20 }, (_, index) => ({ id: `p${index}`, host: `10.0.${index}.1`, port: 8000 }))
+    const first = chooseSticky(pool, [], [], "acct-0", "pool", 0)
+    let pins = first.pins
+    const chosen = [first.choice.proxy?.id ?? ""]
+    for (let index = 1; index < 20; index += 1) {
+      const id = `acct-${index}`
+      expect(accountPartition(id)).toBe(`persist:account-${id}`)
+      expect(accountPartition(id)).not.toBe(accountPartition("acct-0"))
+      const next = chooseSticky(pool, pins, [], id, "pool", 0)
+      expect(next.choice.proxy?.id).toBeTruthy()
+      expect(chosen).not.toContain(next.choice.proxy?.id)
+      chosen.push(next.choice.proxy!.id)
+      pins = next.pins
+    }
+    expect(new Set(chosen).size).toBe(20)
+    const extra = chooseSticky(pool, pins, [], "acct-extra", "pool", 0)
+    expect(extra.choice.proxy).toBeUndefined()
+    expect(extra.choice.allBenched).toBe(true)
+    expect(extra.pins.find((pin) => pin.accountId === "acct-0")?.proxyId).toBe(first.choice.proxy?.id)
+
+    const dir = mkdtempSync(join(tmpdir(), "tcgaio-isolate-"))
+    const db = new Database(join(dir, "tcgaio.json"), createAesCipher(dir))
+    db.load()
+    expect(db.getSettings().sessionWindowCap).toBe(3)
+    expect(cleanSettings({ ...DEFAULT_SETTINGS, sessionWindowCap: 3 }).sessionWindowCap).toBe(3)
+    const text = pool.map((proxy) => `${proxy.host}:${proxy.port}`).join("\n")
+    const group = db.saveProxyGroup({ name: "Accounts", text, network: "residential" })
+    for (let index = 0; index < 20; index += 1) {
+      const saved = db.saveAccount({
+        store: "target",
+        label: `Account ${index}`,
+        username: `ada${index}@example.com`,
+        password: "",
+        passwordAction: "clear",
+        session: "accessToken=token",
+        sessionAction: "replace",
+        proxyGroupId: group.id
+      })
+      db.assignProxy(saved.id, group.id, group.proxies, 0)
+      if (index === 0) db.markSession(saved.id, "saved", true)
+    }
+    const listed = db.listAccounts()
+    expect(listed).toHaveLength(20)
+    expect(new Set(listed.map((account) => account.profilePartition)).size).toBe(20)
+    expect(new Set(listed.map((account) => account.stickyProxyId)).size).toBe(20)
+    expect(listed.every((account) => account.profilePartition === `persist:account-${account.id}`)).toBe(true)
+    expect(listed[0]?.freshness).toBe("fresh")
+    expect(listed[1]?.freshness).toBe("stale")
+    expect(consistencyText("en", "fresh")).toBe("Fresh")
+    expect(consistencyText("es", "stale")).toContain("refresco")
+    const dropAt = Date.now() + 3 * 60_000
+    const slots = staggerPlan(listed.map((account) => ({
+      id: account.id,
+      store: account.store,
+      hasSession: account.hasSession,
+      sessionState: account.sessionState,
+      lastWarmAt: account.id === listed[0]?.id ? Date.now() : null
+    })), dropAt, Date.now(), 30)
+    expect(slots.some((slot) => slot.accountId === listed[0]?.id)).toBe(false)
+    expect(slots.length).toBe(19)
+    const times = slots.map((slot) => slot.at)
+    expect(new Set(times).size).toBe(times.length)
+    expect(Math.max(...times) - Math.min(...times)).toBeGreaterThan(60_000)
+    expect(Math.max(...times)).toBeLessThan(dropAt)
   })
 
   it("quarantines 403, 412, and 435, and leaves 429 on the proxy", () => {
