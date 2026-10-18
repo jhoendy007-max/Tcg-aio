@@ -58,6 +58,10 @@ export function KeeperPage() {
           <input type="checkbox" checked={form.sessionWarmup} onChange={(event) => setForm({ ...form, sessionWarmup: event.target.checked })} />
           <span>Session Keeper on. Every saved session is opened on the interval below. A drop can also warm accounts before its start time.</span>
         </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.warmOnStart} onChange={(event) => setForm({ ...form, warmOnStart: event.target.checked })} />
+          <span>Also warm an account when its monitor or checkout starts, if the last warm-up is older than the interval.</span>
+        </label>
         <Field label="Keep-alive interval (minutes)" hint="10–240. Default 30.">
           <TextInput type="number" min={10} max={240} value={form.sessionWarmupMin} onChange={(event) => setForm({ ...form, sessionWarmupMin: Number(event.target.value) })} required />
         </Field>

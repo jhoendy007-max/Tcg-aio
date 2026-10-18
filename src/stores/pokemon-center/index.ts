@@ -101,6 +101,7 @@ export function createPokemonCenterModule(): StoreModule {
     displayName: "Pokémon Center",
     skuHint: "SKU or product URL",
     implemented: true,
+    handlesQueue: true,
     run: (ctx) => runPokemonCenter(ctx)
   }
 }
@@ -449,8 +450,9 @@ async function waitInQueue(ctx: StoreRunContext, jar: CookieJar, target: QueueTa
       : ctx.settings.monitorDelayMs
     const ahead = ticket.ahead ?? "unknown"
     const seconds = Math.max(1, Math.round(waitMs / 1000))
+    ctx.phase("in_queue")
     ctx.log("info", `Pokémon Center waiting room. Ahead of you: ${ahead}. Checking again in ${seconds}s.`)
-    ctx.detail(`Waiting room. Ahead of you: ${ahead}.`)
+    ctx.detail(`In queue. Ahead of you: ${ahead}.`)
     await ctx.sleep(waitMs)
   }
   return { kind: "failed", reason: "Stopped" }
@@ -471,6 +473,7 @@ async function followRedirect(ctx: StoreRunContext, jar: CookieJar, redirectUrl:
     redirect: "manual"
   }, "store")
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: POKEMON_CENTER_PAUSE }
+  ctx.phase("monitoring")
   ctx.log("info", "Pokémon Center waiting room let the session through.")
   return { kind: "ok", value: true }
 }

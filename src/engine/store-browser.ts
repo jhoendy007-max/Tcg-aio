@@ -45,9 +45,14 @@ export async function refreshStoreSession(input: SessionRefreshRequest): Promise
   try {
     await loadHome(win, input.homeUrl, input.signal)
     await fillMailboxCode(win, input.lookupCode, input.onMailFilled)
-    const challenged = await challengeVisible(win)
+    let challenged = await challengeVisible(win)
     if (challenged) {
       input.onChallenge("The store is showing a check. Solve it in the account browser on this PC. TCGAIO does not send challenges to a solving service.")
+      if (input.holdMs && input.holdMs > 0) {
+        win.setTitle(`Solve ${safeHost(input.homeUrl)}`)
+        win.show()
+        challenged = await waitForClear(win, input.signal, input.holdMs)
+      }
     }
     return { cookies: await readSiteCookies(browser, input.homeUrl), challenged }
   } finally {
@@ -149,6 +154,40 @@ async function challengeVisible(win: BrowserWindow): Promise<boolean> {
     return typeof text === "string" && pageLooksLikeChallenge(text)
   } catch {
     return false
+  }
+}
+
+async function waitForClear(win: BrowserWindow, signal: AbortSignal, holdMs: number): Promise<boolean> {
+  const deadline = Date.now() + holdMs
+  while (!signal.aborted && Date.now() < deadline) {
+    await waitFor(Math.min(2000, Math.max(200, deadline - Date.now())), signal)
+    if (win.isDestroyed()) return true
+    if (!(await challengeVisible(win))) return false
+  }
+  if (signal.aborted) throw abortError()
+  return challengeVisible(win)
+}
+
+function waitFor(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(abortError())
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(abortError())
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return "store"
   }
 }
 
