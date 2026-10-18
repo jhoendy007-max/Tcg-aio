@@ -8,7 +8,7 @@ import { redact } from "../../shared/redact"
 import type { ProxyEndpoint, SessionCookies } from "../../shared/types"
 import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
+import { checkoutPreflight, paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
   bodyHas,
   findAddressId,
@@ -138,6 +138,8 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
     if (await holdMonitorOnly(ctx)) continue
+    const preflight = checkoutPreflight(ctx, reading.price)
+    if (preflight) return preflight
     await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, itemId, reading)
@@ -188,12 +190,6 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
       return finishTest(ctx)
     }
     const order = await placeOrder(ctx, jar, contract.value)
-    if (order.kind === "oos") {
-      ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")
-      ctx.phase("monitoring")
-      await ctx.sleep(ctx.settings.monitorDelayMs)
-      continue
-    }
     if (order.kind === "unauthorized") return pause(EXPIRED_PAUSE)
     if (order.kind !== "ok") return asResult(order)
     await clearLine(ctx, jar, cart.value, reading)
@@ -444,16 +440,12 @@ async function createContract(
 }
 
 async function placeOrder(ctx: StoreRunContext, jar: CookieJar, contractId: string): Promise<Step<string | undefined>> {
-  let response = await gql(ctx, jar, "cartxo", "placeOrder", PLACE_ORDER_HASH, "mutation", placeVariables(ctx, contractId))
+  const response = await gql(ctx, jar, "cartxo", "placeOrder", PLACE_ORDER_HASH, "mutation", placeVariables(ctx, contractId))
   if (response.kind !== "ok") return response
   if (needsCvv(response.value.body) && (response.value.status >= 400 || !findOrderId(response.value.body))) {
-    ctx.log("info", "Walmart asked for the CVV again. Resubmitting the card.")
-    const card = await saveCard(ctx, jar)
-    if (card.kind !== "ok") return card
-    response = await gql(ctx, jar, "cartxo", "placeOrder", PLACE_ORDER_HASH, "mutation", placeVariables(ctx, contractId))
-    if (response.kind !== "ok") return response
+    return { kind: "paused", reason: "Walmart requested CVV verification after the order request. Check your Walmart account for an order before resuming; TCGAIO did not retry the place-order request." }
   }
-  if (outOfStock(response.value)) return { kind: "oos", reason: "Out of stock" }
+  if (outOfStock(response.value)) return { kind: "failed", reason: "Walmart reported unavailable stock after the order request. The request was not retried; verify your account before starting again." }
   if (bodyHas(response.value.body, "PAYMENT_DECLINED") || bodyHas(response.value.body, "payment_declined")) {
     return { kind: "failed", reason: "Walmart declined the card." }
   }

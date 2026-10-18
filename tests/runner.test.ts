@@ -135,6 +135,43 @@ describe("task runner", () => {
     expect(urls).toEqual([])
   })
 
+  it("does not send place order when a configured price cap cannot be verified", async () => {
+    const { db, task } = setup()
+    db.saveTask({
+      id: task.id,
+      store: "target",
+      sku: "88897904",
+      quantity: 1,
+      profileId: task.profileId,
+      accountId: task.accountId,
+      proxyGroupId: null,
+      confirmPurchase: true,
+      maxPrice: 50
+    })
+    const urls: string[] = []
+    const module: StoreModule = {
+      id: "target",
+      displayName: "Target",
+      skuHint: "TCIN",
+      implemented: true,
+      async run(ctx) {
+        await ctx.http.request({ method: "POST", url: "https://carts.target.com/web_checkouts/v1/checkout", body: "{}" })
+        return { outcome: "success", detail: "should not win" }
+      }
+    }
+    const service = new TaskService(db, new Map([["target", module]]), () => undefined, async () => false, {
+      async request(input) {
+        urls.push(input.url)
+        return { status: 200, body: "{}", headers: {} }
+      }
+    })
+    service.start(task.id)
+    await service.wait(task.id)
+    expect(db.getTask(task.id).status).toBe("paused")
+    expect(db.getTask(task.id).detail).toMatch(/price could not be verified/i)
+    expect(urls).toEqual([])
+  })
+
   it("refuses to start without purchase confirmation", () => {
     const { db, task } = setup()
     db.saveTask({

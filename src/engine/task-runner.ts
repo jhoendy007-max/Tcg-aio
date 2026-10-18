@@ -424,6 +424,7 @@ export class TaskService {
             if (!testMode) {
               const price = this.watches.get(`${task.store}:${task.sku}`)?.price ?? null
               const cap = this.db.getTask(id).maxPrice
+              if (cap && price === null) throw new SpendLimitError(`The checkout price could not be verified against this checkout's $${cap.toFixed(2)} max, so the order was not sent.`)
               if (cap && price !== null && price > cap) throw new SpendLimitError(`The price is above this checkout's max of $${cap.toFixed(2)}.`)
               const decision = allowCheckout(this.db.getSettings(), this.db.listCheckouts(), {
                 store: task.store,

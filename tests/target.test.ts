@@ -50,11 +50,12 @@ function json(status: number, body: unknown, headers: HttpResponse["headers"] = 
   return { status, headers, body: typeof body === "string" ? body : JSON.stringify(body) }
 }
 
-function stock(status: string) {
+function stock(status: string, price?: number | string) {
   return {
     data: {
       product_summaries: [{
         item: { product_description: { title: "Pokemon ETB" } },
+        ...(price === undefined ? {} : { price: { current_retail: price } }),
         fulfillment: { sold_out: false, shipping_options: { availability_status: status } }
       }]
     }
@@ -160,6 +161,105 @@ describe("target module", () => {
     expect(checks).toBe(2)
   })
 
+  it("does not add to cart when a configured max price cannot be verified", async () => {
+    const fake = client((req) => happy(req))
+    const result = await createTargetModule().run(ctx(fake.http, {
+      task: { id: "t1", sku: "https://www.target.com/p/pokemon-etb/-/A-88897904", quantity: 2, store: "target", maxPrice: 50 }
+    }))
+    expect(result).toMatchObject({ outcome: "paused" })
+    if (result.outcome === "paused") expect(result.reason).toMatch(/verified price is required/i)
+    expect(fake.calls.some((call) => call.url.includes("cart_items"))).toBe(false)
+    expect(fake.calls.some((call) => call.url.includes("payment_instructions"))).toBe(false)
+  })
+
+  it("does not add to cart when Target's price exceeds the configured max", async () => {
+    const fake = client((req) => req.url.includes("product_summary_with_fulfillment")
+      ? json(200, stock("IN_STOCK", "59.99"))
+      : happy(req))
+    const result = await createTargetModule().run(ctx(fake.http, {
+      task: { id: "t1", sku: "https://www.target.com/p/pokemon-etb/-/A-88897904", quantity: 2, store: "target", maxPrice: 50 }
+    }))
+    expect(result).toMatchObject({ outcome: "paused" })
+    if (result.outcome === "paused") expect(result.reason).toContain("$59.99")
+    expect(fake.calls.some((call) => call.url.includes("cart_items"))).toBe(false)
+  })
+
+  it("does not invent a visitor id when the saved session has none", async () => {
+    const fake = client((req) => happy(req))
+    await createTargetModule().run(ctx(fake.http, {
+      account: { ...account, session: { accessToken: "token-without-visitor" } }
+    }))
+    const cart = fake.calls.find((call) => call.method === "POST" && call.url.includes("/cart_items"))
+    expect(cart?.headers?.cookie ?? "").not.toMatch(/visitorI[Dd]=/)
+    expect(cart?.headers?.authorization).toContain("token-without-visitor")
+  })
+
+  it("makes no request when neither a Target session nor password is present", async () => {
+    const fake = client(() => json(500, "unexpected request"))
+    const result = await createTargetModule().run(ctx(fake.http, {
+      account: { ...account, session: undefined }
+    }))
+    expect(result).toMatchObject({ outcome: "paused" })
+    expect(fake.calls).toEqual([])
+  })
+
+  it("stops when add to cart fails", async () => {
+    const fake = client((req) => req.method === "POST" && req.url.includes("/cart_items")
+      ? json(500, "cart unavailable")
+      : happy(req))
+    const result = await createTargetModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(fake.calls.some((call) => call.url.includes("cart_shipping_addresses"))).toBe(false)
+    expect(fake.calls.some((call) => call.url.includes("payment_instructions"))).toBe(false)
+  })
+
+  it("stops when the shipping address is rejected", async () => {
+    const fake = client((req) => req.url.includes("cart_shipping_addresses")
+      ? json(400, "address.mobile required")
+      : happy(req))
+    const result = await createTargetModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(fake.calls.some((call) => call.url.includes("payment_instructions"))).toBe(false)
+    expect(fake.calls.filter((call) => isFinalSubmit("target", call))).toHaveLength(0)
+  })
+
+  it("stops when Target rejects payment", async () => {
+    const fake = client((req) => req.url.includes("payment_instructions")
+      ? json(400, "payment rejected")
+      : happy(req))
+    const result = await createTargetModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(fake.calls.filter((call) => isFinalSubmit("target", call))).toHaveLength(0)
+  })
+
+  it("does not retry a failed Target place-order request", async () => {
+    let submits = 0
+    const fake = client((req) => {
+      if (isFinalSubmit("target", req)) {
+        submits += 1
+        return json(429, "rate limited")
+      }
+      return happy(req)
+    })
+    const result = await createTargetModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(submits).toBe(1)
+  })
+
+  it("does not repeat place order when Target reports an empty cart", async () => {
+    let submits = 0
+    const fake = client((req) => {
+      if (isFinalSubmit("target", req)) {
+        submits += 1
+        return json(400, { errors: [{ code: "EMPTY_CART_FOR_ORDER_SUBMIT" }] })
+      }
+      return happy(req)
+    })
+    const result = await createTargetModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(submits).toBe(1)
+  })
+
   it("reports a declined card without claiming an order", async () => {
     const fake = client((req) => happy(req, { error: "PAYMENT_DECLINED_EXCEPTION" }))
     const result = await createTargetModule().run(ctx(fake.http))
@@ -167,7 +267,7 @@ describe("target module", () => {
     if (result.outcome === "failed") expect(result.reason).toMatch(/declined/i)
   })
 
-  it("resubmits CVV when checkout asks for it", async () => {
+  it("does not retry place order after Target asks for CVV", async () => {
     let checkouts = 0
     const fake = client((req) => {
       if (req.url.includes("/v1/checkout")) {
@@ -178,10 +278,12 @@ describe("target module", () => {
       return happy(req)
     })
     const result = await createTargetModule().run(ctx(fake.http))
-    expect(result).toMatchObject({ outcome: "success", orderId: "555" })
+    expect(result).toMatchObject({ outcome: "paused" })
+    if (result.outcome === "paused") expect(result.reason).toMatch(/did not retry the place-order request/i)
     const cvv = fake.calls.find((call) => call.method === "PUT" && call.url.includes("payment_instructions/pay-9"))
     expect(JSON.parse(cvv?.body ?? "{}").card_details.cvv).toBe("123")
     expect(new URL(cvv?.url ?? "https://invalid").hostname).toBe("carts.target.com")
+    expect(fake.calls.filter((call) => isFinalSubmit("target", call))).toHaveLength(1)
   })
 
   it("runs payment and never sends place order in test mode", async () => {

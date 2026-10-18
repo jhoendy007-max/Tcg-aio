@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto"
 import { attachSession } from "../../engine/block-recovery"
 import { holdMonitorOnly, monitorKey, monitorPlaces, noteWatch, sharedCall } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
@@ -7,7 +6,7 @@ import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
+import { checkoutPreflight, paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
   bodyHas,
   findCartId,
@@ -134,6 +133,8 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("success", `Shipping in stock (${reading.status})${reading.title ? ` · ${reading.title}` : ""}.`)
     note(ctx, "monitor", "pass", `In stock (${reading.status}).`)
     if (await holdMonitorOnly(ctx)) continue
+    const preflight = checkoutPreflight(ctx, reading.price)
+    if (preflight) return preflight
     await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, key, tcin)
@@ -181,10 +182,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     }
     const order = await placeOrder(ctx, jar, key, cart.value.cartId)
     if (order.kind === "oos") {
-      ctx.log("warn", "Checkout returned an empty cart. Returning to the monitor.")
-      ctx.phase("monitoring")
-      await ctx.sleep(ctx.settings.monitorDelayMs)
-      continue
+      return fail("Target reported an empty cart during order submission. The place-order request was not retried; verify the cart before starting again.")
     }
     if (order.kind !== "ok") return asResult(order)
     const orderId = order.value
@@ -208,9 +206,8 @@ async function ensureSession(ctx: StoreRunContext, jar: CookieJar, key: string):
     await ctx.onSession(jar.toSession())
     ctx.log("success", "Signed in.")
   } else {
-    return fail("Add a Target password or paste a browser session on the account.")
+    return pause("Add a Target password or paste a browser session on the account, then resume.")
   }
-  if (!jar.visitorId) jar.visitorId = randomBytes(16).toString("hex")
   const probe = await probeCart(ctx, jar, key)
   if (probe.kind === "ok") return null
   if (probe.kind === "unauthorized") {
@@ -463,7 +460,7 @@ async function submitPayment(ctx: StoreRunContext, jar: CookieJar, key: string, 
 }
 
 async function placeOrder(ctx: StoreRunContext, jar: CookieJar, key: string, cartId: string): Promise<Step<string | undefined>> {
-  let response = await checkout(ctx, jar, key)
+  const response = await checkout(ctx, jar, key)
   if (bodyHas(response.body, "MISSING_CREDIT_CARD_CVV") || bodyHas(response.body, "Missing CVV")) {
     const instruction = paymentInstructionId(response.body)
     if (!instruction) return { kind: "failed", reason: "Target asked for the CVV again but did not return a payment instruction id." }
@@ -485,7 +482,7 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar, key: string, car
     )
     if (isChallenge(cvv.status, cvv.body)) return { kind: "paused", reason: TARGET_PAUSE }
     if (cvv.status < 200 || cvv.status >= 300) return { kind: "failed", reason: `CVV resubmit failed (${cvv.status}).` }
-    response = await checkout(ctx, jar, key)
+    return { kind: "paused", reason: "Target requested CVV verification after the order request. Check your Target account for an order before resuming; TCGAIO did not retry the place-order request." }
   }
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: TARGET_PAUSE }
   if (bodyHas(response.body, "PAYMENT_DECLINED")) return { kind: "failed", reason: "Target declined the card." }
@@ -521,8 +518,11 @@ function checkout(ctx: StoreRunContext, jar: CookieJar, key: string): Promise<Ht
 }
 
 async function login(ctx: StoreRunContext, jar: CookieJar): Promise<Step<true>> {
-  if (!jar.visitorId) jar.visitorId = randomBytes(16).toString("hex")
-  const device = { visitor_id: jar.visitorId, user_agent: chromeUserAgent(), language: "en-US" }
+  const device = {
+    ...(jar.visitorId ? { visitor_id: jar.visitorId } : {}),
+    user_agent: chromeUserAgent(),
+    language: "en-US"
+  }
   const response = await call(ctx, {
     method: "POST",
     url: "https://gsp.target.com/gsp/authentications/v1/credential_validations?client_id=ecom-web-1.0.0",

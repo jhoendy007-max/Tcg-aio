@@ -6,7 +6,7 @@ import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
+import { checkoutPreflight, paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import { createCardJwe, readFlexContext, readPaymentToken } from "./card"
 import {
   isChallenge,
@@ -149,6 +149,8 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
     if (await holdMonitorOnly(ctx)) continue
+    const preflight = checkoutPreflight(ctx, reading.price)
+    if (preflight) return preflight
     await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, reading, page)
@@ -175,12 +177,6 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("info", `Submitting payment for the card ending ${ctx.profile.last4}.`)
     const paid = await pay(ctx, jar, page)
     if (paid.kind === "tested") return finishTest(ctx)
-    if (paid.kind === "oos") {
-      ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")
-      ctx.phase("monitoring")
-      await ctx.sleep(ctx.settings.monitorDelayMs)
-      continue
-    }
     if (paid.kind !== "ok") return asResult(paid)
     const orderId = paid.value
     return {
@@ -369,7 +365,7 @@ async function pay(ctx: StoreRunContext, jar: CookieJar, page: string): Promise<
     body: JSON.stringify({ paymentKey: keyId, paymentToken, email: ctx.profile.email })
   })
   if (order.kind !== "ok") return order
-  if (outOfStock(order.value.body)) return { kind: "oos", reason: "Out of stock" }
+  if (outOfStock(order.value.body)) return { kind: "failed", reason: "Pokémon Center reported unavailable stock after the order request. The request was not retried; verify your account before starting again." }
   if (declined(order.value.body)) return { kind: "failed", reason: "Pokémon Center declined the card." }
   const orderId = readOrderId(order.value.body)
   if (order.value.status >= 200 && order.value.status < 300 && orderId) {

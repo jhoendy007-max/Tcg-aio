@@ -331,6 +331,15 @@ describe("amazon checkout", () => {
     expect(carts).toBe(2)
   })
 
+  it("does not retry place order when Amazon reports unavailable stock", async () => {
+    const fake = client((req) => isFinalSubmit("amazon", req)
+      ? json(200, "out of stock")
+      : happy(req))
+    const result = await createAmazonModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(fake.calls.filter((call) => isFinalSubmit("amazon", call))).toHaveLength(1)
+  })
+
   it("reads checkout and never submits place order in test mode", async () => {
     const fake = client((req) => happy(req))
     const result = await createAmazonModule().run(ctx(fake.http, { testMode: true }))
