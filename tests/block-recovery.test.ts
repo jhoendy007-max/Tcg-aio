@@ -125,6 +125,60 @@ describe("block recovery", () => {
     expect(stuck?.host).toBe("10.0.0.1")
   })
 
+  it("backs off a 429 on the same proxy and does not open the account browser", async () => {
+    const seen: string[] = []
+    let hits = 0
+    let refreshed = 0
+    const http = {
+      async request(input: HttpRequest) {
+        seen.push(input.proxy?.host ?? "direct")
+        hits += 1
+        if (hits === 1) return json(429, "slow down")
+        return json(200, { ok: true })
+      }
+    }
+    const run = ctx({
+      http,
+      sleep: async (ms) => { expect(ms).toBeGreaterThanOrEqual(500) },
+      refreshSession: async () => {
+        refreshed += 1
+        return { cookies: { accessToken: "fresh" }, challenged: false }
+      }
+    })
+    const response = await sendWithRecovery(run, { method: "GET", url: "https://redsky.target.com/stock" }, {
+      homeUrl: "https://www.target.com/",
+      inner: http,
+      blocked: (result) => isBlockStatus(result.status, result)
+    })
+    expect(response.status).toBe(200)
+    expect(seen).toEqual(["10.0.0.1", "10.0.0.1"])
+    expect(refreshed).toBe(0)
+  })
+
+  it("returns a challenge page without rotating or reloading", async () => {
+    const seen: string[] = []
+    const http = {
+      async request(input: HttpRequest) {
+        seen.push(input.proxy?.host ?? "direct")
+        return json(403, "<html><body>Please verify you are a human</body></html>")
+      }
+    }
+    const run = ctx({
+      account: { id: "", store: "target" } as StoreRunContext["account"],
+      http,
+      refreshSession: async () => {
+        throw new Error("the account browser should stay closed until the task pauses")
+      }
+    })
+    const response = await sendWithRecovery(run, { method: "GET", url: "https://www.target.com/p/-/A-1" }, {
+      homeUrl: "https://www.target.com/",
+      inner: http,
+      blocked: (result) => isBlockStatus(result.status, result)
+    })
+    expect(response.status).toBe(403)
+    expect(seen).toEqual(["10.0.0.1"])
+  })
+
   it("lets a task with no account move to the next proxy", async () => {
     const seen: HttpRequest[] = []
     let hits = 0

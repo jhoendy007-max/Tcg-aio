@@ -8,7 +8,8 @@ import { storeName } from "../../../shared/stores"
 import { ProductVisual } from "../components/marks"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { TasksBulk } from "./TasksBulk"
-import { errorText, formatTime, STATUS_LABEL, unwrap } from "../lib"
+import { errorText, formatTime, STATUS_LABEL, statusLabel, unwrap } from "../lib"
+import { QuickSetup } from "./QuickSetup"
 
 const emptyForm = (): TaskInput => ({
   store: "target",
@@ -118,10 +119,10 @@ export function TasksPage() {
       if (kindFilter === "monitor" && task.kind !== "monitor") return false
       if (kindFilter === "checkout" && task.kind === "monitor") return false
       if (!needle) return true
-      const hay = [task.sku, task.group, task.detail, storeName(task.store), STATUS_LABEL[task.status]].join(" ").toLowerCase()
+      const hay = [task.sku, task.group, task.detail, storeName(task.store), statusLabel(task.status, lang)].join(" ").toLowerCase()
       return hay.includes(needle)
     })
-  }, [tasks, query, statusFilter, storeFilter, kindFilter])
+  }, [tasks, query, statusFilter, storeFilter, kindFilter, lang])
   const sections = useMemo(() => {
     if (!grouped) return [{ label: "", rows: filtered }]
     const buckets = new Map<string, PublicTask[]>()
@@ -259,9 +260,27 @@ export function TasksPage() {
           <h1>Tasks</h1>
           <p>Monitor a drop, add it to cart, and place a ship-to-home order with your own account.</p>
         </div>
-        <button type="button" className="primary" onClick={() => { setForm(freshTask(settings)); setError("") }}>New task</button>
+        <button type="button" onClick={() => { setForm(freshTask(settings)); setError("") }}>{taskText(lang, "quickAdvanced")}</button>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
+      {!form && settings ? (
+        <QuickSetup
+          lang={lang}
+          stores={stores}
+          profiles={profiles}
+          accounts={accounts}
+          groups={groups}
+          tasks={tasks}
+          globalTest={globalTest}
+          warmOnStart={settings.warmOnStart}
+          onCreated={reload}
+          onWarm={async (enabled) => {
+            const saved = await unwrap(window.aio.settings.save({ ...settings, warmOnStart: enabled }))
+            setSettings(saved.settings)
+            window.dispatchEvent(new CustomEvent("tcgaio-settings", { detail: saved.settings }))
+          }}
+        />
+      ) : null}
       {globalTest ? <Banner tone="info">Global test mode is on. Every task stops before place order. Nothing is charged.</Banner> : null}
       {challenge ? (
         <div className="card">
@@ -333,7 +352,7 @@ export function TasksPage() {
         <Field label="Status">
           <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TaskStatus | "")} aria-label="Filter by status">
             <option value="">All statuses</option>
-            {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((status) => <option key={status} value={status}>{STATUS_LABEL[status]}</option>)}
+            {(Object.keys(STATUS_LABEL) as TaskStatus[]).map((status) => <option key={status} value={status}>{statusLabel(status, lang)}</option>)}
           </Select>
         </Field>
         <Field label="Store">
@@ -498,7 +517,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
           {taskView === "detailed" ? <td>{bindingCell(task, accounts, groups, lang).account}</td> : null}
           {taskView === "detailed" ? <td>{bindingCell(task, accounts, groups, lang).proxy}</td> : null}
           <td>
-            <span className={`pill ${task.status}`}>{STATUS_LABEL[task.status]}</span>
+            <span className={`pill ${task.status}`}>{statusLabel(task.status, lang)}</span>
             {task.detail ? <div className="detail">{task.detail}</div> : null}
           </td>
           <td className="row-actions">

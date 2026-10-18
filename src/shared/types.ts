@@ -192,13 +192,15 @@ export type TaskStatus =
   | "stopped"
   | "tested"
   | "challenge"
+  | "in_queue"
 
 export const ACTIVE_STATUSES: TaskStatus[] = [
   "monitoring",
   "in_stock",
   "adding_to_cart",
   "checking_out",
-  "challenge"
+  "challenge",
+  "in_queue"
 ]
 
 export function isActiveStatus(status: TaskStatus): boolean {
@@ -341,6 +343,8 @@ export interface Settings {
   challengeTimeoutSec: number
   /** Open the real browser session on a timer and save the cookies it already has. */
   sessionWarmup: boolean
+  /** Warm the account browser when a monitor or checkout starts, if the session is stale. */
+  warmOnStart: boolean
   /** Minutes between session warm-ups. */
   sessionWarmupMin: number
   /** How many hidden session windows can load at once. The rest wait. */
@@ -432,6 +436,7 @@ export const DEFAULT_SETTINGS: Settings = {
   clearCartAfterTest: false,
   challengeTimeoutSec: 180,
   sessionWarmup: false,
+  warmOnStart: false,
   sessionWarmupMin: 30,
   sessionWindowCap: 3,
   monitorJitterPct: 20,

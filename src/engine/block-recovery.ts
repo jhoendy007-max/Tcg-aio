@@ -2,6 +2,9 @@ import type { HttpClient, HttpRequest, HttpResponse } from "./http"
 import { proxyLabel } from "../shared/proxy"
 import type { ProxyEndpoint, SessionCookies, Settings } from "../shared/types"
 import type { StoreRunContext } from "../stores/module"
+import { classifyTraffic } from "./traffic"
+
+export { pageLooksLikeChallenge } from "./traffic"
 
 const COOLDOWN_MS = 10 * 60 * 1000
 
@@ -14,6 +17,8 @@ export interface SessionRefreshRequest {
   existing?: SessionCookies
   signal: AbortSignal
   onChallenge: (message: string) => void
+  /** How long to leave the account window open when the store is showing a check. */
+  holdMs?: number
   /** Read a code from the user's mailbox. The digits stay in the browser fill. */
   lookupCode?: () => Promise<string | null>
   onMailFilled?: () => void
@@ -57,28 +62,9 @@ export function backoffMs(attempt: number, baseMs: number, random = Math.random(
 }
 
 export function isBlockStatus(status: number, response?: Pick<HttpResponse, "body" | "headers">): boolean {
+  if (response && classifyTraffic({ status, body: response.body, headers: response.headers }) === "queue") return false
   if (status === 403 || status === 412 || status === 435) return true
-  if (status !== 429 || !response) return status === 429
-  return !isProductQueue(response)
-}
-
-export function pageLooksLikeChallenge(text: string): boolean {
-  const lower = text.toLowerCase()
-  const markers = [
-    "captcha",
-    "access denied",
-    "press and hold",
-    "press-and-hold",
-    "verify you are human",
-    "please verify you are a human",
-    "robot check",
-    "robot or human",
-    "just a moment",
-    "challenge-platform",
-    "attention required",
-    "pardon our interruption"
-  ]
-  return markers.some((marker) => lower.includes(marker))
+  return status === 429
 }
 
 export async function sendWithRecovery(
@@ -94,13 +80,24 @@ export async function sendWithRecovery(
     const proxy = selectProxy(stickKey(ctx), list, Date.now()) ?? ctx.proxy
     if (proxy) ctx.proxy = proxy
     response = await options.inner.request({ ...request, proxy, signal: ctx.signal })
-    if (!options.blocked(response) || attempt === budget) {
-      if (options.blocked(response) && attempt === budget) {
-        ctx.log("warn", `Pausing after ${budget} blocked ${budget === 1 ? "attempt" : "attempts"}.`)
+    const kind = classifyTraffic(response)
+    const blocked = options.blocked(response) && (kind === "rate_limit" || kind === "hard_block")
+    if (!blocked) {
+      if (kind === "challenge") {
+        ctx.log("warn", "The store is showing a challenge. A person can solve it in the account browser. TCGAIO does not solve challenges.")
       }
       return response
     }
+    if (attempt === budget) {
+      ctx.log("warn", `Pausing after ${budget} blocked ${budget === 1 ? "attempt" : "attempts"}.`)
+      return response
+    }
     const wait = backoffMs(attempt, ctx.module?.blockBackoffMs ?? ctx.settings.monitorDelayMs)
+    if (kind === "rate_limit") {
+      ctx.log("warn", `HTTP 429. Waiting ${formatWait(wait)} on the same connection, then retrying.`)
+      await ctx.sleep(wait)
+      continue
+    }
     const locked = Boolean(ctx.account.id)
     const next = locked ? proxy : advanceProxy(ctx, list, proxy)
     ctx.log("warn", `${blockLog(response.status, proxy, next, locked)} Waiting ${formatWait(wait)} before reloading the store session.`)
@@ -202,19 +199,6 @@ async function reloadSession(ctx: StoreRunContext, request: HttpRequest, homeUrl
     const message = err instanceof Error ? err.message : String(err)
     ctx.log("warn", `The account browser could not reload the store (${message}). Retrying with the saved session.`)
   }
-}
-
-function isProductQueue(response: Pick<HttpResponse, "body" | "headers">): boolean {
-  const wait = headerValue(response.headers, "a2ctransactionwait") || headerValue(response.headers, "a2ctransactioncode")
-  if (wait) return true
-  const text = response.body.slice(0, 2000)
-  return text.includes("CONSTRAINED_ITEM") || text.includes("PLEASE_WAIT")
-}
-
-function headerValue(headers: HttpResponse["headers"], name: string): string {
-  const value = headers[name] ?? headers[name.toLowerCase()]
-  if (Array.isArray(value)) return value[0] ?? ""
-  return value ?? ""
 }
 
 function formatWait(ms: number): string {

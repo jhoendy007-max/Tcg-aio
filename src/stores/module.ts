@@ -14,7 +14,7 @@ import type {
   TaskStatus
 } from "../shared/types"
 
-export type TaskPhase = Extract<TaskStatus, "monitoring" | "in_stock" | "adding_to_cart" | "checking_out">
+export type TaskPhase = Extract<TaskStatus, "monitoring" | "in_stock" | "adding_to_cart" | "checking_out" | "in_queue">
 
 export interface StoreRunContext {
   task: { id: string; sku: string; quantity: number; store: StoreId; maxPrice?: number | null }
@@ -82,5 +82,7 @@ export interface StoreModule {
   displayName: string
   skuHint: string
   implemented: boolean
+  /** The module polls its own waiting room. The runner does not poll those GETs again. */
+  handlesQueue?: boolean
   run(ctx: StoreRunContext): Promise<StoreRunResult>
 }

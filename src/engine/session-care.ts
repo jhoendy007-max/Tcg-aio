@@ -28,6 +28,31 @@ export function warmupDue(lastWarmAt: number | null, intervalMin: number, now: n
   return now - lastWarmAt >= intervalMin * 60_000
 }
 
+/** Accounts whose browser session should be opened before this task runs. A fresh warm-up is left alone. */
+export function accountsToWarm(
+  task: { id: string; accountId: string; kind?: string; monitorOnly?: boolean; linkedCheckoutIds?: string[] },
+  tasks: { id: string; accountId: string; linkedMonitorId?: string | null }[],
+  accounts: { id: string; lastWarmAt: number | null }[],
+  now: number,
+  freshMin: number
+): string[] {
+  const ids = new Set<string>()
+  if (task.accountId) ids.add(task.accountId)
+  if (task.kind === "monitor" || task.monitorOnly) {
+    const linked = new Set(task.linkedCheckoutIds ?? [])
+    for (const other of tasks) {
+      if (other.id === task.id) continue
+      if (other.linkedMonitorId === task.id || linked.has(other.id)) {
+        if (other.accountId) ids.add(other.accountId)
+      }
+    }
+  }
+  return [...ids].filter((id) => {
+    const account = accounts.find((item) => item.id === id)
+    return Boolean(account && warmupDue(account.lastWarmAt, freshMin, now))
+  })
+}
+
 /**
  * A real page landed on a sign-in URL, or the browser stored no cookies.
  * This does not decide how the store's own scripts behave.
