@@ -74,6 +74,10 @@ if [[ -f "$KS" && -f "$PROPS" ]]; then
 fi
 
 if [[ "${TCGAIO_GENERATE_KEYSTORE:-}" == "1" ]]; then
+  if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${TCGAIO_ALLOW_NEW_KEYSTORE:-}" != "1" ]]; then
+    echo "Refusing to mint a new signing key for a tagged release. Updates would fail with a signature mismatch. Set ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD to the keystore that signed the installed APK." >&2
+    exit 1
+  fi
   PASS="$(openssl rand -hex 24)"
   keytool -genkeypair -v \
     -keystore "$KS" \

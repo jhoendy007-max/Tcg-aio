@@ -108,7 +108,8 @@ if (gotLock) void app.whenReady().then(async () => {
     submit: (cookie) => challenge.submit(cookie),
     current: () => challenge.current()
   }, {
-    open: (id) => sessions!.open(id)
+    open: (id) => sessions!.open(id),
+    warm: (id) => sessions!.warm(id)
   }, (url) => shell.openExternal(url), chromiumHttp), {
     onDevices: () => {
       if (phone) window?.webContents.send(channels.phoneEvent, phone.status())

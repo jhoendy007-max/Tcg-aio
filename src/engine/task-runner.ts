@@ -318,7 +318,17 @@ export class TaskService {
         checkoutDelayMs: task.checkoutDelayMs ?? 0,
         phase: (status: "monitoring" | "in_stock" | "adding_to_cart" | "checking_out" | "in_queue") => {
           if (status === "in_queue") {
-            update({ status })
+            const queued = this.db.getTask(id).status === "in_queue"
+            update({ status, detail: "In a store queue. Open the PC if the store asks a person to continue." })
+            if (!queued) {
+              void this.safeNotify(update, {
+                kind: "paused",
+                storeName: module.displayName,
+                sku: task.sku,
+                profileName: profileName(),
+                detail: "In a store queue. Open the PC if the store asks a person to continue."
+              })
+            }
             return
           }
           if (status === "in_stock") detectedAt = Date.now()

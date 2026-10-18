@@ -1,5 +1,5 @@
 import { StatusBar } from "expo-status-bar"
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
 import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from "../src/phone/client"
@@ -18,13 +18,14 @@ import { moduleText } from "../src/shared/module-settings"
 import { taskText } from "../src/shared/task-role"
 import { updateWidget } from "./src/widget"
 import { colors, isActive, palette, STATUS_LABEL } from "./src/theme"
+import { ThemeContext, useTheme } from "./src/theme-context"
+import { DeskPanel, LogsPanel, PhoneSettingsForm } from "./src/Desk"
+import { PhoneUpdateCard } from "./src/PhoneUpdateCard"
 import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
 
 type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats" | "mail" | "stores"
-type Bag = { colors: typeof colors; styles: ReturnType<typeof createStyles> }
-const ThemeContext = createContext<Bag>({ colors, styles: createStyles(colors) })
-function useTheme() { return useContext(ThemeContext) }
+type PhoneTab = "tasks" | "monitors" | "desk" | "logs" | "settings"
 
 const LETTER: Record<string, string> = { target: "T", walmart: "W", bestbuy: "B", "pokemon-center": "P", amazon: "A", crunchyroll: "C", bandai: "N", gamestop: "G", "barnes-noble": "BN", costco: "Co", sams: "S", tcgplayer: "D" }
 
@@ -96,6 +97,7 @@ export default function App() {
   const [noticeImage, setNoticeImage] = useState("")
   const [links, setLinks] = useState<SavedPhoneLink[]>([])
   const [roleFilter, setRoleFilter] = useState<"" | "monitor" | "checkout">("")
+  const [tab, setTab] = useState<PhoneTab>("tasks")
   const seen = useRef(new Map<string, string>())
   const [permission, requestPermission] = useCameraPermissions()
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -116,6 +118,20 @@ export default function App() {
       seen.current.set(task.id, task.status)
       if (before && before !== task.status && (task.status === "success" || task.status === "tested")) {
         setBanner(task.status === "tested" ? `${task.storeName} test finished. Place order was not sent.` : `${task.storeName} checkout confirmed. ${task.sku}`)
+      }
+      if (before !== task.status && (task.status === "challenge" || task.status === "in_queue")) {
+        const text = task.status === "challenge"
+          ? `${task.storeName} needs a person on the PC. ${task.detail || "Solve the check on the desktop window."}`
+          : `${task.storeName} is in a store queue. Open the PC if it asks a person to continue.`
+        setBanner(text)
+        void notify({
+          kind: task.status === "challenge" ? "challenge" : "paused",
+          storeName: task.storeName,
+          sku: task.sku,
+          profileName: task.profileName,
+          detail: text,
+          ts: Date.now()
+        })
       }
       setSnap((current) => current ? { ...current, tasks: upsert(current.tasks, task) } : current)
     })
@@ -332,6 +348,7 @@ export default function App() {
             <TaskEditor draft={draft} snap={snap} setDraft={setDraft} session={session.current} run={run} onSaved={(id) => { setScreen("dash"); setDraft(null); if (id) setSelected(id) }} onCancel={() => { setScreen("dash"); setDraft(null) }} />
           ) : (
             <>
+              {tab === "tasks" || tab === "monitors" ? <>
               {snap?.testMode ? <Text style={styles.p}>Global test mode is on. Every task stops before place order.</Text> : null}
               <View style={styles.metrics}>
                 <View style={styles.metric}><Text style={styles.metricNum}>{activeCount}</Text><Text style={styles.p}>Active</Text></View>
@@ -347,13 +364,15 @@ export default function App() {
               {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
               {snap?.imap ? <Text style={styles.p}>{snap.imap.accounts === 0 ? mailText(snap.language === "es" ? "es" : "en", "statusOff") : `${mailText(snap.language === "es" ? "es" : "en", "statusOn")} ${snap.imap.enabled} · ${snap.imap.ready}${snap.imap.lastError ? ` · ${snap.imap.lastError}` : ""}`}</Text> : null}
               {nextDrop(snap, now) ? <Text style={styles.p}>Next drop {nextDrop(snap, now)}</Text> : null}
+              {tab === "tasks" || tab === "monitors" ? (
               <View style={styles.choices}>
                 {(["", "monitor", "checkout"] as const).map((kind) => (
-                  <Pressable key={kind || "all"} style={[styles.choice, roleFilter === kind && styles.choiceOn]} onPress={() => setRoleFilter(kind)}>
+                  <Pressable key={kind || "all"} style={[styles.choice, (tab === "monitors" ? "monitor" : roleFilter) === kind && styles.choiceOn]} onPress={() => { setTab("tasks"); setRoleFilter(kind) }}>
                     <Text style={styles.choiceText}>{kind === "" ? (snap?.language === "es" ? "Todas" : "All") : taskText(snap?.language === "es" ? "es" : "en", kind)}</Text>
                   </Pressable>
                 ))}
               </View>
+              ) : null}
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
@@ -373,7 +392,15 @@ export default function App() {
               {health ? health.map((row) => (
                 <Text key={row.store} style={styles.p}>{row.storeName} · {row.proxy} · {row.verdict} · {row.detail}</Text>
               )) : null}
-              {(snap?.tasks ?? []).filter((item) => roleFilter === "" || (roleFilter === "monitor" ? item.kind === "monitor" || item.monitorOnly : item.kind !== "monitor" && !item.monitorOnly)).map((item) => (
+              </> : null}
+              {tab === "desk" ? <><Text style={styles.h1}>Desk</Text><DeskPanel snap={snap} session={session.current} run={run} /></> : null}
+              {tab === "logs" ? <><Text style={styles.h1}>Logs</Text><LogsPanel snap={snap} /></> : null}
+              {tab === "settings" ? <><Text style={styles.h1}>Settings</Text><PhoneSettingsForm snap={snap} session={session.current} run={run} /><PhoneUpdateCard /></> : null}
+              {(tab === "tasks" || tab === "monitors" ? (snap?.tasks ?? []).filter((item) => {
+                const kind = tab === "monitors" ? "monitor" : roleFilter
+                if (kind === "") return true
+                return kind === "monitor" ? item.kind === "monitor" || item.monitorOnly : item.kind !== "monitor" && !item.monitorOnly
+              }) : []).map((item) => (
                 <SwipeTask key={item.id} active={isActive(item.status)} onPrimary={() => void run(() => isActive(item.status) ? session.current!.stop(item.id) : session.current!.start(item.id))} onTest={() => void run(() => session.current!.runTest(item.id))}>
                 <Pressable style={[styles.card, selected === item.id && styles.cardOn]} onPress={() => setSelected(item.id)} accessibilityHint="Swipe right to start or stop. Swipe left to run a test. Buttons below do the same.">
                   <View style={styles.row}>
@@ -392,7 +419,7 @@ export default function App() {
                 </Pressable>
                 </SwipeTask>
               ))}
-              {snap && snap.tasks.length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
+ {(tab === "tasks" || tab === "monitors") && snap && snap.tasks.length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
               {links.length > 1 ? (
                 <View style={styles.row}>
                   {links.map((item) => (
@@ -404,6 +431,21 @@ export default function App() {
             </>
           )}
         </ScrollView>
+      ) : null}
+      {screen !== "boot" && screen !== "pair" ? (
+        <View style={styles.tabBar}>
+          {([
+            ["tasks", "Tasks"],
+            ["monitors", "Monitors"],
+            ["desk", "Desk"],
+            ["logs", "Logs"],
+            ["settings", "Settings"]
+          ] as const).map(([id, label]) => (
+            <Pressable key={id} style={styles.tab} onPress={() => { setTab(id); if (screen !== "dash" && screen !== "edit") setScreen("dash") }}>
+              <Text style={[styles.tabText, tab === id && (screen === "dash" || screen === "edit") && styles.tabOn]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
       ) : null}
     </View>
     </ThemeContext.Provider>
@@ -872,6 +914,10 @@ function createStyles(c: typeof colors) {
     metricNum: { color: c.text, fontSize: 18, fontWeight: "700" },
     mark: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
     markText: { color: c.accentInk, fontWeight: "700" },
-    photo: { width: 36, height: 36, borderRadius: 8 }
+    photo: { width: 36, height: 36, borderRadius: 8 },
+    tabBar: { flexDirection: "row", borderTopWidth: 1, borderTopColor: c.line, backgroundColor: c.sidebar, paddingBottom: 10, paddingTop: 8 },
+    tab: { flex: 1, alignItems: "center", paddingVertical: 6 },
+    tabText: { color: c.muted, fontSize: 11, fontWeight: "700" },
+    tabOn: { color: c.accent }
   })
 }

@@ -18,13 +18,14 @@
     },
     "android": {
       "package": "com.tcgaio.phone",
-      "versionCode": 23,
+      "versionCode": 222,
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.INTERNET",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.ACCESS_NETWORK_STATE"
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#14161b",

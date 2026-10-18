@@ -2,6 +2,7 @@
 """Pin the prebuild Android project to a signed release with both phone ABIs."""
 
 from pathlib import Path
+import json
 import re
 import sys
 
@@ -78,4 +79,13 @@ if "TCGAIO_RELEASE_SIGNING" not in gradle:
     gradle = gradle.replace(release_type, signed, 1)
     app_gradle.write_text(gradle)
 
-print("Configured Android release signing, ABIs, and the embedded bundle build.")
+package = json.loads((mobile / "package.json").read_text())
+parts = [int(part) for part in str(package["version"]).split(".")[:3]]
+while len(parts) < 3:
+    parts.append(0)
+code = parts[0] * 10000 + parts[1] * 100 + parts[2]
+gradle = app_gradle.read_text()
+gradle = re.sub(r"versionCode \d+", f"versionCode {code}", gradle, count=1)
+gradle = re.sub(r'versionName "[^"]*"', f'versionName "{package["version"]}"', gradle, count=1)
+app_gradle.write_text(gradle)
+print(f"Configured Android release signing, ABIs, versionCode {code}, and the embedded bundle build.")

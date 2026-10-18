@@ -9,6 +9,7 @@ import type { KeywordWatchInput, RestockRuleInput } from "../shared/types"
 import { parseBulkTasks } from "../engine/bulk"
 import { completeMailSignIn, mailClientId } from "../engine/mail-oauth"
 import { detectMailbox, MAIL_PRESETS } from "../shared/mail"
+import { applyPhoneSettings, projectPhoneClient, projectPhoneLedger, projectPhoneSettings, quickTasks, type PhoneAccountDraft, type PhoneClientDraft, type PhoneProfileDraft, type PhoneProxyDraft, type PhoneQuickDraft, type PhoneSettingsDraft } from "./desk"
 import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projectTask, type PhoneAlerts, type PhoneAnalytics, type PhoneChallenge, type PhoneKeeper, type PhoneMailDraft, type PhoneSchedule, type PhoneSnapshot, type PhoneTaskDraft, type PhoneUpdates } from "./protocol"
 import type { PhoneHost } from "./server"
 
@@ -29,7 +30,7 @@ export function createPhoneHost(
   getRunner: () => TaskService | null,
   getAlerts: () => AlertService | null = () => null,
   challenge?: PhoneChallengeActions,
-  session?: { open(accountId: string): Promise<void> | void },
+  session?: { open(accountId: string): Promise<void> | void; warm?(accountId: string): Promise<{ expired: boolean; detail: string }> },
   openUrl?: (url: string) => Promise<void> | void,
   http: HttpClient = defaultHttp
 ): PhoneHost {
@@ -92,7 +93,10 @@ export function createPhoneHost(
         theme: settings.theme,
         accent: settings.accent,
         successSound: settings.successSound
-      }
+      },
+      clients: db.listClients().map(projectPhoneClient),
+      ledger: db.listLedger().slice(0, 80).map(projectPhoneLedger),
+      desk: projectPhoneSettings(settings)
     }
   }
   const schedules = (): PhoneSchedule[] => db.listSchedules().map((schedule) => ({
@@ -117,7 +121,7 @@ export function createPhoneHost(
       winRate: report.winRate,
       spend: report.spend,
       byStore: report.byStore.map((row) => ({ store: row.store, storeName: row.storeName, success: row.success, failure: row.failure, paused: row.paused, spend: row.spend })),
-      recent: report.recent.slice(0, 8).map((row) => ({ at: row.at, storeName: storeName(row.store), sku: row.sku, outcome: row.outcome, price: row.price })),
+      recent: report.recent.slice(0, 40).map((row) => ({ at: row.at, storeName: storeName(row.store), sku: row.sku, outcome: row.outcome, price: row.price })),
       monitorSamples: report.monitor.samples,
       monitorBlocked: report.monitor.blocked,
       monitorBlockRate: report.monitor.blockRate,
@@ -336,6 +340,49 @@ export function createPhoneHost(
     },
     twoWayDevices(accountId: string) {
       return db.vaultLinksFor(accountId, true).map((link) => link.deviceId)
+    },
+    saveProfile(input: PhoneProfileDraft) {
+      db.saveProfile(input)
+    },
+    deleteProfile(id: string) {
+      db.deleteProfile(id)
+    },
+    saveAccount(input: PhoneAccountDraft) {
+      db.saveAccount({ ...input, session: "", sessionAction: "keep" })
+    },
+    deleteAccount(id: string) {
+      db.deleteAccount(id)
+    },
+    async warmAccount(id: string) {
+      if (!session?.warm) throw new Error("Session warm-up runs on the PC.")
+      return session.warm(id)
+    },
+    saveProxy(input: PhoneProxyDraft) {
+      db.saveProxyGroup(input)
+    },
+    deleteProxy(id: string) {
+      db.deleteProxyGroup(id)
+    },
+    saveClient(input: PhoneClientDraft) {
+      db.saveClient(input)
+    },
+    deleteClient(id: string) {
+      db.deleteClient(id)
+    },
+    markLedger(clientId: string, ids: string[], paid: boolean) {
+      db.markLedgerPaid(clientId, ids, paid)
+    },
+    ledgerCsv(clientId?: string) {
+      return db.ledgerExport(clientId)
+    },
+    saveDeskSettings(input: PhoneSettingsDraft) {
+      db.saveSettings(applyPhoneSettings(db.getSettings(), input))
+    },
+    quickSetup(input: PhoneQuickDraft) {
+      const pair = quickTasks(input)
+      const monitor = db.saveTask(pair.monitor)
+      db.saveTask({ ...pair.checkout, linkedMonitorId: monitor.id })
+      return { created: 2 }
     }
   }
 }

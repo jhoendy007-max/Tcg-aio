@@ -39,7 +39,7 @@ const emptyForm = (): TaskInput => ({
   clientId: ME_CLIENT_ID
 })
 
-export function TasksPage() {
+export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
   const [tasks, setTasks] = useState<PublicTask[]>([])
   const [profiles, setProfiles] = useState<PublicProfile[]>([])
   const [accounts, setAccounts] = useState<PublicAccount[]>([])
@@ -60,7 +60,7 @@ export function TasksPage() {
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("")
   const [storeFilter, setStoreFilter] = useState("")
-  const [kindFilter, setKindFilter] = useState<TaskKind | "">("")
+  const [kindFilter, setKindFilter] = useState<TaskKind | "">(lockedKind)
   const [clientFilter, setClientFilter] = useState("")
   const [clients, setClients] = useState<Client[]>([])
   const [grouped, setGrouped] = useState(true)

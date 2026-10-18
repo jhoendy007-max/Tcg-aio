@@ -2,8 +2,10 @@ import { gcm } from "@noble/ciphers/aes"
 import { hkdf } from "@noble/hashes/hkdf"
 import { sha256 } from "@noble/hashes/sha2"
 import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils"
+import { parseDeskMessage } from "./desk"
 import { redact } from "../shared/redact"
 import { isStoreId, storeName } from "../shared/stores"
+import type { DeskMessage, PhoneClientRow, PhoneDeskSettings, PhoneLedgerRow } from "./desk"
 import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, ModuleRecord, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StartMode, StoreHealth, StoreId, StoreInfo, TaskKind, TaskOverrides, TaskStatus } from "../shared/types"
 
 export const PHONE_PROTOCOL = 1
@@ -27,9 +29,17 @@ export interface PairingPayload {
 export interface PhoneProfile {
   id: string
   name: string
+  email: string
+  phone: string
+  shipping: PublicProfile["shipping"]
+  billing: PublicProfile["billing"]
+  cardName: string
   last4: string
+  expMonth: string
+  expYear: string
   city: string
   state: string
+  clientId?: string
 }
 
 export interface PhoneAccount {
@@ -39,6 +49,10 @@ export interface PhoneAccount {
   usernameMasked: string
   hasPassword: boolean
   hasSession: boolean
+  sessionState?: "missing" | "saved" | "expired"
+  lastWarmAt?: number | null
+  clientId?: string
+  proxyGroupId?: string | null
 }
 
 export interface PhoneProxyGroup {
@@ -222,6 +236,9 @@ export interface PhoneSnapshot {
   moduleGlobals?: PhoneModuleGlobals
   autopilot?: boolean
   brand?: { appName: string; theme: "dark" | "light"; accent: "gold" | "blue" | "green" | "rose"; successSound: boolean }
+  clients?: PhoneClientRow[]
+  ledger?: PhoneLedgerRow[]
+  desk?: PhoneDeskSettings
 }
 
 /** Challenge handoff for the paired phone. The cookie is only on this message. */
@@ -349,6 +366,7 @@ export type ClientMessage =
   | { type: "vault.unlink"; req: string; conn: string; accountId: string }
   | { type: "vault.push"; req: string; conn: string; accountId: string; cookie: string; expiresAt: number | null }
   | { type: "vault.pull"; req: string; conn: string; accountId: string }
+  | DeskMessage
 
 export type ServerMessage =
   | { type: "paired"; token: string; deviceId: string; pcName: string }
@@ -480,9 +498,17 @@ export function projectProfile(profile: PublicProfile): PhoneProfile {
   return {
     id: profile.id,
     name: profile.name,
+    email: profile.email,
+    phone: profile.phone,
+    shipping: profile.shipping,
+    billing: profile.billing,
+    cardName: profile.cardName,
     last4: profile.last4,
+    expMonth: profile.expMonth,
+    expYear: profile.expYear,
     city: profile.shipping.city,
-    state: profile.shipping.state
+    state: profile.shipping.state,
+    clientId: profile.clientId
   }
 }
 
@@ -497,7 +523,11 @@ export function projectAccount(account: PublicAccount): PhoneAccount {
     label: account.label,
     usernameMasked: maskUsername(account.username),
     hasPassword: account.hasPassword,
-    hasSession: account.hasSession
+    hasSession: account.hasSession,
+    sessionState: account.sessionState,
+    lastWarmAt: account.lastWarmAt,
+    clientId: account.clientId,
+    proxyGroupId: account.proxyGroupId
   }
 }
 
@@ -714,6 +744,8 @@ export function asClientMessage(value: unknown): ClientMessage {
       group: typeof message.group === "string" ? message.group.slice(0, 40) : ""
     }
   }
+  const desk = parseDeskMessage(message)
+  if (desk) return desk
   throw new Error("Unknown phone request.")
 }
 

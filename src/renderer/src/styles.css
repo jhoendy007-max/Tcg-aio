@@ -1,15 +1,15 @@
 :root {
   color-scheme: dark;
-  --bg: #14161b;
-  --sidebar: #0c0d10;
-  --card: #1b1e25;
-  --card-2: #12141a;
-  --line: #2e333d;
-  --line-strong: #3d4452;
-  --text: #e7ebf2;
-  --muted: #9aa3b5;
-  --accent: #e0b15a;
-  --accent-ink: #1c1508;
+  --bg: #0e1116;
+  --sidebar: #090b10;
+  --card: #171b22;
+  --card-2: #10141b;
+  --line: #2a3140;
+  --line-strong: #3c4658;
+  --text: #f2f5f8;
+  --muted: #93a0b5;
+  --accent: #7aa2ff;
+  --accent-ink: #07111f;
   --ok: #3cba8b;
   --warn: #e0a045;
   --danger: #e25b5b;
@@ -29,12 +29,14 @@
   --danger-border: #6d3030;
   --proxy-ok: #b7f0d6;
   --proxy-bad: #ffc7c7;
-  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  font-family: "Segoe UI Variable", "Segoe UI", "Helvetica Neue", sans-serif;
   font-size: 14.5px;
   line-height: 1.45;
+  letter-spacing: 0.01em;
 }
 
-:root[data-accent="blue"] { --accent: #79a6f5; --accent-ink: #0d1828; }
+:root[data-accent="gold"] { --accent: #e0b15a; --accent-ink: #1c1508; }
+:root[data-accent="blue"] { --accent: #7aa2ff; --accent-ink: #07111f; }
 :root[data-accent="green"] { --accent: #3cba8b; --accent-ink: #062018; }
 :root[data-accent="rose"] { --accent: #e07a8a; --accent-ink: #2a1014; }
 
@@ -79,13 +81,14 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.shell { display: grid; grid-template-columns: 232px 1fr; min-height: 100%; }
+.shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100%; }
 .sidebar {
   background: var(--sidebar);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  padding: 22px 14px;
+  padding: 18px 12px 14px;
+  gap: 4px;
 }
 .brand { display: flex; gap: 12px; align-items: center; padding: 0 8px 22px; }
 .brand strong { display: block; letter-spacing: 0.08em; font-size: 15px; }
@@ -93,19 +96,26 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .mark { width: 32px; height: 32px; }
 .mark rect { fill: var(--mark-bg); stroke: var(--accent); }
 .mark path { fill: var(--accent); }
-.sidebar nav { display: flex; flex-direction: column; gap: 4px; }
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+.nav-label { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 12px 12px 4px; }
 .sidebar a {
   color: var(--muted);
   text-decoration: none;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 8px;
-  border-left: 3px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
+.sidebar a svg { width: 16px; height: 16px; flex: none; }
 .sidebar a[aria-current="page"] {
   color: var(--text);
   background: var(--nav-active);
-  border-left-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); }
+.toast-stack { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: 360px; }
+.toast { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow); }
 .sidebar footer {
   margin-top: auto;
   padding: 16px 12px 0;
@@ -233,8 +243,8 @@ button.pick.selected { color: var(--accent); }
 .role-switch .choices button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .update-progress { width: min(280px, 100%); height: 8px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; }
-.stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
-.stat strong { font-size: 22px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.stat strong { font-size: 22px; letter-spacing: -0.03em; }
 .stat span, .countdown { color: var(--muted); }
 .countdown { font-variant-numeric: tabular-nums; font-size: 20px; }
 .bars { display: flex; align-items: flex-end; gap: 8px; min-height: 120px; margin-top: 12px; }
