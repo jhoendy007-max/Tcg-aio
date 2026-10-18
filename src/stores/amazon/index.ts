@@ -143,12 +143,6 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("info", "Checking out with the address and payment saved on the Amazon account.")
     const placed = await placeOrder(ctx, jar)
     if (placed.kind === "tested") return finishTest(ctx)
-    if (placed.kind === "oos") {
-      ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")
-      ctx.phase("monitoring")
-      await ctx.sleep(ctx.settings.monitorDelayMs)
-      continue
-    }
     if (placed.kind !== "ok") return asResult(placed)
     return {
       outcome: "success",
@@ -260,7 +254,7 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar): Promise<Step<st
     body: new URLSearchParams(form.fields).toString()
   }, true)
   if (placed.kind !== "ok") return placed
-  if (outOfStock(placed.value.body)) return { kind: "oos", reason: "Out of stock" }
+  if (outOfStock(placed.value.body)) return { kind: "failed", reason: "Amazon reported unavailable stock after the order request. The request was not retried; verify your account before starting again." }
   if (asksForCvv(placed.value.body) || cardField(readPlaceOrder(placed.value.body)?.fields ?? {})) return { kind: "paused", reason: CVV_PAUSE }
   const declined = /payment was declined|card was declined|payment declined/i.test(placed.value.body)
   if (declined) return { kind: "failed", reason: "Amazon declined the saved payment method." }

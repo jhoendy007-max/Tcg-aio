@@ -250,6 +250,11 @@ describe("best buy module", () => {
     )
     expect(plain.toString()).toBe("009600014242424242424242")
     expect(fake.calls.some((call) => call.url.includes("cardinalcommerce") || call.url.includes("pickup"))).toBe(false)
+    const place = fake.calls.find((call) => isFinalSubmit("bestbuy", call))
+    const placeBody = JSON.parse(place?.body ?? "{}")
+    expect(placeBody.metadata.userDeviceDetails).toBeUndefined()
+    expect(placeBody.metadata.browserInfo).toBeUndefined()
+    expect(fake.calls.filter((call) => isFinalSubmit("bestbuy", call))).toHaveLength(1)
   })
 
   it("uses SKU search for a bare SKU because the legacy product link drops it", async () => {
@@ -348,6 +353,15 @@ describe("best buy module", () => {
     const result = await createBestBuyModule().run(ctx(fake.http))
     expect(result).toMatchObject({ outcome: "failed" })
     if (result.outcome === "failed") expect(result.reason).toMatch(/declined/i)
+  })
+
+  it("does not retry place order when Best Buy reports unavailable stock", async () => {
+    const fake = client((req) => isFinalSubmit("bestbuy", req)
+      ? json(409, { error: "Out of stock" })
+      : happy(req))
+    const result = await createBestBuyModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(fake.calls.filter((call) => isFinalSubmit("bestbuy", call))).toHaveLength(1)
   })
 
   it("waits on a numeric please-wait header for a high-velocity queue", async () => {

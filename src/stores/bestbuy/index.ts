@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto"
 import { attachSession } from "../../engine/block-recovery"
 import { holdMonitorOnly, monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
@@ -170,12 +169,6 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
       return finishTest(ctx)
     }
     const order = await placeOrder(ctx, jar, started.value.orderId)
-    if (order.kind === "oos") {
-      ctx.log("warn", "Checkout reported the item unavailable. Returning to the monitor.")
-      ctx.phase("monitoring")
-      await ctx.sleep(ctx.settings.monitorDelayMs)
-      continue
-    }
     if (order.kind === "unauthorized") return pause(EXPIRED_PAUSE)
     if (order.kind !== "ok") return asResult(order)
     const orderId = order.value
@@ -355,8 +348,7 @@ async function prelookup(ctx: StoreRunContext, jar: CookieJar, order: OrderDetai
       orderId: order.userOrderId || order.orderId,
       paymentId: order.paymentId,
       payComponentVersion: "STANDARD_REDESIGN",
-      payVersion: "5.3.276",
-      browserInfo: browserInfo()
+      payVersion: "5.3.276"
     })
   })
   if (isThreeDSecure(response.body) || isChallenge(response.status, response.body)) return { kind: "paused", reason: BESTBUY_PAUSE }
@@ -471,15 +463,13 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar, orderId: string)
     body: JSON.stringify({
       user: {},
       metadata: {
-        userDeviceDetails: { forterToken: `${randomBytes(16).toString("hex")}_${Date.now()}` },
-        browserInfo: browserInfo(),
         buyLegalMessaging: []
       }
     })
   })
   if (isThreeDSecure(response.body) || isChallenge(response.status, response.body)) return { kind: "paused", reason: BESTBUY_PAUSE }
   if (isUnauthorized(response.status, response.body)) return { kind: "unauthorized", reason: "Unauthorized" }
-  if (outOfStock(response.body)) return { kind: "oos", reason: "Out of stock" }
+  if (outOfStock(response.body)) return { kind: "failed", reason: "Best Buy reported unavailable stock after the order request. The request was not retried; verify your account before starting again." }
   if (bodyHas(response.body, "PAYMENT_DECLINED") || bodyHas(response.body, "declined")) {
     return { kind: "failed", reason: "Best Buy declined the card." }
   }
@@ -546,18 +536,6 @@ function jsonHeaders(jar: CookieJar, referer: string): Record<string, string> {
     referer,
     "user-agent": chromeUserAgent(),
     cookie: jar.header()
-  }
-}
-
-function browserInfo(): Record<string, unknown> {
-  return {
-    javaEnabled: false,
-    language: "en-US",
-    userAgent: chromeUserAgent(),
-    height: "1440",
-    width: "2560",
-    timeZone: "240",
-    colorDepth: "24"
   }
 }
 

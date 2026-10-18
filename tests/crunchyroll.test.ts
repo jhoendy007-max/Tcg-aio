@@ -309,6 +309,15 @@ describe("crunchyroll checkout", () => {
     expect(baskets).toBe(2)
   })
 
+  it("does not retry place order when Crunchyroll reports unavailable stock", async () => {
+    const fake = client((req) => isFinalSubmit("crunchyroll", req)
+      ? json(409, { error: "OUT_OF_STOCK" })
+      : happy(req))
+    const result = await createCrunchyrollModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(fake.calls.filter((call) => isFinalSubmit("crunchyroll", call))).toHaveLength(1)
+  })
+
   it("tokenizes the card and never sends place order in test mode", async () => {
     const fake = client((req) => happy(req))
     const result = await createCrunchyrollModule().run(ctx(fake.http, { testMode: true }))
