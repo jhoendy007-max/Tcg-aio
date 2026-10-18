@@ -8,7 +8,7 @@ import { Database } from "../src/engine/database"
 import { TaskService } from "../src/engine/task-runner"
 import { parseTaskDraft } from "../src/phone/protocol"
 import { paceAddToCart, type StoreRunContext } from "../src/stores/module"
-import { checkoutsToStart, inActiveHours, keywordMatch, normalizeRole, restockCheckouts, structuralChange, taskText, triggerDecision } from "../src/shared/task-role"
+import { checkoutsToStart, inActiveHours, keywordMatch, normalizeRole, restockCheckouts, roleFields, structuralChange, taskText, triggerDecision } from "../src/shared/task-role"
 import type { RestockSignal } from "../src/engine/restock-parse"
 import type { AccountInput, ProfileInput, PublicTask, TaskInput } from "../src/shared/types"
 
@@ -302,6 +302,47 @@ describe("task roles", () => {
       sleep: async (ms: number) => { slept.push(ms) }
     } as unknown as StoreRunContext)
     expect(slept).toEqual([40, 15])
+  })
+
+  it("saves a monitor and a linked checkout, then lists each role", () => {
+    const { db, profileId, accountId } = openDb()
+    const monitor = db.saveTask({
+      store: "target",
+      sku: "88897904",
+      quantity: 1,
+      profileId: "",
+      accountId: "",
+      proxyGroupId: null,
+      confirmPurchase: false,
+      kind: "monitor",
+      overrides: { monitorDelayMs: 2500 }
+    })
+    const checkout = db.saveTask(checkoutInput({ profileId, accountId }, "94724620", {
+      startMode: "monitor",
+      linkedMonitorId: monitor.id,
+      quantity: 2,
+      maxPrice: 40
+    }))
+    expect(monitor.kind).toBe("monitor")
+    expect(monitor.overrides?.monitorDelayMs).toBe(2500)
+    expect(monitor.profileId).toBe("")
+    expect(checkout.kind).toBe("checkout")
+    expect(checkout.startMode).toBe("monitor")
+    expect(checkout.linkedMonitorId).toBe(monitor.id)
+    expect(checkout.quantity).toBe(2)
+    expect(checkout.maxPrice).toBe(40)
+    expect(checkout.profileId).toBe(profileId)
+    expect(checkout.accountId).toBe(accountId)
+    const listed = db.listTasks()
+    expect(listed.filter((task) => task.kind === "monitor").map((task) => task.id)).toEqual([monitor.id])
+    expect(listed.filter((task) => task.kind === "checkout").map((task) => task.id)).toContain(checkout.id)
+    expect(checkoutsToStart(monitor, listed, () => false).map((task) => task.id)).toEqual([checkout.id])
+    expect(roleFields("monitor")).toMatchObject({ interval: true, sku: true, profile: false, account: false, quantity: false, linkMonitor: false, linkCheckouts: true })
+    expect(roleFields("checkout", "builtin")).toMatchObject({ interval: false, profile: true, account: true, quantity: true, maxPrice: true, linkMonitor: false, startMode: true })
+    expect(roleFields("checkout", "restock").linkMonitor).toBe(false)
+    expect(roleFields("checkout", "monitor").linkMonitor).toBe(true)
+    expect(taskText("en", "roleTitle")).toMatch(/task do/)
+    expect(taskText("es", "roleBadgeCheckout")).toBe("COMPRA")
   })
 
   it("accepts a monitor draft from the phone without a profile", () => {

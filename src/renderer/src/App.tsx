@@ -19,6 +19,7 @@ import { dropOpsText } from "../../shared/drop-ops"
 import { Wizard } from "./pages/Wizard"
 import { SuccessScreen, type WinCard } from "./components/Success"
 import { moduleText } from "../../shared/module-settings"
+import { updateStatusText } from "../../shared/update-status"
 import { APP_VERSION } from "../../shared/version"
 import { DEFAULT_SETTINGS, type Settings, type UpdateStatus } from "../../shared/types"
 import { errorText, unwrap } from "./lib"
@@ -162,15 +163,18 @@ export function App() {
         </footer>
       </aside>
       <main>
-        {update && (update.status === "available" || update.status === "downloaded" || update.status === "downloading") ? (
+        {update && update.status !== "idle" && update.status !== "current" ? (
           <div className="card update-banner">
             <div>
-              <strong>Update {update.version}</strong>
-              <p>{update.notes ? update.notes.slice(0, 280) : "A newer TCGAIO release is on GitHub."}</p>
+              <strong>{update.status === "available" || update.status === "downloading" || update.status === "downloaded" ? `Update ${update.version ?? ""}` : "Updates"}</strong>
+              <p>{updateStatusText(update)}</p>
+              {update.notes && (update.status === "available" || update.status === "downloaded") ? <p>{update.notes.slice(0, 280)}</p> : null}
+              {update.status === "downloading" ? <progress className="update-progress" value={update.percent ?? 0} max={100} /> : null}
               {updateError ? <p>{updateError}</p> : null}
             </div>
             <div className="actions">
-              {update.status !== "downloaded" ? <button type="button" className="primary" onClick={() => void unwrap(window.aio.updates.download()).then(setUpdate).catch((err) => setUpdateError(errorText(err)))}>{update.status === "downloading" ? "Downloading…" : "Download"}</button> : null}
+              {update.status === "checking" || update.status === "error" ? <button type="button" onClick={() => void unwrap(window.aio.updates.check()).then(setUpdate).catch((err) => setUpdateError(errorText(err)))}>{update.status === "checking" ? "Checking…" : "Check for updates"}</button> : null}
+              {update.status === "available" || update.status === "downloading" ? <button type="button" className="primary" disabled={update.status === "downloading"} onClick={() => void unwrap(window.aio.updates.download()).then(setUpdate).catch((err) => setUpdateError(errorText(err)))}>{update.status === "downloading" ? `Downloading ${Math.round(update.percent ?? 0)}%` : "Download"}</button> : null}
               {update.status === "downloaded" ? <button type="button" className="primary" onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setUpdateError(errorText(err)))}>Restart and install</button> : null}
             </div>
           </div>

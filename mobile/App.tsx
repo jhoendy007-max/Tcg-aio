@@ -95,6 +95,7 @@ export default function App() {
   const [banner, setBanner] = useState("")
   const [noticeImage, setNoticeImage] = useState("")
   const [links, setLinks] = useState<SavedPhoneLink[]>([])
+  const [roleFilter, setRoleFilter] = useState<"" | "monitor" | "checkout">("")
   const seen = useRef(new Map<string, string>())
   const [permission, requestPermission] = useCameraPermissions()
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -346,6 +347,13 @@ export default function App() {
               {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
               {snap?.imap ? <Text style={styles.p}>{snap.imap.accounts === 0 ? mailText(snap.language === "es" ? "es" : "en", "statusOff") : `${mailText(snap.language === "es" ? "es" : "en", "statusOn")} ${snap.imap.enabled} · ${snap.imap.ready}${snap.imap.lastError ? ` · ${snap.imap.lastError}` : ""}`}</Text> : null}
               {nextDrop(snap, now) ? <Text style={styles.p}>Next drop {nextDrop(snap, now)}</Text> : null}
+              <View style={styles.choices}>
+                {(["", "monitor", "checkout"] as const).map((kind) => (
+                  <Pressable key={kind || "all"} style={[styles.choice, roleFilter === kind && styles.choiceOn]} onPress={() => setRoleFilter(kind)}>
+                    <Text style={styles.choiceText}>{kind === "" ? (snap?.language === "es" ? "Todas" : "All") : taskText(snap?.language === "es" ? "es" : "en", kind)}</Text>
+                  </Pressable>
+                ))}
+              </View>
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
@@ -365,14 +373,14 @@ export default function App() {
               {health ? health.map((row) => (
                 <Text key={row.store} style={styles.p}>{row.storeName} · {row.proxy} · {row.verdict} · {row.detail}</Text>
               )) : null}
-              {(snap?.tasks ?? []).map((item) => (
+              {(snap?.tasks ?? []).filter((item) => roleFilter === "" || (roleFilter === "monitor" ? item.kind === "monitor" || item.monitorOnly : item.kind !== "monitor" && !item.monitorOnly)).map((item) => (
                 <SwipeTask key={item.id} active={isActive(item.status)} onPrimary={() => void run(() => isActive(item.status) ? session.current!.stop(item.id) : session.current!.start(item.id))} onTest={() => void run(() => session.current!.runTest(item.id))}>
                 <Pressable style={[styles.card, selected === item.id && styles.cardOn]} onPress={() => setSelected(item.id)} accessibilityHint="Swipe right to start or stop. Swipe left to run a test. Buttons below do the same.">
                   <View style={styles.row}>
                     <View style={[styles.mark, { backgroundColor: theme.accent }]}><Text style={styles.markText}>{LETTER[item.store] ?? "S"}</Text></View>
                     {item.imageUrl?.startsWith("https://") ? <Image source={{ uri: item.imageUrl }} style={styles.photo} accessibilityIgnoresInvertColors /> : null}
                     <Text style={styles.h2}>{item.storeName}</Text>
-                    {item.kind === "monitor" || item.monitorOnly ? <Text style={styles.pill}>MONITOR</Text> : null}
+                    <Text style={styles.pill}>{taskText(snap?.language === "es" ? "es" : "en", item.kind === "monitor" || item.monitorOnly ? "roleBadgeMonitor" : "roleBadgeCheckout")}</Text>
                     {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
                     <Text style={styles.pill}>{STATUS_LABEL[item.status] ?? item.status}</Text>
                   </View>
@@ -417,6 +425,7 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
   const live = Boolean(draft.id && isActive(snap?.tasks.find((task) => task.id === draft.id)?.status ?? "idle"))
   const accounts = (snap?.accounts ?? []).filter((account) => account.store === draft.store)
   const checkouts = (snap?.tasks ?? []).filter((task) => task.kind !== "monitor" && task.id !== draft.id)
+  const monitors = (snap?.tasks ?? []).filter((task) => (task.kind === "monitor" || task.monitorOnly) && task.store === draft.store && task.id !== draft.id)
   const modes = ["manual", "scheduled", "monitor", "restock", "builtin"] as const
   return (
     <View style={styles.card}>
@@ -426,7 +435,7 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
       <Text style={styles.label}>{taskText(lang, "kind")}</Text>
       <View style={styles.choices}>
         {(["monitor", "checkout"] as const).map((kind) => (
-          <Pressable key={kind} disabled={live} style={[styles.choice, draft.kind === kind && styles.choiceOn]} onPress={() => setDraft({ ...draft, kind, confirmPurchase: kind === "monitor" ? false : draft.confirmPurchase, startMode: kind === "monitor" ? "manual" : draft.startMode ?? "builtin" })}>
+          <Pressable key={kind} disabled={live} accessibilityRole="button" accessibilityState={{ selected: draft.kind === kind }} style={[styles.choice, draft.kind === kind && styles.choiceOn]} onPress={() => setDraft({ ...draft, kind, confirmPurchase: kind === "monitor" ? false : draft.confirmPurchase, startMode: kind === "monitor" ? (draft.startMode === "scheduled" ? "scheduled" : "manual") : "builtin", linkedMonitorId: kind === "monitor" ? null : draft.linkedMonitorId ?? null })}>
             <Text style={styles.choiceText}>{taskText(lang, kind)}</Text>
           </Pressable>
         ))}
@@ -445,6 +454,13 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
       <TextInput style={styles.input} value={draft.keywords ?? ""} onChangeText={(keywords) => setDraft({ ...draft, keywords })} autoCapitalize="none" placeholderTextColor={theme.muted} />
       {monitor ? (
         <>
+          <Text style={styles.label}>{taskText(lang, "monitorDelay")}</Text>
+          <TextInput style={styles.input} value={draft.overrides?.monitorDelayMs == null ? "" : String(draft.overrides.monitorDelayMs)} keyboardType="number-pad" onChangeText={(value) => {
+            const overrides = { ...draft.overrides }
+            if (!value.trim()) delete overrides.monitorDelayMs
+            else overrides.monitorDelayMs = Math.round(Number(value))
+            setDraft({ ...draft, overrides })
+          }} placeholder={taskText(lang, "inherit")} placeholderTextColor={theme.muted} />
           <Text style={styles.label}>{taskText(lang, "proxy")}</Text>
           <View style={styles.choices}>
             <Pressable disabled={live} style={[styles.choice, !draft.monitorProxyGroupId && styles.choiceOn]} onPress={() => setDraft({ ...draft, monitorProxyGroupId: null, proxyGroupId: null })}>
@@ -517,11 +533,27 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
           <Text style={styles.label}>{taskText(lang, "startMode")}</Text>
           <View style={styles.choices}>
             {modes.map((mode) => (
-              <Pressable key={mode} disabled={live} style={[styles.choice, (draft.startMode ?? "builtin") === mode && styles.choiceOn]} onPress={() => setDraft({ ...draft, startMode: mode })}>
+              <Pressable key={mode} disabled={live} style={[styles.choice, (draft.startMode ?? "builtin") === mode && styles.choiceOn]} onPress={() => setDraft({ ...draft, startMode: mode, linkedMonitorId: mode === "monitor" ? draft.linkedMonitorId ?? null : null })}>
                 <Text style={styles.choiceText}>{taskText(lang, mode === "monitor" ? "monitorStart" : mode)}</Text>
               </Pressable>
             ))}
           </View>
+          {draft.startMode === "monitor" ? (
+            <>
+              <Text style={styles.label}>{taskText(lang, "linkMonitor")}</Text>
+              <Text style={styles.p}>{taskText(lang, "linkMonitorHint")}</Text>
+              <View style={styles.choices}>
+                <Pressable disabled={live} style={[styles.choice, !draft.linkedMonitorId && styles.choiceOn]} onPress={() => setDraft({ ...draft, linkedMonitorId: null })}>
+                  <Text style={styles.choiceText}>{taskText(lang, "noMonitor")}</Text>
+                </Pressable>
+                {monitors.map((task) => (
+                  <Pressable key={task.id} disabled={live} style={[styles.choice, draft.linkedMonitorId === task.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, linkedMonitorId: task.id })}>
+                    <Text style={styles.choiceText}>{task.sku || task.keywords || task.id}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : null}
           <View style={styles.switchRow}>
             <Text style={styles.p}>{taskText(lang, "testMode")}</Text>
             <Switch value={draft.testMode === true} disabled={live && draft.testMode === true} onValueChange={(testMode) => setDraft({ ...draft, testMode })} trackColor={{ true: theme.accent, false: theme.line }} />
@@ -532,13 +564,6 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
           </View>
         </>
       )}
-      <Text style={styles.label}>{taskText(lang, "monitorDelay")}</Text>
-      <TextInput style={styles.input} value={draft.overrides?.monitorDelayMs == null ? "" : String(draft.overrides.monitorDelayMs)} keyboardType="number-pad" onChangeText={(value) => {
-        const overrides = { ...draft.overrides }
-        if (!value.trim()) delete overrides.monitorDelayMs
-        else overrides.monitorDelayMs = Math.round(Number(value))
-        setDraft({ ...draft, overrides })
-      }} placeholder={taskText(lang, "inherit")} placeholderTextColor={theme.muted} />
       <Text style={styles.label}>{taskText(lang, "retryDelay")}</Text>
       <TextInput style={styles.input} value={draft.overrides?.retryDelayMs == null ? "" : String(draft.overrides.retryDelayMs)} keyboardType="number-pad" onChangeText={(value) => {
         const overrides = { ...draft.overrides }

@@ -530,7 +530,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
             <div className="product-cell">
               <ProductVisual store={task.store} name={storeName(task.store)} sku={task.sku} imageUrl={task.imageUrl} />
               <div>
-                <div>{storeName(task.store)}{task.kind === "monitor" ? <span className="pill">MONITOR</span> : null}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
+                <div>{storeName(task.store)}<span className={`pill role ${task.kind === "monitor" ? "role-monitor" : "role-checkout"}`}>{taskText(lang, task.kind === "monitor" ? "roleBadgeMonitor" : "roleBadgeCheckout")}</span>{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
                 <div className="sku">{task.sku}</div>
                 {taskView === "compact" ? bindingCell(task, accounts, groups, lang).summary : null}
                 <div className="detail">{names.client.get(clientIdOf(task.clientId)) ?? clientText(lang, "me")}</div>
@@ -663,18 +663,32 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
   const accountClient = clientIdOf(accounts.find((account) => account.id === form.accountId)?.clientId)
   const profileChoices = form.accountId ? profiles.filter((profile) => clientIdOf(profile.clientId) === accountClient) : profiles
   const checkouts = tasks.filter((task) => task.kind !== "monitor" && task.id !== form.id)
+  const monitors = tasks.filter((task) => task.kind === "monitor" && task.store === form.store && task.id !== form.id)
   const modes: StartMode[] = ["manual", "scheduled", "monitor", "restock", "builtin"]
+  const inheritedDelay = settings ? String(resolveModule(form.store, moduleScope(settings), form.overrides).monitorDelayMs.value) : ""
+  function chooseKind(kind: TaskKind) {
+    if ((form.kind ?? "checkout") === kind) return
+    onChange({
+      ...form,
+      kind,
+      monitorOnly: kind === "monitor",
+      confirmPurchase: kind === "monitor" ? false : form.confirmPurchase,
+      startMode: kind === "monitor" ? (form.startMode === "scheduled" ? "scheduled" : "manual") : "builtin",
+      linkedMonitorId: kind === "monitor" ? null : form.linkedMonitorId ?? null
+    })
+  }
   return (
     <form className="card form-grid" onSubmit={onSubmit}>
-      <Field label={taskText(lang, "kind")}>
-        <Select value={form.kind ?? "checkout"} disabled={live} onChange={(event) => {
-          const kind = event.target.value as TaskKind
-          onChange({ ...form, kind, monitorOnly: kind === "monitor", confirmPurchase: kind === "monitor" ? false : form.confirmPurchase, startMode: kind === "monitor" ? "manual" : form.startMode ?? "builtin" })
-        }}>
-          <option value="monitor">{taskText(lang, "monitor")}</option>
-          <option value="checkout">{taskText(lang, "checkout")}</option>
-        </Select>
-      </Field>
+      <div className="span-2 role-switch" role="group" aria-label={taskText(lang, "roleTitle")}>
+        <span className="role-title">{taskText(lang, "roleTitle")}</span>
+        <div className="choices">
+          {(["monitor", "checkout"] as const).map((kind) => (
+            <button key={kind} type="button" aria-pressed={(form.kind ?? "checkout") === kind} disabled={live} onClick={() => chooseKind(kind)}>
+              {taskText(lang, kind)}
+            </button>
+          ))}
+        </div>
+      </div>
       <p className="span-2 hint">{monitor ? taskText(lang, "hintMonitor") : taskText(lang, "hintCheckout")} {live ? taskText(lang, "live") : ""}</p>
       <Field label={taskText(lang, "store")}>
         <Select value={form.store} disabled={live} onChange={(event) => {
@@ -698,6 +712,15 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
       </Field>
       {monitor ? (
         <>
+          <Field label={taskText(lang, "monitorDelay")} hint={taskText(lang, "inherit")}>
+            <TextInput inputMode="numeric" value={form.overrides?.monitorDelayMs ?? ""} placeholder={inheritedDelay} onChange={(event) => {
+              const overrides = { ...form.overrides }
+              const raw = event.target.value
+              if (!raw.trim()) delete overrides.monitorDelayMs
+              else overrides.monitorDelayMs = Math.round(Number(raw))
+              onChange({ ...form, overrides })
+            }} />
+          </Field>
           <Field label={clientText(lang, "filter")}>
             <Select value={form.clientId || ME_CLIENT_ID} disabled={live} onChange={(event) => onChange({ ...form, clientId: event.target.value })}>
               {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
@@ -766,10 +789,21 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
             <TextInput type="number" min={0} step="0.01" value={form.maxPrice ?? ""} onChange={(event) => onChange({ ...form, maxPrice: event.target.value === "" ? null : Number(event.target.value) })} />
           </Field>
           <Field label={taskText(lang, "startMode")}>
-            <Select value={form.startMode ?? "builtin"} disabled={live} onChange={(event) => onChange({ ...form, startMode: event.target.value as StartMode })}>
+            <Select value={form.startMode ?? "builtin"} disabled={live} onChange={(event) => {
+              const startMode = event.target.value as StartMode
+              onChange({ ...form, startMode, linkedMonitorId: startMode === "monitor" ? form.linkedMonitorId ?? null : null })
+            }}>
               {modes.map((mode) => <option key={mode} value={mode}>{taskText(lang, mode === "monitor" ? "monitorStart" : mode === "builtin" ? "builtin" : mode)}</option>)}
             </Select>
           </Field>
+          {form.startMode === "monitor" ? (
+            <Field className="span-2" label={taskText(lang, "linkMonitor")} hint={taskText(lang, "linkMonitorHint")}>
+              <Select value={form.linkedMonitorId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, linkedMonitorId: event.target.value || null })}>
+                <option value="">{taskText(lang, "noMonitor")}</option>
+                {monitors.map((task) => <option key={task.id} value={task.id}>{storeName(task.store)} · {task.sku || task.keywords || task.id}</option>)}
+              </Select>
+            </Field>
+          ) : null}
           <label className="check span-2">
             <input type="checkbox" checked={form.testMode === true} disabled={live && form.testMode === true} onChange={(event) => onChange({ ...form, testMode: event.target.checked })} />
             <span>{taskText(lang, "testMode")}</span>
@@ -832,9 +866,11 @@ function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings
       <h2>{moduleText(lang, "overrides")}</h2>
       <p>{moduleText(lang, "overrideHint")} {moduleText(lang, "rateLimitMs")}: {resolved.rateLimitMs.value} ms · {sourceLabel(lang, resolved.rateLimitMs.source)}. {moduleText(lang, "maxRetries")}: {resolved.maxRetries.value} · {sourceLabel(lang, resolved.maxRetries.source)}. {taskText(lang, "jitter")}: {form.jitterPct ?? settings.monitorJitterPct}% · {sourceLabel(lang, form.jitterPct === null || form.jitterPct === undefined ? "global" : "task")}.</p>
       <div className="form-grid">
-        <Field label={moduleText(lang, "monitorDelayMs")}>
-          <TextInput value={form.overrides?.monitorDelayMs ?? ""} placeholder={String(resolved.monitorDelayMs.value)} onChange={(event) => setNumber("monitorDelayMs", event.target.value)} />
-        </Field>
+        {form.kind === "monitor" ? null : (
+          <Field label={moduleText(lang, "monitorDelayMs")} hint={taskText(lang, "inherit")}>
+            <TextInput value={form.overrides?.monitorDelayMs ?? ""} placeholder={String(resolved.monitorDelayMs.value)} onChange={(event) => setNumber("monitorDelayMs", event.target.value)} />
+          </Field>
+        )}
         <Field label={moduleText(lang, "retryDelayMs")}>
           <TextInput value={form.overrides?.retryDelayMs ?? ""} placeholder={String(resolved.retryDelayMs.value)} onChange={(event) => setNumber("retryDelayMs", event.target.value)} />
         </Field>

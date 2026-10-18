@@ -2,7 +2,8 @@ import { useEffect, useState } from "react"
 import { healthText } from "../../../shared/checkout-health"
 import { consistencyText } from "../../../shared/consistency"
 import { dropOpsText } from "../../../shared/drop-ops"
-import { DEFAULT_SETTINGS, type LicenseView, type Settings, type SettingsPayload } from "../../../shared/types"
+import { DEFAULT_SETTINGS, type LicenseView, type Settings, type SettingsPayload, type UpdateStatus } from "../../../shared/types"
+import { updateStatusText } from "../../../shared/update-status"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { MailSettings } from "./MailSettings"
 import { applyTheme } from "../theme"
@@ -16,6 +17,7 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false)
   const [token, setToken] = useState("")
   const [hasToken, setHasToken] = useState(false)
+  const [update, setUpdate] = useState<UpdateStatus | null>(null)
   const [passphrase, setPassphrase] = useState("")
   const [backupToken, setBackupToken] = useState("")
   const [hasBackupToken, setHasBackupToken] = useState(false)
@@ -33,9 +35,10 @@ export function SettingsPage() {
         setForm(next.settings)
       })
       .catch((err) => setError(errorText(err)))
-    void unwrap(window.aio.updates.get()).then((status) => setHasToken(status.hasToken)).catch(() => undefined)
+    void unwrap(window.aio.updates.get()).then((status) => { setHasToken(status.hasToken); setUpdate(status) }).catch(() => undefined)
     void unwrap(window.aio.backup.saveToken({ action: "keep", token: "" })).then((status) => setHasBackupToken(status.hasToken)).catch(() => undefined)
     void unwrap(window.aio.license.get()).then(setLicense).catch(() => undefined)
+    return window.aio.updates.onEvent((status) => { setUpdate(status); setHasToken(status.hasToken) })
   }, [])
 
   async function save(event: React.FormEvent) {
@@ -446,7 +449,7 @@ export function SettingsPage() {
           .then(async (status) => {
             setHasToken(status.hasToken)
             setToken("")
-            if (status.hasToken) await unwrap(window.aio.updates.check())
+            if (status.hasToken) setUpdate(await unwrap(window.aio.updates.check()))
             setMessage(status.hasToken ? "GitHub token saved on this PC. Checking releases." : "GitHub token removed.")
           })
           .catch((err) => setError(errorText(err)))
@@ -454,14 +457,18 @@ export function SettingsPage() {
       }}>
         <div>
           <h2>Updates</h2>
-          <p className="hint">The GitHub repo is private, so electron-updater needs a personal access token that can read releases. The token stays on this PC and is not sent to the phone. Leave the field blank and save to remove it. A newer desktop build shows a prompt with the release notes. The phone shows when a newer APK is on that release.</p>
+          <p className="hint">Check for updates reads the public GitHub releases for jhoendy007-max/Tcg-aio, including prereleases and latest.yml. A token is optional. Save one only if the repo is private: a fine-grained personal access token with Contents: Read on that repo. The token stays on this PC and is not sent to the phone. Leave the field blank and save to remove it. Download and Restart and install call electron-updater. A development build can check, then explains that the installed Windows app is what downloads and restarts.</p>
+          {update ? <p className="hint" aria-live="polite">{updateStatusText(update)}</p> : null}
+          {update?.status === "downloading" ? <progress className="update-progress" value={update.percent ?? 0} max={100} /> : null}
         </div>
-        <Field label="GitHub token" hint={hasToken ? "A token is saved. Paste a new one to replace it." : "No token saved yet."}>
+        <Field label="GitHub token" hint={hasToken ? "A token is saved. Paste a new one to replace it." : "No token saved. A public repo does not need one."}>
           <TextInput type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="github_pat_…" />
         </Field>
         <div className="actions">
           <button className="primary" type="submit" disabled={busy}>{token ? "Save token" : "Remove token"}</button>
-          <button type="button" disabled={busy} onClick={() => void unwrap(window.aio.updates.check()).then(() => setMessage("Update check finished.")).catch((err) => setError(errorText(err)))}>Check for updates</button>
+          <button type="button" disabled={busy || update?.status === "checking" || update?.status === "downloading"} onClick={() => void unwrap(window.aio.updates.check()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update?.status === "checking" ? "Checking…" : "Check for updates"}</button>
+          {update?.status === "available" || update?.status === "downloading" ? <button type="button" disabled={busy || update.status === "downloading"} onClick={() => void unwrap(window.aio.updates.download()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update.status === "downloading" ? `Downloading ${Math.round(update.percent ?? 0)}%` : "Download"}</button> : null}
+          {update?.status === "downloaded" ? <button type="button" className="primary" disabled={busy} onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setError(errorText(err)))}>Restart and install</button> : null}
         </div>
       </form>
     </section>
