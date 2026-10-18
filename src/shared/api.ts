@@ -1,4 +1,5 @@
 import type { Client, ClientExport, ClientInput, ClientSummary, LedgerEntry } from "./clients"
+import type { CheckoutSubject, HealthIssue, HealthReport } from "./checkout-health"
 import { channels } from "./ipc"
 import type {
   AccountInput,
@@ -92,6 +93,11 @@ export interface AioApi {
     ledger: (clientId?: string) => Promise<Result<LedgerEntry[]>>
     markPaid: (clientId: string, ids: string[], paid: boolean) => Promise<Result<LedgerEntry[]>>
     csv: (clientId?: string) => Promise<Result<{ csv: string }>>
+  }
+  checkoutHealth: {
+    preview: (input: CheckoutSubject) => Promise<Result<HealthReport>>
+    client: (clientId: string) => Promise<Result<HealthReport>>
+    tasks: () => Promise<Result<Array<{ taskId: string; issues: HealthIssue[] }>>>
   }
   settings: {
     get: () => Promise<Result<SettingsPayload>>

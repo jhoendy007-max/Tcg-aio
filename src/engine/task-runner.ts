@@ -8,6 +8,7 @@ import { productImage } from "../shared/image"
 import { cleanImageUrl } from "./validate"
 import { postDiscord } from "./discord"
 import { clientCanStart, clientIdOf, clientSuccessNotice } from "../shared/clients"
+import { isCardDecline, issueText } from "../shared/checkout-health"
 import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../shared/module-settings"
 import { checkoutsToStart, triggerDecision } from "../shared/task-role"
 import { accountPartition } from "../shared/consistency"
@@ -57,6 +58,26 @@ export class TaskService {
     const testMode = options?.test === true || task.testMode === true || this.db.getSettings().testMode === true
     if (!testMode && !task.confirmPurchase && task.monitorOnly !== true && task.kind !== "monitor") {
       throw new Error("Confirm that this task may place a real shipping order before starting it.")
+    }
+    if (task.kind !== "monitor" && task.monitorOnly !== true) {
+      const report = this.db.assessTask(id)
+      const lang = this.db.getSettings().language === "es" ? "es" : "en"
+      if (report.blocked) {
+        const message = report.issues.filter((item) => item.level === "block").map((item) => issueText(lang, item)).join(" ")
+        void this.notify({
+          kind: "paused",
+          storeName: task.store,
+          sku: task.sku,
+          profileName: client?.name || "Checkout",
+          detail: message
+        }).catch(() => undefined)
+        throw new Error(message)
+      }
+      if (report.issues.length) {
+        this.db.patchTask(id, {
+          log: line("warn", report.issues.map((item) => issueText(lang, item)).join(" ").slice(0, 240))
+        })
+      }
     }
     const controller = new AbortController()
     this.controllers.set(id, controller)
@@ -471,7 +492,7 @@ export class TaskService {
           }
           return
         }
-        await this.finishResult(update, result, { store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4, clientId: task.clientId }, module.displayName, profile.name)
+        await this.finishResult(update, result, { id, store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4, clientId: task.clientId }, module.displayName, profile.name)
         return
       }
     } catch (err) {
@@ -656,7 +677,7 @@ export class TaskService {
   private async finishResult(
     update: (patch: Parameters<Database["patchTask"]>[1]) => void,
     result: StoreRunResult,
-    task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string; clientId?: string },
+    task: { id: string; store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string; clientId?: string },
     storeNameText: string,
     profileNameText: string
   ): Promise<void> {
@@ -750,14 +771,21 @@ export class TaskService {
       finish(update, "stopped", "Stopped", "info")
       return
     }
-    finish(update, "failed", result.reason, "error")
-    this.remember(task, "failure", profileNameText, result.reason)
+    const declined = Boolean(task.last4) && isCardDecline(result.reason)
+    const detail = declined
+      ? issueText(this.db.getSettings().language === "es" ? "es" : "en", { code: "decline-task", level: "block", vars: { last4: task.last4 ?? "" } })
+      : result.reason
+    if (declined && task.last4) {
+      this.db.recordDecline({ taskId: task.id, last4: task.last4, store: task.store, sku: task.sku })
+    }
+    finish(update, "failed", detail, "error")
+    this.remember(task, "failure", profileNameText, detail)
     await this.safeNotify(update, {
       kind: "failure",
       storeName: storeNameText,
       sku,
       profileName: profileNameText,
-      detail: result.reason
+      detail
     })
   }
 

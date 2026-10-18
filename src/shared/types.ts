@@ -402,6 +402,14 @@ export interface Settings {
   cardDailyOrders: number
   /** Lines like target:1. Max quantity of one SKU per account per day. */
   storePurchaseLimits: string
+  /** When on, checkout warnings stop the task. A same-task card decline always stops it. */
+  checkoutHealthBlock: boolean
+  /** 0 means no per-client cap for one SKU at one store. */
+  clientSkuLimit: number
+  /** Lines like target:3. Blank uses 3 orders per shipping address at each store. */
+  addressOrderLimits: string
+  /** Minutes a declined card stays flagged for other tasks. */
+  declineHoldMin: number
   /** Local time HH:MM. Blank turns the daily report off. */
   healthReportTime: string
   /** IANA timezone for budgets and the daily report. Blank uses UTC. */
@@ -472,6 +480,10 @@ export const DEFAULT_SETTINGS: Settings = {
   cardDailySpend: 0,
   cardDailyOrders: 0,
   storePurchaseLimits: "",
+  checkoutHealthBlock: false,
+  clientSkuLimit: 0,
+  addressOrderLimits: "",
+  declineHoldMin: 1440,
   healthReportTime: "",
   healthReportZone: "",
   theme: "dark",

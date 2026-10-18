@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { issueText, type HealthIssue } from "../../../shared/checkout-health"
 import { clientIdOf, clientText, ME_CLIENT_ID, type Client } from "../../../shared/clients"
 import { consistencyText, effectiveBinding } from "../../../shared/consistency"
 import { dropOpsText } from "../../../shared/drop-ops"
@@ -64,16 +65,18 @@ export function TasksPage() {
   const [clients, setClients] = useState<Client[]>([])
   const [grouped, setGrouped] = useState(true)
   const [dragId, setDragId] = useState<string | null>(null)
+  const [checkoutIssues, setCheckoutIssues] = useState<Map<string, HealthIssue[]>>(new Map())
 
   async function reload() {
-    const [nextTasks, nextProfiles, nextAccounts, nextGroups, nextStores, nextClients, settings] = await Promise.all([
+    const [nextTasks, nextProfiles, nextAccounts, nextGroups, nextStores, nextClients, settings, healthRows] = await Promise.all([
       unwrap(window.aio.tasks.list()),
       unwrap(window.aio.profiles.list()),
       unwrap(window.aio.accounts.list()),
       unwrap(window.aio.proxies.list()),
       unwrap(window.aio.stores.list()),
       unwrap(window.aio.clients.list()),
-      unwrap(window.aio.settings.get())
+      unwrap(window.aio.settings.get()),
+      unwrap(window.aio.checkoutHealth.tasks())
     ])
     setGlobalTest(settings.settings.testMode)
     setSettings(settings.settings)
@@ -83,6 +86,7 @@ export function TasksPage() {
     setGroups(nextGroups)
     setStores(nextStores)
     setClients(nextClients)
+    setCheckoutIssues(new Map(healthRows.map((row) => [row.taskId, row.issues])))
     setSelectedId((current) => current ?? nextTasks[0]?.id ?? null)
   }
 
@@ -101,6 +105,9 @@ export function TasksPage() {
         if (index >= 0) next[index] = event.task
         return next.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || b.createdAt - a.createdAt)
       })
+      void unwrap(window.aio.checkoutHealth.tasks()).then((rows) => {
+        setCheckoutIssues(new Map(rows.map((row) => [row.taskId, row.issues])))
+      }).catch(() => undefined)
     })
     const stopChallenge = window.aio.challenge.onEvent(setChallenge)
     return () => {
@@ -425,6 +432,7 @@ export function TasksPage() {
                 accounts={accounts}
                 groups={groups}
                 lang={lang}
+                checkoutIssues={checkoutIssues}
                 onSelect={setSelectedId}
                 onDrag={setDragId}
                 onDrop={(target) => { if (dragId) place(dragId, target, false); setDragId(null) }}
@@ -479,7 +487,7 @@ export function TasksPage() {
   )
 }
 
-function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, accounts, groups, lang, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
+function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, accounts, groups, lang, checkoutIssues, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
   section: { label: string; rows: PublicTask[] }
   grouped: boolean
   taskView: "compact" | "detailed"
@@ -490,6 +498,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
   accounts: PublicAccount[]
   groups: ProxyGroup[]
   lang: "en" | "es"
+  checkoutIssues: Map<string, HealthIssue[]>
   onSelect: (id: string) => void
   onDrag: (id: string | null) => void
   onDrop: (id: string) => void
@@ -536,6 +545,9 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
           <td>
             <span className={`pill ${task.status}`}>{statusLabel(task.status, lang)}</span>
             {task.detail ? <div className="detail">{task.detail}</div> : null}
+            {(checkoutIssues.get(task.id) ?? []).slice(0, 2).map((item) => (
+              <div key={item.code} className="detail">{issueText(lang, item)}</div>
+            ))}
           </td>
           <td className="row-actions">
             {isActiveStatus(task.status) ? (

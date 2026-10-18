@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { issueText, type HealthReport } from "../../../shared/checkout-health"
 import { clientIdOf, clientText, ME_CLIENT_ID, proxyGroupTakenBy, type Client } from "../../../shared/clients"
 import { planExtraCheckout, planQuickPair } from "../../../shared/quick-setup"
 import { taskText } from "../../../shared/task-role"
@@ -52,6 +53,7 @@ export function QuickSetup({
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const [report, setReport] = useState<HealthReport | null>(null)
 
   const storeAccounts = useMemo(
     () => accounts.filter((account) => account.store === store && clientIdOf(account.clientId) === clientId),
@@ -73,6 +75,24 @@ export function QuickSetup({
   const selectedStore = stores.find((item) => item.id === store)
   const made = tasks.find((task) => task.id === monitorId && task.kind === "monitor") ?? null
   const clientOptions = clients.length ? clients : [{ id: ME_CLIENT_ID, name: clientText(lang, "me") }]
+  const blocked = report?.blocked === true
+
+  useEffect(() => {
+    let cancel = false
+    void unwrap(window.aio.checkoutHealth.preview({
+      store,
+      sku,
+      quantity,
+      profileId: profileId || undefined,
+      accountId: newAccount ? undefined : accountId || undefined,
+      clientId
+    })).then((next) => {
+      if (!cancel) setReport(next)
+    }).catch(() => {
+      if (!cancel) setReport(null)
+    })
+    return () => { cancel = true }
+  }, [store, sku, quantity, profileId, accountId, clientId, newAccount])
 
   function chooseClient(next: string) {
     setClientId(next)
@@ -122,6 +142,17 @@ export function QuickSetup({
       const profile = profiles.find((item) => item.id === profileId)
       if (account && clientIdOf(account.clientId) !== clientId) throw new Error(taskText(lang, "quickSameClient"))
       if (profile && clientIdOf(profile.clientId) !== clientId) throw new Error(taskText(lang, "quickSameClient"))
+      const preview = await unwrap(window.aio.checkoutHealth.preview({
+        store,
+        sku,
+        quantity,
+        profileId: profileId || undefined,
+        accountId: chosen,
+        clientId
+      }))
+      if (preview.blocked) {
+        throw new Error(preview.issues.filter((item) => item.level === "block").map((item) => issueText(lang, item)).join(" "))
+      }
       const pair = planQuickPair({
         store,
         sku,
@@ -164,6 +195,17 @@ export function QuickSetup({
       if (!profile || clientIdOf(profile.clientId) !== owner || !account || clientIdOf(account.clientId) !== owner) {
         throw new Error(taskText(lang, "quickSameClient"))
       }
+      const preview = await unwrap(window.aio.checkoutHealth.preview({
+        store: made.store,
+        sku: made.sku,
+        quantity,
+        profileId,
+        accountId: extraAccountId,
+        clientId: owner
+      }))
+      if (preview.blocked) {
+        throw new Error(preview.issues.filter((item) => item.level === "block").map((item) => issueText(lang, item)).join(" "))
+      }
       const extra = planExtraCheckout({
         id: made.id,
         store: made.store,
@@ -203,6 +245,9 @@ export function QuickSetup({
       </div>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {message ? <Banner tone="info">{message}</Banner> : null}
+      {report?.issues.length ? report.issues.map((item) => (
+        <Banner key={`${item.code}:${JSON.stringify(item.vars ?? {})}`} tone={item.level === "block" ? "error" : "info"}>{issueText(lang, item)}</Banner>
+      )) : null}
       <Field label={clientText(lang, "filter")}>
         <Select value={clientId} disabled={Boolean(made)} onChange={(event) => chooseClient(event.target.value)} aria-label={clientText(lang, "filter")}>
           {clientOptions.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
@@ -272,7 +317,7 @@ export function QuickSetup({
       </label>
       {!clientProfiles.length ? <p className="span-2 hint">{taskText(lang, "quickNeedProfile")} <a href="#profiles">{taskText(lang, "quickProfiles")}</a></p> : null}
       <div className="actions span-2">
-        <button className="primary" type="submit" disabled={busy || !clientProfiles.length}>{taskText(lang, "quickCreate")}</button>
+        <button className="primary" type="submit" disabled={busy || !clientProfiles.length || blocked}>{taskText(lang, "quickCreate")}</button>
       </div>
       {made ? (
         <div className="span-2 actions">

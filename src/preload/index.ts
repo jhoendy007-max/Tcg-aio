@@ -52,6 +52,11 @@ const api: AioApi = {
     markPaid: (clientId, ids, paid) => ipcRenderer.invoke(channels.clientsMarkPaid, { clientId, ids, paid }),
     csv: (clientId) => ipcRenderer.invoke(channels.clientsCsv, clientId)
   },
+  checkoutHealth: {
+    preview: (input) => ipcRenderer.invoke(channels.checkoutHealthPreview, input),
+    client: (clientId) => ipcRenderer.invoke(channels.checkoutHealthClient, clientId),
+    tasks: () => ipcRenderer.invoke(channels.checkoutHealthTasks)
+  },
   settings: {
     get: () => ipcRenderer.invoke(channels.settingsGet),
     save: (input) => ipcRenderer.invoke(channels.settingsSave, input),

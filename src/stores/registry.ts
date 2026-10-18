@@ -33,6 +33,15 @@ export function createRegistry(): Map<StoreId, StoreModule> {
   return modules
 }
 
+export function moduleAddressCaps(modules: Iterable<StoreModule>): Partial<Record<StoreId, number>> {
+  const caps: Partial<Record<StoreId, number>> = {}
+  for (const module of modules) {
+    const cap = module.addressOrderCap
+    if (typeof cap === "number" && Number.isFinite(cap) && cap >= 1 && cap < 3) caps[module.id] = Math.round(cap)
+  }
+  return caps
+}
+
 export function listStores(registry: Map<StoreId, StoreModule>): StoreInfo[] {
   return [...registry.values()].map((module) => ({
     id: module.id,

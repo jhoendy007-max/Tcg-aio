@@ -84,5 +84,7 @@ export interface StoreModule {
   implemented: boolean
   /** The module polls its own waiting room. The runner does not poll those GETs again. */
   handlesQueue?: boolean
+  /** Orders allowed to one shipping address. Only a value under 3 is stricter than the default. */
+  addressOrderCap?: number
   run(ctx: StoreRunContext): Promise<StoreRunResult>
 }

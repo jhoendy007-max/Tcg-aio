@@ -12,6 +12,8 @@ import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
 import { accountPartition, sessionFreshness } from "../shared/consistency"
 import { clientIdOf, clientSummary, feeOwed, ledgerCsv as ledgerCsvText, ME_CLIENT_ID, meClient, proxyGroupTakenBy, roundMoney, type Client, type ClientExport, type ClientInput, type ClientSummary, type LedgerEntry } from "../shared/clients"
+import { assessCheckout, assessClient, startOfLocalDay, type CardDecline, type CheckoutSubject, type HealthIssue, type HealthReport, type HealthWorld } from "../shared/checkout-health"
+import { activeDropStart } from "./limits"
 import { assertDiscordWebhook } from "./discord"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
@@ -200,6 +202,7 @@ interface DbFile {
   vault?: VaultLink[]
   clients?: Client[]
   ledger?: LedgerEntry[]
+  declines?: CardDecline[]
 }
 
 interface MailboxFile {
@@ -227,6 +230,7 @@ interface MailboxFile {
 export class Database {
   private data: DbFile = emptyDb()
   private interrupted: string[] = []
+  private moduleAddressCaps: HealthWorld["moduleAddressCaps"] = {}
 
   constructor(
     private readonly file: string,
@@ -270,7 +274,8 @@ export class Database {
       mailboxes: loadMailboxes(parsed.mailboxes, parsed.imap),
       vault: Array.isArray(parsed.vault) ? parsed.vault : [],
       clients: normalizeClients(parsed.clients),
-      ledger: normalizeLedger(parsed.ledger)
+      ledger: normalizeLedger(parsed.ledger),
+      declines: normalizeDeclines(parsed.declines)
     }
     const migratedMail = !Array.isArray(parsed.mailboxes) && (this.data.mailboxes?.length ?? 0) > 0
     const migratedPii = (parsed.profiles ?? []).some((profile) => !profile.piiSecret || !profile.clientId)
@@ -1120,6 +1125,135 @@ export class Database {
     return { ...record }
   }
 
+  healthWorld(): HealthWorld {
+    const settings = this.getSettings()
+    return {
+      profiles: this.listProfiles().map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        phone: profile.phone,
+        cardName: profile.cardName,
+        last4: profile.last4,
+        clientId: profile.clientId,
+        shipping: profile.shipping,
+        billing: profile.billing
+      })),
+      accounts: this.listAccounts().map((account) => ({
+        id: account.id,
+        clientId: account.clientId,
+        hasSession: account.hasSession,
+        sessionState: account.sessionState,
+        lastWarmAt: account.lastWarmAt
+      })),
+      tasks: this.listTasks().map((task) => ({
+        id: task.id,
+        store: task.store,
+        sku: task.sku,
+        quantity: task.quantity,
+        clientId: task.clientId,
+        profileId: task.profileId,
+        accountId: task.accountId,
+        kind: task.kind,
+        monitorOnly: task.monitorOnly,
+        status: task.status
+      })),
+      checkouts: this.listCheckouts().map((record) => ({
+        outcome: record.outcome,
+        store: record.store,
+        sku: record.sku,
+        quantity: record.quantity,
+        clientId: record.clientId,
+        profileId: record.profileId,
+        last4: record.last4,
+        at: record.at
+      })),
+      declines: (this.data.declines ?? []).map((row) => ({ ...row })),
+      now: Date.now(),
+      freshMin: settings.sessionWarmupMin,
+      block: settings.checkoutHealthBlock === true,
+      skuLimit: settings.clientSkuLimit,
+      declineHoldMin: settings.declineHoldMin,
+      addressOrderLimits: settings.addressOrderLimits,
+      addressWindowStart: activeDropStart(this.listSchedules(), Date.now()) ?? startOfLocalDay(Date.now(), settings.healthReportZone),
+      moduleAddressCaps: { ...this.moduleAddressCaps }
+    }
+  }
+
+  setModuleAddressCaps(caps: HealthWorld["moduleAddressCaps"]): void {
+    this.moduleAddressCaps = { ...caps }
+  }
+
+  assessTask(id: string): HealthReport {
+    const task = this.requireTask(id)
+    if (task.kind === "monitor" || task.monitorOnly === true) return { issues: [], blocked: false }
+    return assessCheckout(this.healthWorld(), {
+      taskId: task.id,
+      store: task.store,
+      sku: task.sku,
+      quantity: task.quantity,
+      profileId: task.profileId,
+      accountId: task.accountId,
+      clientId: task.clientId
+    })
+  }
+
+  previewCheckoutHealth(input: CheckoutSubject): HealthReport {
+    const store = assertStore(input.store)
+    const quantity = Math.round(Number(input.quantity))
+    const clamped = Number.isInteger(quantity) && quantity >= 1 && quantity <= 12 ? quantity : 1
+    return assessCheckout(this.healthWorld(), {
+      store,
+      sku: typeof input.sku === "string" ? input.sku : "",
+      quantity: clamped,
+      profileId: input.profileId || undefined,
+      accountId: input.accountId || undefined,
+      clientId: input.clientId || undefined,
+      taskId: input.taskId || undefined
+    })
+  }
+
+  clientCheckoutHealth(clientId: string): HealthReport {
+    this.requireClient(clientIdOf(clientId))
+    return assessClient(this.healthWorld(), clientId)
+  }
+
+  listTaskHealth(): Array<{ taskId: string; issues: HealthIssue[] }> {
+    const world = this.healthWorld()
+    const rows: Array<{ taskId: string; issues: HealthIssue[] }> = []
+    for (const task of world.tasks) {
+      if (task.kind === "monitor" || task.monitorOnly) continue
+      const report = assessCheckout(world, {
+        taskId: task.id,
+        store: task.store,
+        sku: task.sku,
+        quantity: task.quantity,
+        profileId: task.profileId,
+        accountId: task.accountId,
+        clientId: task.clientId
+      })
+      if (report.issues.length) rows.push({ taskId: task.id, issues: report.issues })
+    }
+    return rows
+  }
+
+  recordDecline(input: { taskId: string; last4: string; store: StoreId; sku: string }): CardDecline | null {
+    const last4 = /^\d{4}$/.test(input.last4) ? input.last4 : ""
+    if (!last4 || !input.taskId) return null
+    const row: CardDecline = {
+      taskId: input.taskId.slice(0, 80),
+      last4,
+      at: Date.now(),
+      store: assertStore(input.store),
+      sku: (input.sku || "").slice(0, 180)
+    }
+    const rest = (this.data.declines ?? []).filter((item) => !(item.taskId === row.taskId && item.last4 === row.last4))
+    rest.unshift(row)
+    this.data.declines = rest.slice(0, 200)
+    this.flush()
+    return { ...row }
+  }
+
   listClients(): Client[] {
     return (this.data.clients ?? []).map((client) => ({ ...client }))
   }
@@ -1179,7 +1313,9 @@ export class Database {
     const profileIds = new Set(this.data.profiles.filter((profile) => clientIdOf(profile.clientId) === client.id).map((profile) => profile.id))
     const active = this.data.tasks.some((task) => isActiveStatus(task.status) && (clientIdOf(task.clientId) === client.id || (task.accountId ? accountSet.has(task.accountId) : false)))
     if (active) throw new AppError("Stop this client's tasks before deleting their data.")
-    this.data.tasks = this.data.tasks.filter((task) => clientIdOf(task.clientId) !== client.id && !(task.accountId && accountSet.has(task.accountId)) && !(task.profileId && profileIds.has(task.profileId)))
+    const removedTasks = new Set(this.data.tasks.filter((task) => clientIdOf(task.clientId) === client.id || (task.accountId && accountSet.has(task.accountId)) || (task.profileId && profileIds.has(task.profileId))).map((task) => task.id))
+    this.data.tasks = this.data.tasks.filter((task) => !removedTasks.has(task.id))
+    this.data.declines = (this.data.declines ?? []).filter((row) => !removedTasks.has(row.taskId))
     this.data.profiles = this.data.profiles.filter((profile) => !profileIds.has(profile.id))
     this.data.accounts = this.data.accounts.filter((account) => !accountSet.has(account.id))
     this.data.ledger = (this.data.ledger ?? []).filter((row) => row.clientId !== client.id)
@@ -2576,6 +2712,7 @@ function emptyDb(): DbFile {
     vault: [],
     clients: [meClient()],
     ledger: [],
+    declines: [],
     updates: emptyUpdates()
   }
 }
@@ -2758,6 +2895,26 @@ function cleanStoredClient(raw: Partial<Client> | undefined): Client | null {
     webhook: typeof raw.webhook === "string" ? raw.webhook.slice(0, 400) : "",
     createdAt: typeof raw.createdAt === "number" ? raw.createdAt : 0
   }
+}
+
+function normalizeDeclines(value: CardDecline[] | undefined): CardDecline[] {
+  if (!Array.isArray(value)) return []
+  const rows: CardDecline[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue
+    const store = typeof raw.store === "string" && (STORE_IDS as readonly string[]).includes(raw.store) ? raw.store as StoreId : null
+    const last4 = typeof raw.last4 === "string" && /^\d{4}$/.test(raw.last4) ? raw.last4 : ""
+    if (!store || !last4 || typeof raw.taskId !== "string" || !raw.taskId) continue
+    rows.push({
+      taskId: raw.taskId.slice(0, 80),
+      last4,
+      at: typeof raw.at === "number" ? raw.at : Date.now(),
+      store,
+      sku: typeof raw.sku === "string" ? raw.sku.slice(0, 180) : ""
+    })
+    if (rows.length >= 200) break
+  }
+  return rows
 }
 
 function normalizeLedger(value: LedgerEntry[] | undefined): LedgerEntry[] {

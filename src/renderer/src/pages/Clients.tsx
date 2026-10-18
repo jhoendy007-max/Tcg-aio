@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { healthText, issueText, type HealthReport } from "../../../shared/checkout-health"
 import { clientText, ME_CLIENT_ID, type Client, type ClientInput, type ClientSummary, type LedgerEntry } from "../../../shared/clients"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
@@ -24,6 +25,7 @@ export function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([])
   const [summaries, setSummaries] = useState<ClientSummary[]>([])
   const [ledger, setLedger] = useState<LedgerEntry[]>([])
+  const [health, setHealth] = useState<HealthReport | null>(null)
   const [selectedId, setSelectedId] = useState(ME_CLIENT_ID)
   const [form, setForm] = useState<ClientInput | null>(null)
   const [lang, setLang] = useState<"en" | "es">("en")
@@ -46,6 +48,7 @@ export function ClientsPage() {
     const id = nextClients.some((client) => client.id === nextId) ? nextId : nextClients[0]?.id ?? ME_CLIENT_ID
     setSelectedId(id)
     setLedger(await unwrap(window.aio.clients.ledger(id)))
+    setHealth(await unwrap(window.aio.checkoutHealth.client(id)))
   }
 
   useEffect(() => {
@@ -57,6 +60,7 @@ export function ClientsPage() {
     setError("")
     try {
       setLedger(await unwrap(window.aio.clients.ledger(id)))
+      setHealth(await unwrap(window.aio.checkoutHealth.client(id)))
     } catch (err) {
       setError(errorText(err))
     }
@@ -190,6 +194,14 @@ export function ClientsPage() {
           </tbody>
         </table>
       </div>
+      {selected ? (
+        <div className="card stack">
+          <h2>{healthText(lang, "title")}</h2>
+          {health && health.issues.length ? health.issues.map((item) => (
+            <Banner key={`${item.code}:${JSON.stringify(item.vars ?? {})}`} tone={item.level === "block" ? "error" : "info"}>{issueText(lang, item)}</Banner>
+          )) : <p className="hint">{healthText(lang, "clear")}</p>}
+        </div>
+      ) : null}
       {selected ? (
         <div className="card stack">
           <header className="page-head">

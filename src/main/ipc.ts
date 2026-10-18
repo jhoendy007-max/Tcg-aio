@@ -122,6 +122,9 @@ export function registerIpc(
   handle(channels.clientsLedger, (clientId?: string) => db.listLedger(clientId))
   handle(channels.clientsMarkPaid, (input: { clientId: string; ids: string[]; paid: boolean }) => db.markLedgerPaid(input.clientId, input.ids ?? [], input.paid === true))
   handle(channels.clientsCsv, (clientId?: string) => ({ csv: db.ledgerExport(clientId) }))
+  handle(channels.checkoutHealthPreview, (input) => db.previewCheckoutHealth(input))
+  handle(channels.checkoutHealthClient, (clientId: string) => db.clientCheckoutHealth(clientId))
+  handle(channels.checkoutHealthTasks, () => db.listTaskHealth())
   handle(channels.sessionOpen, async (id: string) => {
     await sessions.open(id)
     return { opened: true as const }

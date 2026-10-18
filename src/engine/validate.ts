@@ -143,6 +143,10 @@ export function cleanSettings(input: Settings): Settings {
     cardDailySpend: cleanMoney(input.cardDailySpend, "Card daily spend"),
     cardDailyOrders: cleanCount(input.cardDailyOrders, "Card daily orders"),
     storePurchaseLimits: cleanStoreLimits(input.storePurchaseLimits ?? ""),
+    checkoutHealthBlock: input.checkoutHealthBlock === true,
+    clientSkuLimit: cleanCount(input.clientSkuLimit ?? 0, "Client SKU limit"),
+    addressOrderLimits: cleanStoreLimits(input.addressOrderLimits ?? "", "Address order limits use lines like target:3."),
+    declineHoldMin: cleanRange(input.declineHoldMin ?? DEFAULT_SETTINGS.declineHoldMin, 15, 10080, "Decline hold"),
     healthReportTime: cleanClock(input.healthReportTime ?? ""),
     healthReportZone: cleanZone(input.healthReportZone ?? ""),
     theme: input.theme === "light" ? "light" : "dark",
@@ -232,14 +236,14 @@ function cleanZone(value: string): string {
   return zone
 }
 
-function cleanStoreLimits(value: string): string {
+function cleanStoreLimits(value: string, message = "Store purchase limits use lines like target:1."): string {
   const lines: string[] = []
   for (const raw of value.split(/\n+/)) {
     const line = raw.trim()
     if (!line) continue
     const match = /^([a-z0-9-]+)\s*[:=]\s*(\d+)$/i.exec(line)
     if (!match || !isStoreId(match[1]) || Number(match[2]) < 1 || Number(match[2]) > 99) {
-      throw new AppError("Store purchase limits use lines like target:1.")
+      throw new AppError(message)
     }
     lines.push(`${match[1].toLowerCase()}:${Number(match[2])}`)
   }
