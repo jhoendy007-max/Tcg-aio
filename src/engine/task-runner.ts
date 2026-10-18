@@ -10,6 +10,7 @@ import { postDiscord } from "./discord"
 import { clientCanStart, clientIdOf, clientSuccessNotice } from "../shared/clients"
 import { isCardDecline, issueText } from "../shared/checkout-health"
 import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../shared/module-settings"
+import { overridesWithStoreRole } from "../shared/store-defaults"
 import { checkoutsToStart, triggerDecision } from "../shared/task-role"
 import { accountPartition } from "../shared/consistency"
 import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
@@ -255,7 +256,8 @@ export class TaskService {
         }
       }
       const loaded = this.db.getSettings()
-      const pace = resolvedValues(resolveModule(task.store, moduleScope(loaded), task.overrides))
+      const role = task.kind === "monitor" ? "monitor" : "checkout"
+      const pace = resolvedValues(resolveModule(task.store, moduleScope(loaded), overridesWithStoreRole(task.store, role, loaded.storeRoles, task.overrides)))
       const settings = tuneSettings(loaded, task.store, pace)
       const jitterPct = typeof task.jitterPct === "number" ? task.jitterPct : loaded.monitorJitterPct
       const http = this.polite.wrap(task.store, monitorProxy?.id, this.http, (proxyId, status) => {
@@ -856,7 +858,8 @@ export class TaskService {
   private refreshLive(id: string, settings: Settings, pace: ModulePace, ctx: { checkoutDelayMs?: number }): PublicTask {
     const fresh = this.db.getTask(id)
     const loaded = this.db.getSettings()
-    const paceNow = resolvedValues(resolveModule(fresh.store, moduleScope(loaded), fresh.overrides))
+    const roleNow = fresh.kind === "monitor" ? "monitor" : "checkout"
+    const paceNow = resolvedValues(resolveModule(fresh.store, moduleScope(loaded), overridesWithStoreRole(fresh.store, roleNow, loaded.storeRoles, fresh.overrides)))
     const tuned = tuneSettings(loaded, fresh.store, paceNow)
     if (typeof fresh.jitterPct === "number") tuned.monitorJitterPct = fresh.jitterPct
     Object.assign(settings, tuned)

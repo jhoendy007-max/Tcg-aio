@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, session, shell } from "electron"
+import { app, BrowserWindow, safeStorage, screen, session, shell } from "electron"
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
@@ -19,6 +19,7 @@ import { PhoneServer } from "../phone/server"
 import { createRegistry, moduleAddressCaps } from "../stores/registry"
 import { warmupDue } from "../engine/session-care"
 import { moduleScope, resolveModule } from "../shared/module-settings"
+import { chooseWindowFrame, type Frame } from "../shared/window-frame"
 import { storeName } from "../shared/stores"
 import { createChallengeController } from "./challenge-window"
 import { createSessionBrowser, type SessionBrowser } from "./session-window"
@@ -56,14 +57,35 @@ function createCipher(): Cipher {
   return createAesCipher(app.getPath("userData"))
 }
 
+function frameFile(): string {
+  return join(app.getPath("userData"), "window-frame.json")
+}
+
+function readSavedFrame(): Frame | null {
+  try {
+    const parsed = JSON.parse(readFileSync(frameFile(), "utf8")) as Frame
+    if (!parsed || typeof parsed.width !== "number" || typeof parsed.height !== "number") return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
 function createWindow(): void {
+  const area = screen.getPrimaryDisplay().workArea
+  const choice = chooseWindowFrame(
+    { x: area.x, y: area.y, width: area.width, height: area.height },
+    readSavedFrame()
+  )
   window = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    minWidth: 980,
-    minHeight: 680,
+    x: choice.bounds.x,
+    y: choice.bounds.y,
+    width: choice.bounds.width,
+    height: choice.bounds.height,
+    minWidth: 1024,
+    minHeight: 640,
     show: false,
-    backgroundColor: "#101114",
+    backgroundColor: "#0b0d12",
     title: "TCGAIO",
     autoHideMenuBar: true,
     webPreferences: {
@@ -73,6 +95,19 @@ function createWindow(): void {
       sandbox: true
     }
   })
+  if (choice.maximize) window.maximize()
+  let frameTimer: ReturnType<typeof setTimeout> | null = null
+  const remember = () => {
+    if (!window || window.isDestroyed()) return
+    if (frameTimer) clearTimeout(frameTimer)
+    frameTimer = setTimeout(() => {
+      if (!window || window.isDestroyed() || window.isMaximized()) return
+      const bounds = window.getBounds()
+      try { writeFileSync(frameFile(), JSON.stringify(bounds)) } catch { /* the next launch uses the display size */ }
+    }, 400)
+  }
+  window.on("resize", remember)
+  window.on("move", remember)
   window.once("ready-to-show", () => window?.show())
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
   window.webContents.on("will-navigate", (event) => event.preventDefault())

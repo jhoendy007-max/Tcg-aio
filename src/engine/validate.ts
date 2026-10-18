@@ -1,5 +1,6 @@
 import { digitsOnly, expiryInFuture, last4, luhnOk, normalizeExp } from "../shared/card"
 import { cleanModules } from "../shared/module-settings"
+import { cleanStoreRoles } from "../shared/store-defaults"
 import { AppError } from "../shared/errors"
 import { isStoreId } from "../shared/stores"
 import { assertBackupUrl } from "./backup"
@@ -163,7 +164,8 @@ export function cleanSettings(input: Settings): Settings {
     licenseServerUrl: assertLicenseUrl(input.licenseServerUrl ?? ""),
     licenseRequired: input.licenseRequired === true,
     licensePublicKey: cleanPublicKey(input.licensePublicKey),
-    modules: cleanModules(input.modules)
+    modules: cleanModules(input.modules),
+    storeRoles: cleanStoreRoles(input.storeRoles)
   }
 }
 
