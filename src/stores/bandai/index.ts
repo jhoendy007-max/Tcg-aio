@@ -3,6 +3,7 @@ import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engin
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import type { SessionCookies } from "../../shared/types"
+import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
@@ -20,7 +21,6 @@ import {
   type StockReading
 } from "./parse"
 
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const ORIGIN = "https://p-bandai.com"
 
 export const BANDAI_PAUSE =
@@ -295,7 +295,7 @@ function apiHeaders(jar: CookieJar, referer: string, write = false): Record<stri
     "x-requested-with": "XMLHttpRequest",
     origin: ORIGIN,
     referer,
-    "user-agent": USER_AGENT,
+    "user-agent": chromeUserAgent(),
     cookie: jar.header()
   }
   if (write) headers["content-type"] = "application/json"

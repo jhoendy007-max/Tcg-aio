@@ -8,6 +8,7 @@ import type { SessionBrowser } from "./session-window"
 import type { UpdateController } from "./auto-update"
 import { parseBulkTasks } from "../engine/bulk"
 import { defaultHttp } from "../engine/http"
+import { chromiumHttp } from "./chromium-http"
 import { lookupResale } from "../engine/resale"
 import { inventoryCsv, inventoryReport } from "../engine/inventory"
 import { getBackup, putBackup } from "../engine/backup"
@@ -76,7 +77,7 @@ export function registerIpc(
   })
   handle(channels.healthCheck, async (proxyGroupId: string | null) => {
     const proxies = proxyGroupId ? db.getProxyGroup(proxyGroupId).proxies : []
-    return db.recordHealth(await checkStoreHealth(defaultHttp, proxies), proxies)
+    return db.recordHealth(await checkStoreHealth(chromiumHttp, proxies), proxies)
   })
   handle(channels.tasksStop, (id: string) => {
     runner.stop(id)

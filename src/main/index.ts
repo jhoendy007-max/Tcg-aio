@@ -6,6 +6,7 @@ import { Database } from "../engine/database"
 import { AlertService, relayRestockUrl as relayUrl } from "../engine/alerts"
 import { warmTaskMonitors } from "../engine/bench"
 import { defaultHttp } from "../engine/http"
+import { chromiumHttp } from "./chromium-http"
 import { refreshStoreSession } from "../engine/store-browser"
 import { postDiscord, postGroupDiscord } from "../engine/discord"
 import { ChallengeGate } from "../engine/challenge-gate"
@@ -107,7 +108,7 @@ if (gotLock) void app.whenReady().then(async () => {
     current: () => challenge.current()
   }, {
     open: (id) => sessions!.open(id)
-  }, (url) => shell.openExternal(url)), {
+  }, (url) => shell.openExternal(url), chromiumHttp), {
     onDevices: () => {
       if (phone) window?.webContents.send(channels.phoneEvent, phone.status())
     }
@@ -150,7 +151,7 @@ if (gotLock) void app.whenReady().then(async () => {
       else desktop.publishTask(projectTask(event.task, db.listProfiles(), db.listAccounts(), db.listProxyGroups()))
     },
     publish,
-    defaultHttp,
+    chromiumHttp,
     gate,
     (input) => {
       sessionWindows.setCap(db.getSettings().sessionWindowCap)
@@ -308,7 +309,7 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
       if (plan.action === "warm") {
         db.setSchedulePhase(plan.id, "warming")
         const matched = db.listTasks().filter((task) => plan.taskIds.includes(task.id))
-        await warmTaskMonitors(defaultHttp, matched, db.listProxyGroups()).catch(() => undefined)
+        await warmTaskMonitors(chromiumHttp, matched, db.listProxyGroups()).catch(() => undefined)
         await publish({ kind: "drop", storeName: "Session Keeper", sku: plan.name, profileName: "Drop", detail: "Near-expiry sessions refresh a few at a time before the drop. Warm-up does not add to cart." })
       }
       if (plan.action === "start") {

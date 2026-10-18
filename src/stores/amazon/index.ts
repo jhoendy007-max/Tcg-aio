@@ -4,6 +4,7 @@ import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
+import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
@@ -26,7 +27,6 @@ import {
   type StockReading
 } from "./parse"
 
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const HOST = "www.amazon.com"
 
 export const AMAZON_PAUSE =
@@ -346,7 +346,7 @@ function pageHeaders(jar: CookieJar, referer: string, ajax = false): Record<stri
     accept: ajax ? "text/html,*/*" : "text/html,application/xhtml+xml",
     "accept-language": "en-US,en;q=0.9",
     referer,
-    "user-agent": USER_AGENT
+    "user-agent": chromeUserAgent()
   }
   const cookie = jar.header()
   if (cookie) headers.cookie = cookie

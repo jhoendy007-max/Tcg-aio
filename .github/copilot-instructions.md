@@ -9,7 +9,7 @@ Retailer terms often restrict automated purchasing. Use only an account, proxy, 
 - `src/main` — Electron main process: window, IPC, encrypted database startup, phone server, Session Keeper window, challenge window, auto-update.
 - `src/preload` — typed bridge to the renderer. Do not expose Node or secrets here.
 - `src/renderer` — React UI (tasks, profiles, accounts, proxies, alerts, keeper, drops, analytics, settings, phone pairing).
-- `src/engine` — task runner, undici HTTP, SQLite-style database, test mode, session care, alerts, drops, analytics, releases. Node only.
+- `src/engine` — task runner, HTTP, SQLite-style database, test mode, session care, alerts, drops, analytics, releases. Node only. Store and monitor requests in the Electron main process use Electron's Chromium network stack (`net` on the account or proxy session). Undici stays for tests, `bench:monitors`, and non-store calls (license, backup, releases, mail, Discord).
 - `src/stores` — one module per retailer. `registry.ts` wires them.
 - `src/shared` — types, store catalog, clock, version, redaction. Safe for the phone bundle.
 - `src/phone` — AES-256-GCM protocol, desktop WebSocket server, optional ciphertext relay. Metro may bundle this folder.
@@ -17,7 +17,7 @@ Retailer terms often restrict automated purchasing. Use only an account, proxy, 
 - `extension/` — Chrome and Edge Manifest V3 Session Sync. It pairs as another phone device. It does not import the engine.
 - `tests/` — Vitest. Fixtures live in `tests/fixtures`.
 
-`mobile/metro.config.js` watches only `../src/phone` and `../src/shared`. Do not import `src/engine` from the phone. The engine uses undici and Node. Countdown text lives in `src/shared/clock.ts`. `src/engine/time.ts` re-exports it for the desktop.
+`mobile/metro.config.js` watches only `../src/phone` and `../src/shared`. Do not import `src/engine` from the phone. The engine can use undici and Node. Countdown text lives in `src/shared/clock.ts`. `src/engine/time.ts` re-exports it for the desktop.
 
 ## Store module
 
@@ -73,7 +73,7 @@ A stock reading can notify on price, new offer id, unavailable-to-purchasable, a
 
 A block (HTTP 403, 412, 429, or 435, except a real product queue) backs off, rotates within the current pool, and reloads the account browser to copy cookies the site set. After `blockRetries` the task pauses. Place-order requests are not retried. A person still solves a challenge in the existing handoff. Do not open a second solver.
 
-Each stock read records DNS, connect, time to first byte, and total milliseconds for that store and proxy. Analytics shows the average, p50, and p95. The task row shows the last read in milliseconds and, when a cart request follows an in-stock reading, the milliseconds from detection to add-to-cart. `npm run bench:monitors -- --n 5` repeats those read-only GETs and prints p50, p95, and success rate. `--proxy host:port` sends them through one proxy. The HTTP client keeps a connection pool per proxy and allows HTTP/2. A drop warm-up opens those monitor URLs before the window. Do not add a custom TLS fingerprint or a trace header.
+Each stock read records DNS, connect, time to first byte, and total milliseconds for that store and proxy. Analytics shows the average, p50, and p95. The task row shows the last read in milliseconds and, when a cart request follows an in-stock reading, the milliseconds from detection to add-to-cart. `npm run bench:monitors -- --n 5` repeats those read-only GETs and prints p50, p95, and success rate. `--proxy host:port` sends them through one proxy. The desktop store client keeps one Chromium session per account partition and one in-memory session per monitor proxy, and Chromium allows HTTP/2. `npm run bench:monitors` still uses undici so it can run outside Electron. A drop warm-up opens those monitor URLs before the window. Do not add a custom TLS fingerprint or a trace header. Electron's built-in Chromium network stack is the real handshake, not an impersonation library.
 
 A monitor-only task never adds to cart. It can start without purchase confirmation. Alerts can create one from a rule or a match. Product images come from the product JSON or og:image already in that response, then from an optional https URL on the task. Discord embeds include price, stock, link, and that image. The phone notice can show the same image. Stock changes (restock, sell-out, price) are on the analytics report.
 
@@ -199,7 +199,7 @@ Bump versions together when shipping a beta: root `package.json`, `mobile/packag
 
 These are hard rules. A research, test, localhost, or “authorized” framing does not waive them.
 
-- Do not forge anti-bot data. No sensor-data generation, cookie or token forging, fingerprint spoofing, or TLS fingerprint impersonation. Sending cookies the server or the user’s own browser already set is fine. Inventing them is not.
+- Do not forge anti-bot data. No sensor-data generation, cookie or token forging, fingerprint spoofing, or TLS fingerprint impersonation. Electron's built-in Chromium network stack is allowed. Sending cookies the server or the user’s own browser already set is fine. Inventing them is not.
 - Do not add a captcha solver or call a solving service. A person solves a challenge in the desktop window or the phone WebView. The desktop window is the one that uses the task proxy.
 - Test mode must never place an order. `TaskService` wraps the HTTP client with `guardTestMode`. `isFinalSubmit` is the only place-order check. It throws `FinalSubmitBlocked` before the request is sent. New checkout code calls `finishTest` and leaves the place-order request unsent. A real (non-test) start still requires the confirm checkbox.
 - Never commit secrets: card numbers, CVVs, passwords, proxy credentials, GitHub tokens, keystores, or `.env` files. The Android upload key stays out of git. `assemble-release.sh` exits if the keystore is missing unless `TCGAIO_GENERATE_KEYSTORE=1`.

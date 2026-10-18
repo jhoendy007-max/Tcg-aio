@@ -1,7 +1,7 @@
 import { hostname } from "node:os"
 import type { AlertService } from "../engine/alerts"
 import { checkStoreHealth } from "../engine/health"
-import { defaultHttp } from "../engine/http"
+import { defaultHttp, type HttpClient } from "../engine/http"
 import type { Database } from "../engine/database"
 import type { TaskService } from "../engine/task-runner"
 import { STORE_CATALOG, storeName } from "../shared/stores"
@@ -30,7 +30,8 @@ export function createPhoneHost(
   getAlerts: () => AlertService | null = () => null,
   challenge?: PhoneChallengeActions,
   session?: { open(accountId: string): Promise<void> | void },
-  openUrl?: (url: string) => Promise<void> | void
+  openUrl?: (url: string) => Promise<void> | void,
+  http: HttpClient = defaultHttp
 ): PhoneHost {
   const pcName = desktopName()
   const snapshot = (): PhoneSnapshot => {
@@ -161,7 +162,7 @@ export function createPhoneHost(
     },
     async checkHealth(proxyGroupId: string | null) {
       const proxies = proxyGroupId ? db.getProxyGroup(proxyGroupId).proxies : []
-      return db.recordHealth(await checkStoreHealth(defaultHttp, proxies), proxies)
+      return db.recordHealth(await checkStoreHealth(http, proxies), proxies)
     },
     stop(id: string) {
       getRunner()?.stop(id)

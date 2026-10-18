@@ -1,6 +1,7 @@
 import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { note } from "../../engine/test-mode"
+import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import { checkoutCopy, checkoutLang } from "./copy"
@@ -16,8 +17,6 @@ import {
 } from "./parse"
 
 export { pageHandoff } from "./copy"
-
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 export function pageChallengePause(name: string, language?: string): string {
   return checkoutCopy(checkoutLang(language)).challenge(name)
@@ -189,7 +188,7 @@ function pageHeaders(jar: PageCookies, referer: string): Record<string, string> 
     accept: "text/html,application/xhtml+xml,application/json",
     "accept-language": "en-US,en;q=0.9",
     referer,
-    "user-agent": USER_AGENT,
+    "user-agent": chromeUserAgent(),
     cookie: jar.header()
   }
 }

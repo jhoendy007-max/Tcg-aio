@@ -1,8 +1,7 @@
+import { chromeUserAgent } from "./chrome-ua"
 import type { HttpClient } from "./http"
 import { detailsUrl, parseProductId, readProduct } from "../stores/tcgplayer/parse"
 import type { ResaleQuery, ResaleQuote } from "../shared/types"
-
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 export function median(values: number[]): number | null {
   const sorted = values.filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b)
@@ -132,7 +131,7 @@ async function readOnly(http: HttpClient, url: string, referer: string) {
       accept: host === "www.ebay.com" ? "text/html" : "application/json",
       "accept-language": "en-US,en;q=0.9",
       referer,
-      "user-agent": USER_AGENT
+      "user-agent": chromeUserAgent()
     },
     timeoutMs: 20000
   })

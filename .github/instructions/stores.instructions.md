@@ -19,7 +19,7 @@ Each retailer is an HTTP module, not a browser checkout. `createXModule()` retur
 
 Register the host in the challenge helper, Session Keeper home, health probe, keyword listing headers, bulk URL parser, and restock/Discord line parser. Refuse product URLs on any other host.
 
-Do not port cookie banks, sensor cookies, TLS impersonation, captcha solvers, or account generation. Read a retailer page only to copy the requests the site’s own frontend already makes. Prefer a fixture trimmed from a real JSON response over a live call in tests.
+Do not port cookie banks, sensor cookies, TLS impersonation, captcha solvers, or account generation. The desktop store client is Electron's Chromium network stack, not a fingerprint library. Read a retailer page only to copy the requests the site’s own frontend already makes. Prefer a fixture trimmed from a real JSON response over a live call in tests.
 
 Polite gaps live in `src/engine/polite.ts`. New stores use a gap of at least a few seconds. Health checks are one read-only GET.
 

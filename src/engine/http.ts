@@ -22,6 +22,12 @@ export interface HttpRequest {
   signal?: AbortSignal
   redirect?: "follow" | "manual"
   timeoutMs?: number
+  /**
+   * Chromium partition for the desktop store client. Account tasks set
+   * persist:account-${id}. A blank value selects an in-memory partition for the proxy.
+   * Undici ignores this field.
+   */
+  partition?: string
 }
 
 export interface HttpResponse {
