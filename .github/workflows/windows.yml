@@ -111,6 +111,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           TCGAIO_GENERATE_KEYSTORE: "1"
+          TCGAIO_ALLOW_NEW_KEYSTORE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash mobile/scripts/assemble-release.sh
       - uses: actions/upload-artifact@v4
