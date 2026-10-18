@@ -1,6 +1,6 @@
 import type { HttpResponse } from "../../engine/http"
 import { finishTest, isFinalSubmit, note } from "../../engine/test-mode"
-import { paceAddToCart } from "../module"
+import { checkoutPreflight, paceAddToCart } from "../module"
 import type { StoreRunContext, StoreRunResult } from "../module"
 import { checkoutCopy, checkoutLang } from "./copy"
 import {
@@ -43,17 +43,10 @@ export async function checkoutFromPage(
   fetch: CheckoutFetch
 ): Promise<CheckoutDone> {
   const copy = checkoutCopy(checkoutLang(ctx.settings.language))
-  const cap = ctx.task.maxPrice
-  if (typeof price === "number" && typeof cap === "number" && cap > 0 && price > cap) {
-    note(ctx, "cart", "skip", copy.overCap(cap))
-    return { outcome: "paused", reason: copy.overCap(cap) }
-  }
-  if (!ctx.testMode && ctx.spendCheck) {
-    const decision = ctx.spendCheck(price ?? null)
-    if (!decision.ok) {
-      note(ctx, "cart", "skip", decision.reason)
-      return { outcome: "paused", reason: decision.reason }
-    }
+  const preflight = checkoutPreflight(ctx, price)
+  if (preflight) {
+    note(ctx, "cart", "skip", preflight.reason)
+    return preflight
   }
 
   let currentUrl = pageUrl

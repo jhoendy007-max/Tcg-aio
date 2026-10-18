@@ -66,6 +66,23 @@ export async function paceAddToCart(ctx: StoreRunContext): Promise<void> {
   await ctx.sleep(ctx.module.retryDelayMs)
 }
 
+export function checkoutPreflight(ctx: StoreRunContext, price?: number): { outcome: "paused"; reason: string } | null {
+  if (ctx.testMode) return null
+  const verifiedPrice = typeof price === "number" && Number.isFinite(price) && price >= 0 ? price : undefined
+  const cap = ctx.task.maxPrice
+  if (typeof cap === "number" && cap > 0) {
+    if (verifiedPrice === undefined) {
+      return { outcome: "paused", reason: `A verified price is required to enforce this checkout's $${cap.toFixed(2)} max. No cart or payment request was sent.` }
+    }
+    if (verifiedPrice > cap) {
+      return { outcome: "paused", reason: `The price $${verifiedPrice.toFixed(2)} is above this checkout's max of $${cap.toFixed(2)}.` }
+    }
+  }
+  const decision = ctx.spendCheck?.(verifiedPrice ?? null)
+  if (decision && !decision.ok) return { outcome: "paused", reason: decision.reason }
+  return null
+}
+
 export function retryWait(ctx: StoreRunContext): number {
   return ctx.module?.retryDelayMs ?? ctx.settings.monitorDelayMs
 }

@@ -7,7 +7,7 @@ import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
+import { checkoutPreflight, paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import { encryptBestBuyPan } from "./card"
 import {
   decodeQueueSeconds,
@@ -120,6 +120,8 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
     ctx.log("success", reading.reason)
     note(ctx, "monitor", "pass", reading.reason)
     if (await holdMonitorOnly(ctx)) continue
+    const preflight = checkoutPreflight(ctx, reading.price)
+    if (preflight) return preflight
     await paceAddToCart(ctx)
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, sku, pageUrl)
