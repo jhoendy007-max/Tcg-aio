@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
+import { ME_CLIENT_ID, type Client } from "../../../shared/clients"
 import type { Address, ProfileInput, PublicProfile } from "../../../shared/types"
-import { Banner, Field, TextInput } from "../components/ui"
+import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
 function blankAddress(): Address {
@@ -21,18 +22,25 @@ function blankForm(): ProfileInput & { sameBilling: boolean } {
     expYear: "",
     cvv: "",
     cardAction: "replace",
+    clientId: ME_CLIENT_ID,
     sameBilling: true
   }
 }
 
 export function ProfilesPage() {
   const [profiles, setProfiles] = useState<PublicProfile[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [form, setForm] = useState<(ProfileInput & { sameBilling: boolean }) | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
 
   async function reload() {
-    setProfiles(await unwrap(window.aio.profiles.list()))
+    const [nextProfiles, nextClients] = await Promise.all([
+      unwrap(window.aio.profiles.list()),
+      unwrap(window.aio.clients.list())
+    ])
+    setProfiles(nextProfiles)
+    setClients(nextClients)
   }
 
   useEffect(() => {
@@ -83,6 +91,11 @@ export function ProfilesPage() {
           <Field label="Profile name"><TextInput value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></Field>
           <Field label="Email"><TextInput type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required /></Field>
           <Field label="Phone"><TextInput value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} required /></Field>
+          <Field label="Client">
+            <Select value={form.clientId || ME_CLIENT_ID} onChange={(event) => setForm({ ...form, clientId: event.target.value })}>
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+            </Select>
+          </Field>
           <h2 className="span-2">Shipping</h2>
           <AddressFields value={form.shipping} onChange={(shipping) => setForm({ ...form, shipping })} />
           <label className="check span-2">
@@ -113,11 +126,12 @@ export function ProfilesPage() {
       ) : null}
       <div className="table-wrap card">
         <table>
-          <thead><tr><th>Name</th><th>Ship to</th><th>Card</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Client</th><th>Ship to</th><th>Card</th><th></th></tr></thead>
           <tbody>
-            {profiles.length === 0 ? <tr><td colSpan={4} className="empty">No profiles yet.</td></tr> : profiles.map((profile) => (
+            {profiles.length === 0 ? <tr><td colSpan={5} className="empty">No profiles yet.</td></tr> : profiles.map((profile) => (
               <tr key={profile.id}>
                 <td>{profile.name}</td>
+                <td>{clients.find((client) => client.id === (profile.clientId || ME_CLIENT_ID))?.name ?? "Me"}</td>
                 <td>{profile.shipping.city}, {profile.shipping.state} {profile.shipping.zip}</td>
                 <td>{profile.cardName} · {profile.last4} · {profile.expMonth}/{profile.expYear}</td>
                 <td className="row-actions">
@@ -163,6 +177,7 @@ function fromProfile(profile: PublicProfile): ProfileInput & { sameBilling: bool
     expYear: profile.expYear,
     cvv: "",
     cardAction: "keep",
+    clientId: profile.clientId || ME_CLIENT_ID,
     sameBilling
   }
 }

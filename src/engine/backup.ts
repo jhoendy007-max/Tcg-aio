@@ -1,6 +1,7 @@
 import { pbkdf2Sync, createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
 import { AppError } from "../shared/errors"
 import type { HttpClient } from "./http"
+import type { Client, LedgerEntry } from "../shared/clients"
 import type {
   Address,
   DropSchedule,
@@ -34,6 +35,7 @@ export interface BackupProfile {
   expMonth: string
   expYear: string
   card: BackupCard
+  clientId?: string
 }
 
 export interface BackupAccount {
@@ -46,6 +48,7 @@ export interface BackupAccount {
   proxyGroupId: string | null
   sessionState: "missing" | "saved" | "expired"
   lastWarmAt: number | null
+  clientId?: string
 }
 
 /** Plaintext that only exists inside the user-held ciphertext. */
@@ -58,6 +61,8 @@ export interface BackupDocument {
   proxyGroups: ProxyGroup[]
   schedules: DropSchedule[]
   templates: TaskTemplate[]
+  clients?: Client[]
+  ledger?: LedgerEntry[]
 }
 
 interface Envelope {

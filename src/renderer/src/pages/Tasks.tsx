@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { clientIdOf, clientText, ME_CLIENT_ID, type Client } from "../../../shared/clients"
 import { consistencyText, effectiveBinding } from "../../../shared/consistency"
 import { dropOpsText } from "../../../shared/drop-ops"
 import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type Settings, type StartMode, type StoreHealth, type StoreInfo, type TaskInput, type TaskKind, type TaskStatus } from "../../../shared/types"
@@ -32,7 +33,8 @@ const emptyForm = (): TaskInput => ({
   checkoutDelayMs: null,
   maxPrice: null,
   startMode: "builtin",
-  jitterPct: null
+  jitterPct: null,
+  clientId: ME_CLIENT_ID
 })
 
 export function TasksPage() {
@@ -57,16 +59,19 @@ export function TasksPage() {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("")
   const [storeFilter, setStoreFilter] = useState("")
   const [kindFilter, setKindFilter] = useState<TaskKind | "">("")
+  const [clientFilter, setClientFilter] = useState("")
+  const [clients, setClients] = useState<Client[]>([])
   const [grouped, setGrouped] = useState(true)
   const [dragId, setDragId] = useState<string | null>(null)
 
   async function reload() {
-    const [nextTasks, nextProfiles, nextAccounts, nextGroups, nextStores, settings] = await Promise.all([
+    const [nextTasks, nextProfiles, nextAccounts, nextGroups, nextStores, nextClients, settings] = await Promise.all([
       unwrap(window.aio.tasks.list()),
       unwrap(window.aio.profiles.list()),
       unwrap(window.aio.accounts.list()),
       unwrap(window.aio.proxies.list()),
       unwrap(window.aio.stores.list()),
+      unwrap(window.aio.clients.list()),
       unwrap(window.aio.settings.get())
     ])
     setGlobalTest(settings.settings.testMode)
@@ -76,6 +81,7 @@ export function TasksPage() {
     setAccounts(nextAccounts)
     setGroups(nextGroups)
     setStores(nextStores)
+    setClients(nextClients)
     setSelectedId((current) => current ?? nextTasks[0]?.id ?? null)
   }
 
@@ -117,11 +123,12 @@ export function TasksPage() {
       if (storeFilter && task.store !== storeFilter) return false
       if (kindFilter === "monitor" && task.kind !== "monitor") return false
       if (kindFilter === "checkout" && task.kind === "monitor") return false
+      if (clientFilter && clientIdOf(task.clientId) !== clientFilter) return false
       if (!needle) return true
       const hay = [task.sku, task.group, task.detail, storeName(task.store), STATUS_LABEL[task.status]].join(" ").toLowerCase()
       return hay.includes(needle)
     })
-  }, [tasks, query, statusFilter, storeFilter, kindFilter])
+  }, [tasks, query, statusFilter, storeFilter, kindFilter, clientFilter])
   const sections = useMemo(() => {
     if (!grouped) return [{ label: "", rows: filtered }]
     const buckets = new Map<string, PublicTask[]>()
@@ -181,8 +188,9 @@ export function TasksPage() {
     profile: new Map(profiles.map((profile) => [profile.id, profile.name])),
     account: new Map(accounts.map((account) => [account.id, account.label])),
     group: new Map(groups.map((group) => [group.id, group.name])),
-    store: new Map(stores.map((store) => [store.id, store.name]))
-  }), [profiles, accounts, groups, stores])
+    store: new Map(stores.map((store) => [store.id, store.name])),
+    client: new Map(clients.map((client) => [client.id, client.name]))
+  }), [profiles, accounts, groups, stores, clients])
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
@@ -284,6 +292,7 @@ export function TasksPage() {
           stores={stores}
           profiles={profiles}
           accounts={storeAccounts}
+          clients={clients}
           groups={groups}
           busy={busy}
           lang={lang}
@@ -340,6 +349,12 @@ export function TasksPage() {
           <Select value={storeFilter} onChange={(event) => setStoreFilter(event.target.value)} aria-label="Filter by store">
             <option value="">All stores</option>
             {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+          </Select>
+        </Field>
+        <Field label={clientText(lang, "filter")}>
+          <Select value={clientFilter} onChange={(event) => setClientFilter(event.target.value)} aria-label={clientText(lang, "filter")}>
+            <option value="">{clientText(lang, "allClients")}</option>
+            {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
           </Select>
         </Field>
         <Field label={taskText(lang, "kind")}>
@@ -409,7 +424,7 @@ export function TasksPage() {
           <h2>{dropOpsText(lang, "cloneTitle")}</h2>
           <p className="hint">{dropOpsText(lang, "cloneHint")}</p>
           <div className="choices">
-            {accounts.filter((account) => account.store === selected.store).map((account) => (
+            {accounts.filter((account) => account.store === selected.store && clientIdOf(account.clientId) === clientIdOf(selected.clientId)).map((account) => (
               <label key={account.id} className="check">
                 <input type="checkbox" checked={cloneIds.includes(account.id)} onChange={() => setCloneIds((current) => current.includes(account.id) ? current.filter((id) => id !== account.id) : [...current, account.id])} />
                 <span>{account.label}</span>
@@ -451,7 +466,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
   selectedId: string | null
   globalTest: boolean
   dragId: string | null
-  names: { profile: Map<string, string>; account: Map<string, string>; group: Map<string, string> }
+  names: { profile: Map<string, string>; account: Map<string, string>; group: Map<string, string>; client: Map<string, string> }
   accounts: PublicAccount[]
   groups: ProxyGroup[]
   lang: "en" | "es"
@@ -489,6 +504,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
                 <div>{storeName(task.store)}{task.kind === "monitor" ? <span className="pill">MONITOR</span> : null}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
                 <div className="sku">{task.sku}</div>
                 {taskView === "compact" ? bindingCell(task, accounts, groups, lang).summary : null}
+                <div className="detail">{names.client.get(clientIdOf(task.clientId)) ?? clientText(lang, "me")}</div>
                 {typeof task.monitorMs === "number" ? <div className="detail">{task.monitorMs} ms last read{typeof task.detectToCartMs === "number" ? ` · ${task.detectToCartMs} ms to cart` : ""}</div> : null}
               </div>
             </div>
@@ -589,17 +605,19 @@ function toInput(task: PublicTask): TaskInput {
     startMode: task.startMode ?? (task.kind === "monitor" ? "manual" : "builtin"),
     linkedMonitorId: task.linkedMonitorId ?? null,
     jitterPct: task.jitterPct ?? null,
+    clientId: task.clientId || ME_CLIENT_ID,
     overrides: task.overrides
   }
 }
 
-function TaskEditor({ form, tasks, settings, stores, profiles, accounts, groups, busy, lang, live, onChange, onCancel, onSubmit }: {
+function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients, groups, busy, lang, live, onChange, onCancel, onSubmit }: {
   form: TaskInput
   tasks: PublicTask[]
   settings: Settings | null
   stores: StoreInfo[]
   profiles: PublicProfile[]
   accounts: PublicAccount[]
+  clients: Client[]
   groups: ProxyGroup[]
   busy: boolean
   lang: "en" | "es"
@@ -610,6 +628,8 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, groups,
 }) {
   const monitor = form.kind === "monitor"
   const selectedStore = stores.find((store) => store.id === form.store)
+  const accountClient = clientIdOf(accounts.find((account) => account.id === form.accountId)?.clientId)
+  const profileChoices = form.accountId ? profiles.filter((profile) => clientIdOf(profile.clientId) === accountClient) : profiles
   const checkouts = tasks.filter((task) => task.kind !== "monitor" && task.id !== form.id)
   const modes: StartMode[] = ["manual", "scheduled", "monitor", "restock", "builtin"]
   return (
@@ -646,6 +666,11 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, groups,
       </Field>
       {monitor ? (
         <>
+          <Field label={clientText(lang, "filter")}>
+            <Select value={form.clientId || ME_CLIENT_ID} disabled={live} onChange={(event) => onChange({ ...form, clientId: event.target.value })}>
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+            </Select>
+          </Field>
           <Field label={taskText(lang, "proxy")}>
             <Select value={form.monitorProxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, monitorProxyGroupId: event.target.value || null, proxyGroupId: null })}>
               <option value="">{taskText(lang, "direct")}</option>
@@ -675,11 +700,17 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, groups,
           <Field label={taskText(lang, "profile")}>
             <Select value={form.profileId} disabled={live} onChange={(event) => onChange({ ...form, profileId: event.target.value })} required>
               <option value="">—</option>
-              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.last4}</option>)}
+              {profileChoices.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.last4}</option>)}
             </Select>
           </Field>
           <Field label={taskText(lang, "account")}>
-            <Select value={form.accountId} disabled={live} onChange={(event) => onChange({ ...form, accountId: event.target.value })} required>
+            <Select value={form.accountId} disabled={live} onChange={(event) => {
+              const accountId = event.target.value
+              const next = accounts.find((account) => account.id === accountId)
+              const profile = profiles.find((item) => item.id === form.profileId)
+              const mismatch = Boolean(next && profile && clientIdOf(profile.clientId) !== clientIdOf(next.clientId))
+              onChange({ ...form, accountId, profileId: mismatch ? "" : form.profileId })
+            }} required>
               <option value="">—</option>
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
             </Select>

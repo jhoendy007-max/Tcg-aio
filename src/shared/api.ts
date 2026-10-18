@@ -1,3 +1,4 @@
+import type { Client, ClientExport, ClientInput, ClientSummary, LedgerEntry } from "./clients"
 import { channels } from "./ipc"
 import type {
   AccountInput,
@@ -81,6 +82,16 @@ export interface AioApi {
     openBrowser: (id: string) => Promise<Result<{ opened: true }>>
     captureBrowser: (id: string) => Promise<Result<{ saved: true }>>
     warm: (id: string) => Promise<Result<{ expired: boolean; detail: string }>>
+  }
+  clients: {
+    list: () => Promise<Result<Client[]>>
+    summaries: () => Promise<Result<ClientSummary[]>>
+    save: (input: ClientInput) => Promise<Result<Client>>
+    delete: (id: string) => Promise<Result<{ accountIds: string[] }>>
+    exportData: (id: string) => Promise<Result<ClientExport>>
+    ledger: (clientId?: string) => Promise<Result<LedgerEntry[]>>
+    markPaid: (clientId: string, ids: string[], paid: boolean) => Promise<Result<LedgerEntry[]>>
+    csv: (clientId?: string) => Promise<Result<{ csv: string }>>
   }
   settings: {
     get: () => Promise<Result<SettingsPayload>>
