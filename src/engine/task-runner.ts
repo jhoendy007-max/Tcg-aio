@@ -1,6 +1,7 @@
 import { applySolvedCookies, challengePageUrl, classifyChallenge, cookieHeader } from "./challenge"
 import type { ChallengeGate } from "./challenge-gate"
 import { isBlockStatus as blockStatus, sendWithRecovery, type SessionRefresher } from "./block-recovery"
+import { classifyTraffic, pollQueue } from "./traffic"
 import { adaptiveDelay, detectChanges, MonitorHub, type WatchSnapshot } from "./monitor"
 import type { RequestTiming } from "./http"
 import { productImage } from "../shared/image"
@@ -11,7 +12,7 @@ import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../
 import { checkoutsToStart, triggerDecision } from "../shared/task-role"
 import { accountPartition } from "../shared/consistency"
 import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
-import { storeHome } from "./session-care"
+import { accountsToWarm, storeHome } from "./session-care"
 import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
 import { guardTestMode, isFinalSubmit, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
 import { proxyLabel } from "../shared/proxy"
@@ -37,7 +38,8 @@ export class TaskService {
     private readonly http: HttpClient = defaultHttp,
     private readonly challenges?: ChallengeGate,
     private readonly sessionRefresh?: SessionRefresher,
-    private readonly readCode?: (store: StoreId) => Promise<string | null>
+    private readonly readCode?: (store: StoreId) => Promise<string | null>,
+    private readonly warmAccount?: (accountId: string) => Promise<void>
   ) {}
 
   isRunning(id: string): boolean {
@@ -141,6 +143,7 @@ export class TaskService {
       finishedAt: undefined,
       log: line("info", "Task started.")
     })
+    await this.warmIfDue(task, update)
     let proxy: ProxyEndpoint | undefined
     let proxies: ProxyEndpoint[] | undefined
     try {
@@ -268,7 +271,11 @@ export class TaskService {
         detail: (message: string) => update({ detail: redact(message).slice(0, 240) }),
         monitorOnly: task.monitorOnly === true || task.kind === "monitor",
         checkoutDelayMs: task.checkoutDelayMs ?? 0,
-        phase: (status: "monitoring" | "in_stock" | "adding_to_cart" | "checking_out") => {
+        phase: (status: "monitoring" | "in_stock" | "adding_to_cart" | "checking_out" | "in_queue") => {
+          if (status === "in_queue") {
+            update({ status })
+            return
+          }
           if (status === "in_stock") detectedAt = Date.now()
           if (status === "adding_to_cart" && detectedAt) update({ detectToCartMs: Date.now() - detectedAt })
           update({ status })
@@ -398,7 +405,7 @@ export class TaskService {
           : undefined
       }
       ctx.http = {
-        request: (input) => {
+        request: async (input) => {
           // Monitors with no account leave partition blank. Block recovery may rotate the proxy first, and the Chromium client then isolates that proxy.
           const stamped = account.id ? { ...input, partition: accountPartition(account.id) } : input
           if (isFinalSubmit(task.store, stamped)) {
@@ -420,11 +427,32 @@ export class TaskService {
             }
             return guarded.request(stamped)
           }
-          return sendWithRecovery(ctx, stamped, {
+          const recovered = () => sendWithRecovery(ctx, stamped, {
             homeUrl: storeHome(task.store),
             inner: guarded,
             blocked: (response) => blockStatus(response.status, response)
           })
+          const response = await recovered()
+          if (module.handlesQueue) return response
+          const queued = classifyTraffic(response) === "queue"
+          const before = this.db.getTask(id).status
+          const finished = await pollQueue(response, {
+            method: stamped.method,
+            fallbackMs: settings.monitorDelayMs,
+            signal: controller.signal,
+            sleep: (ms) => sleep(ms, controller.signal),
+            again: recovered,
+            onQueue: (detail) => update({ status: "in_queue", detail, log: line("info", detail) })
+          })
+          if (queued && classifyTraffic(finished) !== "queue") {
+            const restore = before === "adding_to_cart" || before === "checking_out" || before === "in_stock" ? before : "monitoring"
+            update({
+              status: restore,
+              detail: "The waiting room let this session through.",
+              log: line("info", "The waiting room let this session through.")
+            })
+          }
+          return finished
         }
       }
       while (true) {
@@ -484,8 +512,6 @@ export class TaskService {
     profileNameText: string,
     reason: string
   ): Promise<FullAccount | null> {
-    const gate = this.challenges
-    if (!gate) return null
     const task = this.db.getTask(id)
     const timeout = this.db.getSettings().challengeTimeoutSec
     update({
@@ -501,6 +527,11 @@ export class TaskService {
       profileName: profileNameText,
       detail: reason
     })
+    if (account.id && this.sessionRefresh) {
+      return this.holdAccountBrowser(id, controller, update, account, proxy, storeNameText, profileNameText, reason, timeout)
+    }
+    const gate = this.challenges
+    if (!gate) return null
     const outcome = await gate.wait({
       taskId: id,
       store: task.store,
@@ -541,6 +572,85 @@ export class TaskService {
       detail
     })
     return null
+  }
+
+  private async holdAccountBrowser(
+    id: string,
+    controller: AbortController,
+    update: (patch: Parameters<Database["patchTask"]>[1]) => void,
+    account: FullAccount,
+    proxy: ProxyEndpoint | undefined,
+    storeNameText: string,
+    profileNameText: string,
+    reason: string,
+    timeout: number
+  ): Promise<FullAccount | null> {
+    const refresh = this.sessionRefresh
+    if (!refresh) return null
+    const task = this.db.getTask(id)
+    try {
+      const refreshed = await refresh({
+        accountId: account.id,
+        store: task.store,
+        homeUrl: challengePageUrl(task.store, task.sku),
+        proxy,
+        existing: account.session,
+        signal: controller.signal,
+        holdMs: timeout * 1000,
+        onChallenge: (message) => update({ log: line("warn", message) }),
+        lookupCode: this.readCode ? () => this.readCode!(task.store) : undefined,
+        onMailFilled: () => update({ log: line("info", "Filled the verification code from your mailbox.") })
+      })
+      if (controller.signal.aborted) {
+        finish(update, "stopped", "Stopped", "info")
+        return null
+      }
+      const header = cookieHeader(refreshed.cookies)
+      if (!refreshed.challenged && header) {
+        this.db.updateSession(account.id, applySolvedCookies(account.session, header))
+        update({
+          status: "monitoring",
+          detail: "Challenge solved. Resuming.",
+          finishedAt: undefined,
+          log: line("success", "Saved the cookies from the account browser and resumed the task.")
+        })
+        return this.db.readAccount(account.id)
+      }
+    } catch (err) {
+      if (controller.signal.aborted || isAbortError(err)) {
+        finish(update, "stopped", "Stopped", "info")
+        return null
+      }
+    }
+    const detail = `The account browser is still showing a check. ${reason}`
+    finish(update, "paused", detail, "warn")
+    await this.safeNotify(update, {
+      kind: "paused",
+      storeName: storeNameText,
+      sku: task.sku,
+      profileName: profileNameText,
+      detail
+    })
+    return null
+  }
+
+  private async warmIfDue(task: PublicTask, update: (patch: Parameters<Database["patchTask"]>[1]) => void): Promise<void> {
+    if (!this.warmAccount) return
+    const settings = this.db.getSettings()
+    if (!settings.warmOnStart) return
+    const ids = accountsToWarm(task, this.db.listTasks(), this.db.listAccounts(), Date.now(), settings.sessionWarmupMin)
+    for (const accountId of ids) {
+      update({
+        detail: "Warming the account session.",
+        log: line("info", "Warming the account session. Nothing is added to cart.")
+      })
+      try {
+        await this.warmAccount(accountId)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        update({ log: line("warn", `Session warm-up did not finish (${message}). Continuing.`) })
+      }
+    }
   }
 
   private async finishResult(

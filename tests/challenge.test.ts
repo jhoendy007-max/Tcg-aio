@@ -203,6 +203,36 @@ describe("challenge handoff", () => {
     expect(JSON.stringify(notices)).not.toContain("secret")
   })
 
+  it("resumes from the account browser and leaves the separate challenge window closed", async () => {
+    const { db, task, account } = setup()
+    let runs = 0
+    const module: StoreModule = {
+      id: "target",
+      displayName: "Target",
+      skuHint: "TCIN",
+      implemented: true,
+      async run(ctx) {
+        runs += 1
+        if (runs === 1) return { outcome: "paused", reason: TARGET_PAUSE }
+        expect(ctx.account.session?.cookie).toContain("_px3=from-account")
+        return finishTest(ctx)
+      }
+    }
+    const gate = new ChallengeGate()
+    const service = new TaskService(db, new Map([["target", module]]), () => undefined, async () => true, undefined, gate, async (input) => {
+      expect(input.accountId).toBe(account.id)
+      expect(input.holdMs).toBe(db.getSettings().challengeTimeoutSec * 1000)
+      expect(input.homeUrl).toContain("target.com")
+      return { cookies: { accessToken: "token-1", cookie: "_px3=from-account" }, challenged: false }
+    })
+    service.start(task.id, { test: true })
+    await service.wait(task.id)
+    expect(runs).toBe(2)
+    expect(gate.current()).toBeNull()
+    expect(db.getTask(task.id).status).toBe("tested")
+    expect(db.readAccount(account.id).session?.cookie).toContain("_px3=from-account")
+  })
+
   it("pauses when the person does not solve in time and does not run again", async () => {
     vi.useFakeTimers()
     try {

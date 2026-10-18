@@ -157,7 +157,10 @@ if (gotLock) void app.whenReady().then(async () => {
       sessionWindows.setCap(db.getSettings().sessionWindowCap)
       return sessionWindows.run(() => refreshStoreSession(input))
     },
-    (store) => readStoreCode(db, openMailbox, store)
+    (store) => readStoreCode(db, openMailbox, store),
+    async (accountId) => {
+      await sessions?.warm(accountId)
+    }
   )
   alerts = new AlertService(db, () => runner, publish, defaultHttp)
   desktop.setRestock((authorization, alternate, body) => alerts!.ingestHttp(authorization, alternate, body))
@@ -310,7 +313,10 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
         db.setSchedulePhase(plan.id, "warming")
         const matched = db.listTasks().filter((task) => plan.taskIds.includes(task.id))
         await warmTaskMonitors(chromiumHttp, matched, db.listProxyGroups()).catch(() => undefined)
-        await publish({ kind: "drop", storeName: "Session Keeper", sku: plan.name, profileName: "Drop", detail: "Near-expiry sessions refresh a few at a time before the drop. Warm-up does not add to cart." })
+        for (const accountId of plan.accountIds) {
+          if (accountId) await warmTracked(db, accountId)
+        }
+        await publish({ kind: "drop", storeName: "Session Keeper", sku: plan.name, profileName: "Drop", detail: "The account browser loaded the store before the drop. Warm-up does not add to cart." })
       }
       if (plan.action === "start") {
         db.setSchedulePhase(plan.id, "started")

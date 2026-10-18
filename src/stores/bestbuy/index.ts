@@ -234,8 +234,11 @@ async function addToCart(ctx: StoreRunContext, jar: CookieJar, sku: string, page
       if (attempt === QUEUE_ATTEMPTS) return { kind: "failed", reason: "Best Buy kept the add to cart in the please-wait queue." }
       const seconds = queueSeconds(queued, code, waitHeader, sku)
       if (seconds === null) return { kind: "failed", reason: "Best Buy queued the add to cart, but the wait time could not be read." }
+      ctx.phase("in_queue")
+      ctx.detail(`In queue. Waiting ${seconds}s.`)
       ctx.log("info", `Best Buy queued the add to cart (please wait). Waiting ${seconds}s then retrying.`)
       await ctx.sleep(seconds * 1000)
+      ctx.phase("adding_to_cart")
       queueHeaders = {}
       if (code) queueHeaders.a2ctransactioncode = code
       if (reference) queueHeaders.a2ctransactionreferenceid = reference

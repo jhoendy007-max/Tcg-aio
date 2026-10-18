@@ -116,6 +116,7 @@ export function cleanSettings(input: Settings): Settings {
     clearCartAfterTest: input.clearCartAfterTest === true,
     challengeTimeoutSec,
     sessionWarmup: input.sessionWarmup === true,
+    warmOnStart: input.warmOnStart === true,
     sessionWarmupMin,
     sessionWindowCap,
     monitorJitterPct,

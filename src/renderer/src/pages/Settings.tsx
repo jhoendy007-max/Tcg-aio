@@ -162,6 +162,10 @@ export function SettingsPage() {
           <input type="checkbox" checked={form.sessionWarmup} onChange={(event) => setForm({ ...form, sessionWarmup: event.target.checked })} />
           <span>Session Keeper. The PC opens the store homepage and one product page in the real browser, then saves the cookies that browser already has. The Session Keeper page shows each account.</span>
         </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.warmOnStart} onChange={(event) => setForm({ ...form, warmOnStart: event.target.checked })} />
+          <span>Warm the account when a monitor or checkout starts, if that session is older than the Session Keeper interval. A scheduled drop still warms the accounts named on the drop, using the drop's warm-up minutes. Nothing is added to cart.</span>
+        </label>
         <Field label="Session Keeper interval (minutes)" hint="How often each signed-in account is opened. 10–240. An expired session asks you to sign in again.">
           <TextInput type="number" min={10} max={240} value={form.sessionWarmupMin} onChange={(event) => setForm({ ...form, sessionWarmupMin: Number(event.target.value) })} required />
         </Field>
@@ -180,7 +184,7 @@ export function SettingsPage() {
         <Field label="Fast delay (ms)" hint="Used inside a drop window. Each store still waits at least its own gap.">
           <TextInput type="number" min={250} max={60000} value={form.monitorFastDelayMs} onChange={(event) => setForm({ ...form, monitorFastDelayMs: Number(event.target.value) })} required />
         </Field>
-        <Field label="Block retries" hint="After HTTP 403, 412, 429, or 435, reload the account browser on the same sticky proxy. A task with no account can move to another proxy. 1–8.">
+        <Field label="Block retries" hint="HTTP 429 waits and retries on the same connection. HTTP 403, 412, or 435 reloads the account browser on the same sticky proxy. A task with no account can move to another proxy. A challenge page waits for you in the account browser. 1–8.">
           <TextInput type="number" min={1} max={8} value={form.blockRetries} onChange={(event) => setForm({ ...form, blockRetries: Number(event.target.value) })} required />
         </Field>
         <Field className="span-2" label="Drop windows" hint="Atlantic Time, one range per line, like 09:00-09:20. Scheduled drops are windows too.">

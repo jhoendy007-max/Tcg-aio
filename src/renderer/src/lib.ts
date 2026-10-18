@@ -21,7 +21,27 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   paused: "Paused",
   stopped: "Stopped",
   tested: "Tested",
-  challenge: "Solve challenge"
+  challenge: "Solve challenge",
+  in_queue: "In queue"
+}
+
+const STATUS_LABEL_ES: Record<TaskStatus, string> = {
+  idle: "En espera",
+  monitoring: "Vigilando",
+  in_stock: "Hay stock",
+  adding_to_cart: "Añadiendo al carrito",
+  checking_out: "Comprando",
+  success: "Comprado",
+  failed: "Falló",
+  paused: "En pausa",
+  stopped: "Detenido",
+  tested: "Probado",
+  challenge: "Resuelve el desafío",
+  in_queue: "En cola"
+}
+
+export function statusLabel(status: TaskStatus, lang: "en" | "es"): string {
+  return lang === "es" ? STATUS_LABEL_ES[status] : STATUS_LABEL[status]
 }
 
 export function errorText(err: unknown): string {

@@ -138,7 +138,7 @@ export function learnedDue(input: {
 export function stuckIds(tasks: PublicTask[], now: number, minutes: number, heals: Record<string, number>, maxHeals = 3): string[] {
   const cutoff = now - minutes * 60_000
   return tasks.filter((task) => {
-    if (!isActiveStatus(task.status)) return false
+    if (!isActiveStatus(task.status) || task.status === "in_queue") return false
     if ((heals[task.id] ?? 0) >= maxHeals) return false
     const last = task.logs[task.logs.length - 1]?.ts ?? task.startedAt ?? 0
     return last > 0 && last <= cutoff
