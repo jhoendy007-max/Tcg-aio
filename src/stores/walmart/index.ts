@@ -6,6 +6,7 @@ import { finishTest, note } from "../../engine/test-mode"
 import { proxyLabel } from "../../shared/proxy"
 import { redact } from "../../shared/redact"
 import type { ProxyEndpoint, SessionCookies } from "../../shared/types"
+import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
@@ -24,7 +25,6 @@ import {
 } from "./parse"
 import { parsePieKey, protectPanAndCvv } from "./pie"
 
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const CARD_HOST = "www.walmart.com"
 const PIE_HOST = "securedataweb.walmart.com"
 const ALLOWED_HOSTS = new Set([CARD_HOST, PIE_HOST])
@@ -657,7 +657,7 @@ function gqlHeaders(jar: CookieJar, name: string, operation: "query" | "mutation
     "accept-language": "en-US,en;q=0.9",
     origin: "https://www.walmart.com",
     referer,
-    "user-agent": USER_AGENT,
+    "user-agent": chromeUserAgent(),
     "x-apollo-operation-name": name,
     "x-o-gql-query": `${operation} ${name}`,
     "x-o-platform": "rweb",
@@ -684,7 +684,7 @@ function pageHeaders(jar: CookieJar, itemId: string): Record<string, string> {
   const headers: Record<string, string> = {
     accept: "text/html,application/xhtml+xml",
     "accept-language": "en-US,en;q=0.9",
-    "user-agent": USER_AGENT,
+    "user-agent": chromeUserAgent(),
     referer: "https://www.walmart.com/"
   }
   const cookie = jar.header()

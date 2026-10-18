@@ -394,7 +394,9 @@ export class TaskService {
       }
       ctx.http = {
         request: (input) => {
-          if (isFinalSubmit(task.store, input)) {
+          // Monitors with no account leave partition blank. Block recovery may rotate the proxy first, and the Chromium client then isolates that proxy.
+          const stamped = account.id ? { ...input, partition: accountPartition(account.id) } : input
+          if (isFinalSubmit(task.store, stamped)) {
             if (!testMode) {
               const price = this.watches.get(`${task.store}:${task.sku}`)?.price ?? null
               const cap = this.db.getTask(id).maxPrice
@@ -411,9 +413,9 @@ export class TaskService {
               })
               if (!decision.ok) throw new SpendLimitError(decision.reason)
             }
-            return guarded.request(input)
+            return guarded.request(stamped)
           }
-          return sendWithRecovery(ctx, input, {
+          return sendWithRecovery(ctx, stamped, {
             homeUrl: storeHome(task.store),
             inner: guarded,
             blocked: (response) => blockStatus(response.status, response)

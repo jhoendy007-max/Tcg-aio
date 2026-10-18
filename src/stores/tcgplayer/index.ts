@@ -1,5 +1,6 @@
 import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { note } from "../../engine/test-mode"
+import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import { checkoutCopy, checkoutLang } from "../page/copy"
@@ -20,7 +21,6 @@ import {
   type TcgProduct
 } from "./parse"
 
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const HOST = "mp-search-api.tcgplayer.com"
 const SHOP = "www.tcgplayer.com"
 
@@ -240,7 +240,7 @@ function shopHeaders(jar: PageCookies, referer: string): Record<string, string> 
     accept: "text/html,application/xhtml+xml,application/json",
     "accept-language": "en-US,en;q=0.9",
     referer,
-    "user-agent": USER_AGENT,
+    "user-agent": chromeUserAgent(),
     cookie: jar.header()
   }
 }
@@ -251,7 +251,7 @@ function catalogHeaders(referer: string, write = false): Record<string, string> 
     "accept-language": "en-US,en;q=0.9",
     origin: "https://www.tcgplayer.com",
     referer,
-    "user-agent": USER_AGENT
+    "user-agent": chromeUserAgent()
   }
   if (write) headers["content-type"] = "application/json"
   return headers

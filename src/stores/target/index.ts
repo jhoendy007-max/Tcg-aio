@@ -5,6 +5,7 @@ import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
+import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import {
@@ -22,7 +23,6 @@ import {
 import { parseTcin } from "../../shared/tcin"
 
 const DEFAULT_KEY = "9f36aeafbe60771e321a7cc95a78140772ab3e96"
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const ALLOWED_HOSTS = new Set(["carts.target.com", "redsky.target.com", "gsp.target.com", "www.target.com"])
 const FIELD_GROUPS = "ADDRESSES,CART,CART_ITEMS,SUMMARY,PAYMENT_INSTRUCTIONS,PROMOTION_CODES"
 
@@ -522,7 +522,7 @@ function checkout(ctx: StoreRunContext, jar: CookieJar, key: string): Promise<Ht
 
 async function login(ctx: StoreRunContext, jar: CookieJar): Promise<Step<true>> {
   if (!jar.visitorId) jar.visitorId = randomBytes(16).toString("hex")
-  const device = { visitor_id: jar.visitorId, user_agent: USER_AGENT, language: "en-US" }
+  const device = { visitor_id: jar.visitorId, user_agent: chromeUserAgent(), language: "en-US" }
   const response = await call(ctx, {
     method: "POST",
     url: "https://gsp.target.com/gsp/authentications/v1/credential_validations?client_id=ecom-web-1.0.0",
@@ -620,7 +620,7 @@ function monitorHeaders(tcin: string): Record<string, string> {
     "accept-language": "en-US,en;q=0.9",
     origin: "https://www.target.com",
     referer: `https://www.target.com/p/-/A-${tcin}`,
-    "user-agent": USER_AGENT
+    "user-agent": chromeUserAgent()
   }
 }
 
@@ -630,7 +630,7 @@ function apiHeaders(jar: CookieJar, referer: string, json = true): Record<string
     "accept-language": "en-US,en;q=0.9",
     origin: "https://www.target.com",
     referer,
-    "user-agent": USER_AGENT,
+    "user-agent": chromeUserAgent(),
     "x-application-name": "web"
   }
   if (json) headers["content-type"] = "application/json"

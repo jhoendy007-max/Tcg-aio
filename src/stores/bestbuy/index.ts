@@ -5,6 +5,7 @@ import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
+import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
 import { paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
 import { encryptBestBuyPan } from "./card"
@@ -23,7 +24,6 @@ import {
   type StockReading
 } from "./parse"
 
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 const HOST = "www.bestbuy.com"
 const QUEUE_ATTEMPTS = 8
 
@@ -526,7 +526,7 @@ function pageHeaders(jar: CookieJar, referer: string): Record<string, string> {
   return {
     accept: "text/html,application/xhtml+xml",
     "accept-language": "en-US,en;q=0.9",
-    "user-agent": USER_AGENT,
+    "user-agent": chromeUserAgent(),
     referer,
     cookie: jar.header()
   }
@@ -539,7 +539,7 @@ function jsonHeaders(jar: CookieJar, referer: string): Record<string, string> {
     "accept-language": "en-US,en;q=0.9",
     origin: "https://www.bestbuy.com",
     referer,
-    "user-agent": USER_AGENT,
+    "user-agent": chromeUserAgent(),
     cookie: jar.header()
   }
 }
@@ -548,7 +548,7 @@ function browserInfo(): Record<string, unknown> {
   return {
     javaEnabled: false,
     language: "en-US",
-    userAgent: USER_AGENT,
+    userAgent: chromeUserAgent(),
     height: "1440",
     width: "2560",
     timeZone: "240",

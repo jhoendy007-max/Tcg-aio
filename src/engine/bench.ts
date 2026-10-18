@@ -1,5 +1,6 @@
 import { percentile } from "./monitor"
 import { STORE_GAP_MS } from "./polite"
+import { chromeUserAgent } from "./chrome-ua"
 import type { HttpClient, HttpResponse } from "./http"
 import { defaultHttp, warmMonitorHosts } from "./http"
 import { offersUrl, parseAsin } from "../stores/amazon/parse"
@@ -12,8 +13,6 @@ import { parseSku as parsePokemon, searchUrl } from "../stores/pokemon-center/pa
 import { parseTcin } from "../shared/tcin"
 import { parseItemId } from "../stores/walmart/parse"
 import { STORE_IDS, type ProxyEndpoint, type ProxyGroup, type StoreId } from "../shared/types"
-
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 /** Public read-only monitor URLs. These match the stock checks, not cart or checkout. */
 export const BENCH_SKUS: Record<StoreId, string> = {
@@ -114,7 +113,7 @@ function headersFor(store: StoreId, url: string): Record<string, string> {
   const headers: Record<string, string> = {
     accept: store === "target" || store === "pokemon-center" || store === "crunchyroll" || store === "bandai" || store === "tcgplayer" ? "application/json" : "text/html,application/json",
     "accept-language": "en-US,en;q=0.9",
-    "user-agent": USER_AGENT
+    "user-agent": chromeUserAgent()
   }
   if (store === "bandai") {
     headers["x-g1-area-code"] = "us"
