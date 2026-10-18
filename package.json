@@ -68,7 +68,7 @@
       "provider": "github",
       "owner": "jhoendy007-max",
       "repo": "Tcg-aio",
-      "private": true,
+      "private": false,
       "releaseType": "prerelease"
     }
   }

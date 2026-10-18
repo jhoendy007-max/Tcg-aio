@@ -1076,6 +1076,8 @@ export interface UpdateStatus {
   phoneVersion: string | null
   error: string
   hasToken: boolean
+  /** Download progress from 0 to 100. Empty until a download starts. */
+  percent?: number | null
 }
 
 export interface ReleaseAsset {

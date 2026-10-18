@@ -53,20 +53,24 @@ export function pickRelease(releases: ReleaseAsset[]): ReleaseAsset | null {
   return usable[0] ?? null
 }
 
+export const PRIVATE_RELEASE_MESSAGE = `This GitHub repo looks private. Save a token with Contents: Read on ${RELEASE_OWNER}/${RELEASE_REPO}. It stays on this PC.`
+
 export async function fetchLatestRelease(http: HttpClient, token: string): Promise<ReleaseAsset | null> {
   const trimmed = token.trim()
-  if (!trimmed) throw new Error("This GitHub repo is private. Save a token with access to read releases. It stays on this PC.")
+  const headers: Record<string, string> = {
+    accept: "application/vnd.github+json",
+    "user-agent": "TCGAIO"
+  }
+  if (trimmed) headers.authorization = `Bearer ${trimmed}`
   const response = await http.request({
     method: "GET",
     url: `https://api.github.com/repos/${RELEASE_OWNER}/${RELEASE_REPO}/releases?per_page=10`,
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${trimmed}`,
-      "user-agent": "TCGAIO"
-    },
+    headers,
     timeoutMs: 15000
   })
-  if (response.status === 401 || response.status === 403) throw new Error("GitHub rejected the token. It needs access to read this repo's releases.")
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(trimmed ? "GitHub rejected the token. It needs Contents: Read on this repo's releases." : PRIVATE_RELEASE_MESSAGE)
+  }
   if (response.status < 200 || response.status >= 300) throw new Error(`GitHub returned HTTP ${response.status}.`)
   return pickRelease(readReleases(response.body))
 }

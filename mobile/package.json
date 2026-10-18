@@ -15,6 +15,8 @@
     "@noble/hashes": "1.8.0",
     "expo": "~58.0.13",
     "expo-camera": "~58.0.10",
+    "expo-file-system": "~58.0.9",
+    "expo-intent-launcher": "~58.0.3",
     "expo-notifications": "~58.1.5",
     "expo-secure-store": "~58.0.2",
     "expo-status-bar": "~58.0.3",

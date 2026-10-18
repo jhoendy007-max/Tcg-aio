@@ -51,7 +51,7 @@ export function DashboardPage({ onTasks }: { onTasks: () => void }) {
     <section className="page">
       <header className="page-head">
         <div>
-          <h1>Home</h1>
+          <h1>Dashboard</h1>
           <p>Live tasks, today’s checkouts, and the health of proxies and saved sessions.</p>
         </div>
         <button type="button" className="primary" onClick={onTasks}>Open tasks</button>
@@ -60,6 +60,7 @@ export function DashboardPage({ onTasks }: { onTasks: () => void }) {
       <div className="stats">
         <article className="stat"><strong>{active}</strong><span>active tasks</span><small>{tasks.length} saved</small></article>
         <article className="stat"><strong>{today.success}</strong><span>checkouts today</span><small>{today.count} recorded</small></article>
+        <article className="stat"><strong>{today.failure}</strong><span>declines today</span><small>failed checkouts</small></article>
         <article className="stat"><strong>${today.spend.toFixed(2)}</strong><span>spend today</span><small>successful orders</small></article>
         <article className="stat"><strong>{Math.round(today.winRate * 100)}%</strong><span>success rate</span><small>today, tests excluded</small></article>
         <article className="stat"><strong>{scores.length ? scores.length - benched : 0}</strong><span>proxies ready</span><small>{benched ? `${benched} quarantined` : scores.length ? "none quarantined" : "no scores yet"}</small></article>

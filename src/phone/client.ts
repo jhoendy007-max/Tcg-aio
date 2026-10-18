@@ -345,6 +345,58 @@ export class PhoneSession {
     return this.request({ type: "analytics.csv", req: rid(), conn: this.conn })
   }
 
+  saveProfile(profile: import("./desk").PhoneProfileDraft): Promise<PhoneCommandResult> {
+    return this.request({ type: "profile.save", req: rid(), conn: this.conn, profile })
+  }
+
+  deleteProfile(id: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "profile.delete", req: rid(), conn: this.conn, id })
+  }
+
+  saveAccount(account: import("./desk").PhoneAccountDraft): Promise<PhoneCommandResult> {
+    return this.request({ type: "account.save", req: rid(), conn: this.conn, account })
+  }
+
+  deleteAccount(id: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "account.delete", req: rid(), conn: this.conn, id })
+  }
+
+  warmAccount(id: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "account.warm", req: rid(), conn: this.conn, id })
+  }
+
+  saveProxy(proxy: import("./desk").PhoneProxyDraft): Promise<PhoneCommandResult> {
+    return this.request({ type: "proxy.save", req: rid(), conn: this.conn, proxy })
+  }
+
+  deleteProxy(id: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "proxy.delete", req: rid(), conn: this.conn, id })
+  }
+
+  saveClient(client: import("./desk").PhoneClientDraft): Promise<PhoneCommandResult> {
+    return this.request({ type: "client.save", req: rid(), conn: this.conn, client })
+  }
+
+  deleteClient(id: string): Promise<PhoneCommandResult> {
+    return this.request({ type: "client.delete", req: rid(), conn: this.conn, id })
+  }
+
+  markLedger(clientId: string, ids: string[], paid: boolean): Promise<PhoneCommandResult> {
+    return this.request({ type: "ledger.paid", req: rid(), conn: this.conn, clientId, ids, paid })
+  }
+
+  ledgerCsv(clientId = ""): Promise<PhoneCommandResult> {
+    return this.request({ type: "ledger.csv", req: rid(), conn: this.conn, clientId })
+  }
+
+  saveDeskSettings(settings: import("./desk").PhoneSettingsDraft): Promise<PhoneCommandResult> {
+    return this.request({ type: "settings.save", req: rid(), conn: this.conn, settings })
+  }
+
+  quickSetup(setup: import("./desk").PhoneQuickDraft): Promise<PhoneCommandResult> {
+    return this.request({ type: "quick.setup", req: rid(), conn: this.conn, setup })
+  }
+
   private async request(message: ClientMessage): Promise<PhoneCommandResult> {
     if (!("req" in message)) throw new Error("Phone request is missing an id.")
     const req = message.req

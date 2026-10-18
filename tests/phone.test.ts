@@ -202,10 +202,10 @@ describe("phone protocol", () => {
     })
     expect(view).not.toContain(PAN)
     expect(view).not.toContain(CVV)
-    expect(view).not.toContain(EMAIL)
-    expect(view).not.toContain(STREET)
-    expect(view).not.toContain("10001")
+    expect(view).not.toContain(PASSWORD)
     expect(view).not.toContain(PROXY_PASSWORD)
+    expect(view).toContain(EMAIL)
+    expect(view).toContain(STREET)
     expect(view).toContain("[card]")
     expect(view).toContain("4242")
     expect(view).toContain("a***@example.com")
@@ -244,8 +244,7 @@ describe("phone protocol", () => {
     expect(JSON.stringify(snap)).not.toContain(PAN)
     expect(JSON.stringify(snap)).not.toContain(PASSWORD)
     expect(JSON.stringify(snap)).not.toContain(PROXY_PASSWORD)
-    expect(JSON.stringify(snap)).not.toContain(EMAIL)
-    expect(JSON.stringify(snap)).not.toContain(STREET)
+    expect(JSON.stringify(snap)).not.toContain(CVV)
 
     const saved = await session.saveTask({
       store: "target",

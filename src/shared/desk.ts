@@ -3,6 +3,7 @@ import type { CheckoutRecord } from "./types"
 export interface DayStats {
   count: number
   success: number
+  failure: number
   spend: number
   winRate: number
 }
@@ -20,5 +21,5 @@ export function todayCheckoutStats(records: Pick<CheckoutRecord, "at" | "outcome
   const paused = rows.filter((record) => record.outcome === "paused").length
   const decided = success + failure + paused
   const spend = rows.reduce((sum, record) => sum + (record.outcome === "success" && record.price ? record.price : 0), 0)
-  return { count: rows.length, success, spend, winRate: decided ? success / decided : 0 }
+  return { count: rows.length, success, failure, spend, winRate: decided ? success / decided : 0 }
 }

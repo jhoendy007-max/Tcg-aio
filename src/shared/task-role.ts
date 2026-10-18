@@ -2,6 +2,49 @@ import { AppError } from "./errors"
 import type { MailLang } from "./mail"
 import type { PublicTask, SoldByMode, StartMode, TaskInput, TaskKind, TaskRole } from "./types"
 
+export interface RoleFields {
+  interval: boolean
+  sku: boolean
+  keywords: boolean
+  profile: boolean
+  account: boolean
+  quantity: boolean
+  maxPrice: boolean
+  linkMonitor: boolean
+  linkCheckouts: boolean
+  startMode: boolean
+}
+
+/** Which editor fields belong to a monitor and which belong to a checkout. */
+export function roleFields(kind: TaskKind, startMode?: StartMode): RoleFields {
+  if (kind === "monitor") {
+    return {
+      interval: true,
+      sku: true,
+      keywords: true,
+      profile: false,
+      account: false,
+      quantity: false,
+      maxPrice: false,
+      linkMonitor: false,
+      linkCheckouts: true,
+      startMode: false
+    }
+  }
+  return {
+    interval: false,
+    sku: true,
+    keywords: true,
+    profile: true,
+    account: true,
+    quantity: true,
+    maxPrice: true,
+    linkMonitor: startMode === "monitor",
+    linkCheckouts: false,
+    startMode: true
+  }
+}
+
 const START_MODES: readonly StartMode[] = ["manual", "scheduled", "monitor", "restock", "builtin"]
 
 export function kindFrom(input: { kind?: TaskKind; monitorOnly?: boolean }, existing?: { kind?: TaskKind; monitorOnly?: boolean }): TaskKind {
@@ -141,6 +184,12 @@ const TEXT = {
     monitor: "Monitor",
     checkout: "Checkout",
     kind: "Task type",
+    roleTitle: "What should this task do?",
+    linkMonitor: "Linked monitor",
+    linkMonitorHint: "Optional. This checkout starts when that monitor sees stock.",
+    noMonitor: "No monitor",
+    roleBadgeMonitor: "MONITOR",
+    roleBadgeCheckout: "CHECKOUT",
     store: "Store",
     sku: "SKU or URL",
     group: "Group",
@@ -215,6 +264,12 @@ const TEXT = {
     monitor: "Monitor",
     checkout: "Compra",
     kind: "Tipo de tarea",
+    roleTitle: "¿Qué debe hacer esta tarea?",
+    linkMonitor: "Monitor enlazado",
+    linkMonitorHint: "Opcional. Esta compra empieza cuando ese monitor ve stock.",
+    noMonitor: "Sin monitor",
+    roleBadgeMonitor: "MONITOR",
+    roleBadgeCheckout: "COMPRA",
     store: "Tienda",
     sku: "SKU o URL",
     group: "Grupo",

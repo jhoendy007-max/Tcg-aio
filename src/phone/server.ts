@@ -77,6 +77,19 @@ export interface PhoneHost {
   pushVault?(deviceId: string, accountId: string, cookie: string, expiresAt: number | null): void
   pullVault?(deviceId: string, accountId: string): string
   twoWayDevices?(accountId: string): string[]
+  saveProfile?(input: import("./desk").PhoneProfileDraft): void
+  deleteProfile?(id: string): void
+  saveAccount?(input: import("./desk").PhoneAccountDraft): void
+  deleteAccount?(id: string): void
+  warmAccount?(id: string): Promise<{ expired: boolean; detail: string }>
+  saveProxy?(input: import("./desk").PhoneProxyDraft): void
+  deleteProxy?(id: string): void
+  saveClient?(input: import("./desk").PhoneClientDraft): void
+  deleteClient?(id: string): void
+  markLedger?(clientId: string, ids: string[], paid: boolean): void
+  ledgerCsv?(clientId?: string): string
+  saveDeskSettings?(input: import("./desk").PhoneSettingsDraft): void
+  quickSetup?(input: import("./desk").PhoneQuickDraft): { created: number }
 }
 
 interface DeviceKey {
@@ -629,6 +642,7 @@ export class PhoneServer {
         this.reply(conn, req, { ok: true, cookie: this.host.pullVault(conn.deviceId, message.accountId) })
         return
       }
+      if (await this.desk(conn, req, message)) return
     } catch (err) {
       this.reply(conn, req, { ok: false, error: safeError(err) })
     }
@@ -641,6 +655,62 @@ export class PhoneServer {
       if (!conn.deviceId || !devices.has(conn.deviceId) || !conn.key) continue
       this.send(conn, conn.key, "session", { type: "vault.session", accountId, cookie })
     }
+  }
+
+  private async desk(conn: Conn, req: string, message: ClientMessage): Promise<boolean> {
+    const host = this.host
+    if (message.type === "profile.save") {
+      if (!host.saveProfile) throw new Error("Profiles are not available on this PC.")
+      host.saveProfile(message.profile)
+    } else if (message.type === "profile.delete") {
+      if (!host.deleteProfile) throw new Error("Profiles are not available on this PC.")
+      host.deleteProfile(message.id)
+    } else if (message.type === "account.save") {
+      if (!host.saveAccount) throw new Error("Accounts are not available on this PC.")
+      host.saveAccount(message.account)
+    } else if (message.type === "account.delete") {
+      if (!host.deleteAccount) throw new Error("Accounts are not available on this PC.")
+      host.deleteAccount(message.id)
+    } else if (message.type === "account.warm") {
+      if (!host.warmAccount) throw new Error("Session warm-up runs on the PC.")
+      const warmed = await host.warmAccount(message.id)
+      this.broadcast({ type: "snapshot", conn: "", snapshot: host.snapshot() })
+      this.reply(conn, req, { ok: true, created: warmed.expired ? 0 : 1 })
+      return true
+    } else if (message.type === "proxy.save") {
+      if (!host.saveProxy) throw new Error("Proxies are not available on this PC.")
+      host.saveProxy(message.proxy)
+    } else if (message.type === "proxy.delete") {
+      if (!host.deleteProxy) throw new Error("Proxies are not available on this PC.")
+      host.deleteProxy(message.id)
+    } else if (message.type === "client.save") {
+      if (!host.saveClient) throw new Error("Clients are not available on this PC.")
+      host.saveClient(message.client)
+    } else if (message.type === "client.delete") {
+      if (!host.deleteClient) throw new Error("Clients are not available on this PC.")
+      host.deleteClient(message.id)
+    } else if (message.type === "ledger.paid") {
+      if (!host.markLedger) throw new Error("The charge log is not available on this PC.")
+      host.markLedger(message.clientId, message.ids, message.paid)
+    } else if (message.type === "ledger.csv") {
+      if (!host.ledgerCsv) throw new Error("The charge log is not available on this PC.")
+      this.reply(conn, req, { ok: true, csv: host.ledgerCsv(message.clientId || undefined) })
+      return true
+    } else if (message.type === "settings.save") {
+      if (!host.saveDeskSettings) throw new Error("Settings are not available on this PC.")
+      host.saveDeskSettings(message.settings)
+    } else if (message.type === "quick.setup") {
+      if (!host.quickSetup) throw new Error("Quick setup is not available on this PC.")
+      const made = host.quickSetup(message.setup)
+      this.broadcast({ type: "snapshot", conn: "", snapshot: host.snapshot() })
+      this.reply(conn, req, { ok: true, created: made.created })
+      return true
+    } else {
+      return false
+    }
+    this.broadcast({ type: "snapshot", conn: "", snapshot: host.snapshot() })
+    this.reply(conn, req, { ok: true })
+    return true
   }
 
   private reply(conn: Conn, req: string, body: { ok: true; started?: string[]; errors?: { id: string; error: string }[]; task?: PhoneTask; health?: import("../shared/types").StoreHealth[]; alerts?: PhoneAlerts; csv?: string; created?: number; cookie?: string } | { ok: false; error: string }): void {
