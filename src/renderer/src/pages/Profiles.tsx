@@ -87,7 +87,8 @@ export function ProfilesPage() {
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {form ? (
-        <form className="card form-grid" onSubmit={save}>
+        <div className="drawer-scrim" onMouseDown={() => setForm(null)}>
+        <form className="drawer form-grid" onMouseDown={(event) => event.stopPropagation()} onSubmit={save}>
           <Field label="Profile name"><TextInput value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></Field>
           <Field label="Email"><TextInput type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required /></Field>
           <Field label="Phone"><TextInput value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} required /></Field>
@@ -123,8 +124,9 @@ export function ProfilesPage() {
             <button type="button" onClick={() => setForm(null)}>Cancel</button>
           </div>
         </form>
+        </div>
       ) : null}
-      <div className="table-wrap card">
+      <div className="table-wrap card manager">
         <table>
           <thead><tr><th>Name</th><th>Client</th><th>Ship to</th><th>Card</th><th></th></tr></thead>
           <tbody>

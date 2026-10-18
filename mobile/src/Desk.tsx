@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Pressable, Text, TextInput, View } from "react-native"
+import { Alert, Pressable, Text, TextInput, View } from "react-native"
 import type { PhoneSession } from "../../src/phone/client"
 import type { PhoneSnapshot } from "../../src/phone/protocol"
 import type { PhoneAccountDraft, PhoneClientDraft, PhoneProfileDraft, PhoneProxyDraft, PhoneQuickDraft } from "../../src/phone/desk"
@@ -9,13 +9,14 @@ type Run = (action: () => Promise<{ ok: boolean; error?: string; csv?: string; c
 
 const blankAddress = { firstName: "", lastName: "", line1: "", line2: "", city: "", state: "", zip: "", country: "US" as const }
 
-export function DeskPanel({ snap, session, run }: { snap: PhoneSnapshot | null; session: PhoneSession | null; run: Run }) {
+export function DeskPanel({ snap, session, run, focus = "all" }: { snap: PhoneSnapshot | null; session: PhoneSession | null; run: Run; focus?: "all" | "people" | "clients" }) {
   const { styles, colors } = useTheme()
-  const [section, setSection] = useState<"quick" | "profiles" | "accounts" | "proxies" | "clients">("quick")
+  const choices = focus === "clients" ? (["clients"] as const) : focus === "people" ? (["profiles", "accounts", "proxies"] as const) : (["quick", "profiles", "accounts", "proxies", "clients"] as const)
+  const [section, setSection] = useState<(typeof choices)[number]>(choices[0])
   return (
     <View style={{ gap: 12 }}>
       <View style={styles.choices}>
-        {(["quick", "profiles", "accounts", "proxies", "clients"] as const).map((id) => (
+        {choices.map((id) => (
           <Pressable key={id} style={[styles.choice, section === id && styles.choiceOn]} onPress={() => setSection(id)}>
             <Text style={styles.choiceText}>{id === "quick" ? "Quick setup" : id[0].toUpperCase() + id.slice(1)}</Text>
           </Pressable>
@@ -140,7 +141,7 @@ function ProfileForm({ snap, session, run }: { snap: PhoneSnapshot | null; sessi
             setCard("")
             setCvv("")
           }}><Text style={styles.link}>Edit</Text></Pressable>
-          <Pressable onPress={() => void run(() => session!.deleteProfile(profile.id))}><Text style={styles.link}>Delete</Text></Pressable>
+          <Pressable onPress={() => confirmDelete(() => void run(() => session!.deleteProfile(profile.id)))}><Text style={styles.link}>Delete</Text></Pressable>
         </View>
       ))}
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={colors.muted} />
@@ -181,7 +182,7 @@ function AccountForm({ snap, session, run }: { snap: PhoneSnapshot | null; sessi
           <Text style={styles.p}>{account.label} · {account.usernameMasked} · {account.sessionState ?? (account.hasSession ? "saved" : "missing")}</Text>
           <Pressable onPress={() => void run(() => session!.warmAccount(account.id))}><Text style={styles.link}>Warm</Text></Pressable>
           <Pressable onPress={() => void run(() => session!.openAccountLogin(account.id))}><Text style={styles.link}>Sign in on PC</Text></Pressable>
-          <Pressable onPress={() => void run(() => session!.deleteAccount(account.id))}><Text style={styles.link}>Delete</Text></Pressable>
+          <Pressable onPress={() => confirmDelete(() => void run(() => session!.deleteAccount(account.id)))}><Text style={styles.link}>Delete</Text></Pressable>
         </View>
       ))}
       <ChoiceRow label="Store" options={(snap?.stores ?? []).map((item) => ({ id: item.id, label: item.name }))} value={store} onChange={(id) => setStore(id as typeof store)} />
@@ -211,7 +212,7 @@ function ProxyForm({ snap, session, run }: { snap: PhoneSnapshot | null; session
       {(snap?.proxyGroups ?? []).map((group) => (
         <View key={group.id} style={styles.row}>
           <Text style={styles.p}>{group.name} · {group.count}</Text>
-          <Pressable onPress={() => void run(() => session!.deleteProxy(group.id))}><Text style={styles.link}>Delete</Text></Pressable>
+          <Pressable onPress={() => confirmDelete(() => void run(() => session!.deleteProxy(group.id)))}><Text style={styles.link}>Delete</Text></Pressable>
         </View>
       ))}
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Group name" placeholderTextColor={colors.muted} />
@@ -241,7 +242,7 @@ function ClientForm({ snap, session, run }: { snap: PhoneSnapshot | null; sessio
       {clients.map((client) => (
         <View key={client.id} style={styles.row}>
           <Text style={styles.p}>{client.name} · ${client.fee.toFixed(2)} / {client.feeBasis} · {client.status}</Text>
-          {client.id !== "me" ? <Pressable onPress={() => void run(() => session!.deleteClient(client.id))}><Text style={styles.link}>Delete</Text></Pressable> : null}
+          {client.id !== "me" ? <Pressable onPress={() => confirmDelete(() => void run(() => session!.deleteClient(client.id)))}><Text style={styles.link}>Delete</Text></Pressable> : null}
         </View>
       ))}
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Client name" placeholderTextColor={colors.muted} />
@@ -264,6 +265,13 @@ function ClientForm({ snap, session, run }: { snap: PhoneSnapshot | null; sessio
       {csv ? <Text selectable style={styles.log}>{csv}</Text> : null}
     </View>
   )
+}
+
+function confirmDelete(onYes: () => void) {
+  Alert.alert("Delete?", "This cannot be undone.", [
+    { text: "Cancel", style: "cancel" },
+    { text: "Delete", style: "destructive", onPress: onYes }
+  ])
 }
 
 function ChoiceRow({ label, options, value, onChange }: { label: string; options: { id: string; label: string }[]; value: string; onChange: (id: string) => void }) {

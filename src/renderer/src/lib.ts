@@ -11,17 +11,17 @@ export function formatTime(ts: number): string {
 }
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
-  idle: "Idle",
+  idle: "Waiting",
   monitoring: "Monitoring",
   in_stock: "In stock",
-  adding_to_cart: "Adding to cart",
+  adding_to_cart: "Carting",
   checking_out: "Checking out",
-  success: "Checked out",
-  failed: "Failed",
-  paused: "Paused",
+  success: "Success",
+  failed: "Declined",
+  paused: "Waiting",
   stopped: "Stopped",
-  tested: "Tested",
-  challenge: "Solve challenge",
+  tested: "Success",
+  challenge: "Waiting",
   in_queue: "In queue"
 }
 
@@ -29,14 +29,14 @@ const STATUS_LABEL_ES: Record<TaskStatus, string> = {
   idle: "En espera",
   monitoring: "Vigilando",
   in_stock: "Hay stock",
-  adding_to_cart: "Añadiendo al carrito",
-  checking_out: "Comprando",
-  success: "Comprado",
-  failed: "Falló",
-  paused: "En pausa",
+  adding_to_cart: "Al carrito",
+  checking_out: "Pagando",
+  success: "Éxito",
+  failed: "Rechazado",
+  paused: "En espera",
   stopped: "Detenido",
-  tested: "Probado",
-  challenge: "Resuelve el desafío",
+  tested: "Éxito",
+  challenge: "En espera",
   in_queue: "En cola"
 }
 

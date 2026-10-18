@@ -25,7 +25,7 @@ import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
 
 type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats" | "mail" | "stores"
-type PhoneTab = "tasks" | "monitors" | "desk" | "logs" | "settings"
+type PhoneTab = "tasks" | "accounts" | "clients" | "settings"
 
 const LETTER: Record<string, string> = { target: "T", walmart: "W", bestbuy: "B", "pokemon-center": "P", amazon: "A", crunchyroll: "C", bandai: "N", gamestop: "G", "barnes-noble": "BN", costco: "Co", sams: "S", tcgplayer: "D" }
 
@@ -348,7 +348,7 @@ export default function App() {
             <TaskEditor draft={draft} snap={snap} setDraft={setDraft} session={session.current} run={run} onSaved={(id) => { setScreen("dash"); setDraft(null); if (id) setSelected(id) }} onCancel={() => { setScreen("dash"); setDraft(null) }} />
           ) : (
             <>
-              {tab === "tasks" || tab === "monitors" ? <>
+              {tab === "tasks" ? <>
               {snap?.testMode ? <Text style={styles.p}>Global test mode is on. Every task stops before place order.</Text> : null}
               <View style={styles.metrics}>
                 <View style={styles.metric}><Text style={styles.metricNum}>{activeCount}</Text><Text style={styles.p}>Active</Text></View>
@@ -364,25 +364,18 @@ export default function App() {
               {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
               {snap?.imap ? <Text style={styles.p}>{snap.imap.accounts === 0 ? mailText(snap.language === "es" ? "es" : "en", "statusOff") : `${mailText(snap.language === "es" ? "es" : "en", "statusOn")} ${snap.imap.enabled} · ${snap.imap.ready}${snap.imap.lastError ? ` · ${snap.imap.lastError}` : ""}`}</Text> : null}
               {nextDrop(snap, now) ? <Text style={styles.p}>Next drop {nextDrop(snap, now)}</Text> : null}
-              {tab === "tasks" || tab === "monitors" ? (
               <View style={styles.choices}>
                 {(["", "monitor", "checkout"] as const).map((kind) => (
-                  <Pressable key={kind || "all"} style={[styles.choice, (tab === "monitors" ? "monitor" : roleFilter) === kind && styles.choiceOn]} onPress={() => { setTab("tasks"); setRoleFilter(kind) }}>
+                  <Pressable key={kind || "all"} style={[styles.choice, roleFilter === kind && styles.choiceOn]} onPress={() => setRoleFilter(kind)}>
                     <Text style={styles.choiceText}>{kind === "" ? (snap?.language === "es" ? "Todas" : "All") : taskText(snap?.language === "es" ? "es" : "en", kind)}</Text>
                   </Pressable>
                 ))}
               </View>
-              ) : null}
               <View style={styles.row}>
                 <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.pauseAll())}><Text style={styles.secondaryText}>Pause all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={() => setScreen("mail")}><Text style={styles.secondaryText}>{mailText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={() => setScreen("stores")}><Text style={styles.secondaryText}>{moduleText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={() => setScreen("alerts")}><Text style={styles.secondaryText}>Alerts</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={() => setScreen("drops")}><Text style={styles.secondaryText}>Drops</Text></Pressable>
-                <Pressable style={styles.secondary} onPress={() => setScreen("stats")}><Text style={styles.secondaryText}>Stats</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(async () => {
                   const result = await session.current!.checkHealth(snap?.proxyGroups[0]?.id ?? null)
                   if (result.ok) setHealth(result.health ?? [])
@@ -393,13 +386,20 @@ export default function App() {
                 <Text key={row.store} style={styles.p}>{row.storeName} · {row.proxy} · {row.verdict} · {row.detail}</Text>
               )) : null}
               </> : null}
-              {tab === "desk" ? <><Text style={styles.h1}>Desk</Text><DeskPanel snap={snap} session={session.current} run={run} /></> : null}
-              {tab === "logs" ? <><Text style={styles.h1}>Logs</Text><LogsPanel snap={snap} /></> : null}
-              {tab === "settings" ? <><Text style={styles.h1}>Settings</Text><PhoneSettingsForm snap={snap} session={session.current} run={run} /><PhoneUpdateCard /></> : null}
-              {(tab === "tasks" || tab === "monitors" ? (snap?.tasks ?? []).filter((item) => {
-                const kind = tab === "monitors" ? "monitor" : roleFilter
-                if (kind === "") return true
-                return kind === "monitor" ? item.kind === "monitor" || item.monitorOnly : item.kind !== "monitor" && !item.monitorOnly
+              {tab === "accounts" ? <><Text style={styles.h1}>Accounts</Text><DeskPanel snap={snap} session={session.current} run={run} focus="people" /></> : null}
+              {tab === "clients" ? <><Text style={styles.h1}>Clients</Text><DeskPanel snap={snap} session={session.current} run={run} focus="clients" /></> : null}
+              {tab === "settings" ? <><Text style={styles.h1}>Settings</Text><PhoneSettingsForm snap={snap} session={session.current} run={run} /><PhoneUpdateCard /><LogsPanel snap={snap} />
+                <View style={styles.row}>
+                  <Pressable style={styles.secondary} onPress={() => setScreen("mail")}><Text style={styles.secondaryText}>{mailText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
+                  <Pressable style={styles.secondary} onPress={() => setScreen("stores")}><Text style={styles.secondaryText}>{moduleText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
+                  <Pressable style={styles.secondary} onPress={() => setScreen("alerts")}><Text style={styles.secondaryText}>Alerts</Text></Pressable>
+                  <Pressable style={styles.secondary} onPress={() => setScreen("drops")}><Text style={styles.secondaryText}>Drops</Text></Pressable>
+                  <Pressable style={styles.secondary} onPress={() => setScreen("stats")}><Text style={styles.secondaryText}>Stats</Text></Pressable>
+                </View>
+              </> : null}
+              {(tab === "tasks" ? (snap?.tasks ?? []).filter((item) => {
+                if (roleFilter === "") return true
+                return roleFilter === "monitor" ? item.kind === "monitor" || item.monitorOnly : item.kind !== "monitor" && !item.monitorOnly
               }) : []).map((item) => (
                 <SwipeTask key={item.id} active={isActive(item.status)} onPrimary={() => void run(() => isActive(item.status) ? session.current!.stop(item.id) : session.current!.start(item.id))} onTest={() => void run(() => session.current!.runTest(item.id))}>
                 <Pressable style={[styles.card, selected === item.id && styles.cardOn]} onPress={() => setSelected(item.id)} accessibilityHint="Swipe right to start or stop. Swipe left to run a test. Buttons below do the same.">
@@ -409,7 +409,7 @@ export default function App() {
                     <Text style={styles.h2}>{item.storeName}</Text>
                     <Text style={styles.pill}>{taskText(snap?.language === "es" ? "es" : "en", item.kind === "monitor" || item.monitorOnly ? "roleBadgeMonitor" : "roleBadgeCheckout")}</Text>
                     {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
-                    <Text style={styles.pill}>{STATUS_LABEL[item.status] ?? item.status}</Text>
+                    <Text style={[styles.pill, { color: statusColor(item.status) }]}>{STATUS_LABEL[item.status] ?? item.status}</Text>
                   </View>
                   <Text style={styles.sku}>{item.sku}</Text>
                   <Text style={styles.p}>Qty {item.quantity} · {item.profileName} · {item.accountLabel} · {item.proxyGroupName ?? "Direct"}</Text>
@@ -419,7 +419,7 @@ export default function App() {
                 </Pressable>
                 </SwipeTask>
               ))}
- {(tab === "tasks" || tab === "monitors") && snap && snap.tasks.length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
+ {tab === "tasks" && snap && snap.tasks.length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
               {links.length > 1 ? (
                 <View style={styles.row}>
                   {links.map((item) => (
@@ -436,9 +436,8 @@ export default function App() {
         <View style={styles.tabBar}>
           {([
             ["tasks", "Tasks"],
-            ["monitors", "Monitors"],
-            ["desk", "Desk"],
-            ["logs", "Logs"],
+            ["accounts", "Accounts"],
+            ["clients", "Clients"],
             ["settings", "Settings"]
           ] as const).map(([id, label]) => (
             <Pressable key={id} style={styles.tab} onPress={() => { setTab(id); if (screen !== "dash" && screen !== "edit") setScreen("dash") }}>
@@ -866,6 +865,15 @@ function AlertsPanel({ snap, onRun, session, onBack }: {
   )
 }
 
+function statusColor(status: string): string {
+  if (status === "success" || status === "tested") return "#3cba8b"
+  if (status === "failed") return "#ff8d8d"
+  if (status === "adding_to_cart" || status === "checking_out") return "#c4b5fd"
+  if (status === "monitoring" || status === "in_stock") return "#8eb4ff"
+  if (status === "in_queue" || status === "paused" || status === "challenge" || status === "idle") return "#e0b15a"
+  return "#a8b3c7"
+}
+
 function upsert(tasks: PhoneTask[], task: PhoneTask): PhoneTask[] {
   const index = tasks.findIndex((item) => item.id === task.id)
   if (index < 0) return [task, ...tasks]
@@ -878,9 +886,9 @@ function createStyles(c: typeof colors) {
   return StyleSheet.create({
     root: { flex: 1, backgroundColor: c.bg },
     boot: { marginTop: 80 },
-    pad: { padding: 20, paddingTop: 56, gap: 12 },
+    pad: { padding: 16, paddingTop: 48, paddingBottom: 24, gap: 10 },
     brand: { color: c.accent, letterSpacing: 2, fontSize: 12, fontWeight: "700" },
-    h1: { color: c.text, fontSize: 28, fontWeight: "700" },
+    h1: { color: c.text, fontSize: 22, fontWeight: "700" },
     h2: { color: c.text, fontSize: 16, fontWeight: "700" },
     p: { color: c.muted, fontSize: 14, flexShrink: 1 },
     err: { color: "#ffd0d0", backgroundColor: "#3a1d1d", padding: 10, borderRadius: 8 },
@@ -915,7 +923,7 @@ function createStyles(c: typeof colors) {
     mark: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
     markText: { color: c.accentInk, fontWeight: "700" },
     photo: { width: 36, height: 36, borderRadius: 8 },
-    tabBar: { flexDirection: "row", borderTopWidth: 1, borderTopColor: c.line, backgroundColor: c.sidebar, paddingBottom: 10, paddingTop: 8 },
+    tabBar: { flexDirection: "row", borderTopWidth: 1, borderTopColor: c.line, backgroundColor: c.sidebar, paddingBottom: 18, paddingTop: 6 },
     tab: { flex: 1, alignItems: "center", paddingVertical: 6 },
     tabText: { color: c.muted, fontSize: 11, fontWeight: "700" },
     tabOn: { color: c.accent }

@@ -437,6 +437,8 @@ export interface Settings {
   licensePublicKey: string
   /** Per-store defaults. Missing stores use the recommended values. */
   modules: Partial<Record<StoreId, ModuleRecord>>
+  /** Role defaults the user saved for a store. Missing keys use the built-in module values. */
+  storeRoles: import("./store-defaults").StoreRoles
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -500,7 +502,8 @@ export const DEFAULT_SETTINGS: Settings = {
   licenseServerUrl: "",
   licenseRequired: false,
   licensePublicKey: "",
-  modules: {}
+  modules: {},
+  storeRoles: {}
 }
 
 export interface SecurityInfo {

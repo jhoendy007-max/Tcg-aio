@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react"
 import { issueText, type HealthIssue } from "../../../shared/checkout-health"
 import { clientIdOf, clientText, ME_CLIENT_ID, type Client } from "../../../shared/clients"
 import { consistencyText, effectiveBinding } from "../../../shared/consistency"
+import { deskText } from "../../../shared/desk-ui"
 import { dropOpsText } from "../../../shared/drop-ops"
+import { fieldMark, prefillRole } from "../../../shared/store-defaults"
 import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallenge, type PublicProfile, type PublicTask, type Settings, type StartMode, type StoreHealth, type StoreInfo, type TaskInput, type TaskKind, type TaskStatus } from "../../../shared/types"
 import { moduleScope, moduleText, resolveModule, sourceLabel } from "../../../shared/module-settings"
 import { taskText } from "../../../shared/task-role"
@@ -61,9 +63,12 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("")
   const [storeFilter, setStoreFilter] = useState("")
   const [kindFilter, setKindFilter] = useState<TaskKind | "">(lockedKind)
+  const [folder, setFolder] = useState("")
+  const [picked, setPicked] = useState<string[]>([])
+  const [showQuick, setShowQuick] = useState(false)
   const [clientFilter, setClientFilter] = useState("")
   const [clients, setClients] = useState<Client[]>([])
-  const [grouped, setGrouped] = useState(true)
+  const [grouped, setGrouped] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [checkoutIssues, setCheckoutIssues] = useState<Map<string, HealthIssue[]>>(new Map())
 
@@ -116,6 +121,8 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
     }
   }, [])
 
+  useEffect(() => { setKindFilter(lockedKind) }, [lockedKind])
+
   useEffect(() => {
     if (!challenge) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -137,17 +144,24 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
       return hay.includes(needle)
     })
   }, [tasks, query, statusFilter, storeFilter, kindFilter, clientFilter, lang])
+  const folderName = (task: PublicTask) => task.group?.trim() || storeName(task.store)
+  const folders = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const task of filtered) counts.set(folderName(task), (counts.get(folderName(task)) ?? 0) + 1)
+    return [...counts.entries()]
+  }, [filtered])
+  const listed = useMemo(() => (folder ? filtered.filter((task) => folderName(task) === folder) : filtered), [filtered, folder])
   const sections = useMemo(() => {
-    if (!grouped) return [{ label: "", rows: filtered }]
+    if (!grouped) return [{ label: "", rows: listed }]
     const buckets = new Map<string, PublicTask[]>()
-    for (const task of filtered) {
+    for (const task of listed) {
       const label = task.group?.trim() || "Ungrouped"
       const rows = buckets.get(label) ?? []
       rows.push(task)
       buckets.set(label, rows)
     }
     return [...buckets.entries()].map(([label, rows]) => ({ label, rows }))
-  }, [filtered, grouped])
+  }, [listed, grouped])
 
   async function commitOrder(ids: string[]) {
     setError("")
@@ -256,8 +270,32 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
     }
   }
 
+  function togglePick(id: string) {
+    setPicked((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+  }
+
+  async function bulkRun(action: "start" | "stop" | "delete") {
+    if (!picked.length) return
+    if (action === "delete" && !window.confirm(deskText(lang, "confirmDelete"))) return
+    setError("")
+    try {
+      if (action === "delete") {
+        await unwrap(window.aio.bulk.delete(picked))
+        setPicked([])
+        await reload()
+        return
+      }
+      for (const id of picked) {
+        if (action === "start") await unwrap(window.aio.tasks.start(id))
+        else await unwrap(window.aio.tasks.stop(id))
+      }
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
   async function remove(id: string) {
-    if (!window.confirm("Delete this task?")) return
+    if (!window.confirm(deskText(lang, "confirmDelete"))) return
     setError("")
     try {
       await unwrap(window.aio.tasks.delete(id))
@@ -268,17 +306,28 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
     }
   }
 
+  const allPicked = listed.length > 0 && listed.every((task) => picked.includes(task.id))
+  const role = kindFilter === "monitor" ? "monitor" : kindFilter === "checkout" ? "checkout" : ""
+
   return (
     <section className="page">
       <header className="page-head">
         <div>
-          <h1>Tasks</h1>
-          <p>Monitor a drop, add it to cart, and place a ship-to-home order with your own account.</p>
+          <h1>{deskText(lang, "navTasks")}</h1>
+          <p>{deskText(lang, "emptyHint")}</p>
         </div>
-        <button type="button" onClick={() => { setForm(freshTask(settings)); setError("") }}>{taskText(lang, "quickAdvanced")}</button>
+        <div className="actions">
+          <button type="button" onClick={() => setShowQuick((open) => !open)}>{deskText(lang, "quickSetup")}</button>
+          <button type="button" className="primary" onClick={() => { setForm(freshTask(settings, kindFilter === "monitor" ? "monitor" : "checkout")); setError("") }}>{deskText(lang, "newTask")}</button>
+        </div>
       </header>
+      <div className="segments" role="tablist">
+        {(["", "monitor", "checkout"] as const).map((kind) => (
+          <a key={kind || "all"} href={kind ? `#tasks/${kind}` : "#tasks"} aria-current={role === kind ? "page" : undefined}>{deskText(lang, kind === "" ? "tabAll" : kind === "monitor" ? "tabMonitor" : "tabCheckout")}</a>
+        ))}
+      </div>
       {error ? <Banner tone="error">{error}</Banner> : null}
-      {!form && settings ? (
+      {showQuick && settings ? (
         <QuickSetup
           lang={lang}
           stores={stores}
@@ -312,23 +361,29 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
         </div>
       ) : null}
       {form ? (
-        <TaskEditor
-          form={form}
-          tasks={tasks}
-          settings={settings}
-          stores={stores}
-          profiles={profiles}
-          accounts={storeAccounts}
-          clients={clients}
-          groups={groups}
-          busy={busy}
-          lang={lang}
-          live={Boolean(form.id && isActiveStatus(tasks.find((task) => task.id === form.id)?.status ?? "idle"))}
-          onChange={setForm}
-          onCancel={() => setForm(null)}
-          onSubmit={save}
-        />
+        <div className="drawer-scrim" onMouseDown={() => setForm(null)}>
+          <div className="drawer" onMouseDown={(event) => event.stopPropagation()}>
+            <TaskEditor
+              form={form}
+              tasks={tasks}
+              settings={settings}
+              stores={stores}
+              profiles={profiles}
+              accounts={storeAccounts}
+              clients={clients}
+              groups={groups}
+              busy={busy}
+              lang={lang}
+              live={Boolean(form.id && isActiveStatus(tasks.find((task) => task.id === form.id)?.status ?? "idle"))}
+              onChange={setForm}
+              onCancel={() => setForm(null)}
+              onSubmit={save}
+            />
+          </div>
+        </div>
       ) : null}
+      <details className="advanced">
+        <summary>{deskText(lang, "checkStores")}</summary>
       <div className="card">
         <div className="log-head">
           <h2>{taskText(lang, "healthTitle")}</h2>
@@ -361,7 +416,11 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
           </div>
         ) : null}
       </div>
-      <TasksBulk tasks={tasks} profiles={profiles} accounts={accounts} groups={groups} stores={stores} lang={lang} onChanged={() => reload()} />
+      </details>
+      <details className="advanced">
+        <summary>{deskText(lang, "createMany")}</summary>
+        <TasksBulk tasks={tasks} profiles={profiles} accounts={accounts} groups={groups} stores={stores} lang={lang} onChanged={() => reload()} />
+      </details>
       <div className="card toolbar">
         <Field label="Search">
           <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SKU, store, or group" aria-label="Search tasks" />
@@ -400,25 +459,51 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
           <button type="button" aria-pressed={taskView === "detailed"} onClick={() => void setView("detailed")}>Detailed</button>
         </div>
       </div>
+      <div className="task-desk">
+        <aside className="folders">
+          <h2>{deskText(lang, "folders")}</h2>
+          <button type="button" aria-pressed={folder === ""} onClick={() => setFolder("")}><span>{deskText(lang, "allGroups")}</span><span className="count">{filtered.length}</span></button>
+          {folders.map(([label, count]) => (
+            <button key={label} type="button" aria-pressed={folder === label} onClick={() => setFolder(label)}><span>{label}</span><span className="count">{count}</span></button>
+          ))}
+        </aside>
+        <div>
+          <div className="bulk-bar">
+            <label className="check">
+              <input type="checkbox" checked={allPicked} onChange={() => {
+                const ids = listed.map((task) => task.id)
+                setPicked((current) => allPicked ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])])
+              }} />
+              <span>{deskText(lang, "selectAll")}</span>
+            </label>
+            <button type="button" disabled={!picked.length} onClick={() => void bulkRun("start")}>{deskText(lang, "bulkStart")}</button>
+            <button type="button" disabled={!picked.length} onClick={() => void bulkRun("stop")}>{deskText(lang, "bulkStop")}</button>
+            <button type="button" disabled={picked.length !== 1} onClick={() => {
+              const task = tasks.find((item) => item.id === picked[0])
+              if (task) { setForm(toInput(task)); setError("") }
+            }}>{deskText(lang, "editSelected")}</button>
+            <button type="button" className="danger" disabled={!picked.length} onClick={() => void bulkRun("delete")}>{deskText(lang, "bulkDelete")}</button>
+          </div>
       <div className="table-wrap card">
         <table>
           <thead>
             <tr>
+              <th></th>
               <th>Order</th>
               <th>Product</th>
-              {taskView === "detailed" ? <th>Qty</th> : null}
-              {taskView === "detailed" ? <th>Profile</th> : null}
-              {taskView === "detailed" ? <th>Account</th> : null}
-              {taskView === "detailed" ? <th>Proxy</th> : null}
+              {taskView === "detailed" ? <th className="col-extra">Qty</th> : null}
+              {taskView === "detailed" ? <th className="col-extra">Profile</th> : null}
+              {taskView === "detailed" ? <th className="col-extra">Account</th> : null}
+              {taskView === "detailed" ? <th className="col-extra">Proxy</th> : null}
               <th>Status</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {tasks.length === 0 ? (
-              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty">No tasks yet. Create one when the profile and account are saved.</td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty">No tasks match this search.</td></tr>
+              <tr><td colSpan={taskView === "detailed" ? 9 : 5} className="empty">{deskText(lang, "emptyTasks")} <button type="button" className="primary" onClick={() => { setForm(freshTask(settings, "checkout")); setError("") }}>{deskText(lang, "emptyNext")}</button></td></tr>
+            ) : listed.length === 0 ? (
+              <tr><td colSpan={taskView === "detailed" ? 9 : 5} className="empty">No tasks match this search.</td></tr>
             ) : sections.map((section) => (
               <SectionRows
                 key={section.label || "all"}
@@ -426,6 +511,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
                 grouped={grouped}
                 taskView={taskView}
                 selectedId={selectedId}
+                picked={picked}
                 globalTest={globalTest}
                 dragId={dragId}
                 names={names}
@@ -434,6 +520,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
                 lang={lang}
                 checkoutIssues={checkoutIssues}
                 onSelect={setSelectedId}
+                onToggle={togglePick}
                 onDrag={setDragId}
                 onDrop={(target) => { if (dragId) place(dragId, target, false); setDragId(null) }}
                 onMove={moveVisible}
@@ -446,6 +533,8 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
             ))}
           </tbody>
         </table>
+      </div>
+        </div>
       </div>
       {selected ? (
         <div className="card stack">
@@ -487,11 +576,12 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
   )
 }
 
-function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragId, names, accounts, groups, lang, checkoutIssues, onSelect, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
+function SectionRows({ section, grouped, taskView, selectedId, picked, globalTest, dragId, names, accounts, groups, lang, checkoutIssues, onSelect, onToggle, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
   section: { label: string; rows: PublicTask[] }
   grouped: boolean
   taskView: "compact" | "detailed"
   selectedId: string | null
+  picked: string[]
   globalTest: boolean
   dragId: string | null
   names: { profile: Map<string, string>; account: Map<string, string>; group: Map<string, string>; client: Map<string, string> }
@@ -500,6 +590,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
   lang: "en" | "es"
   checkoutIssues: Map<string, HealthIssue[]>
   onSelect: (id: string) => void
+  onToggle: (id: string) => void
   onDrag: (id: string | null) => void
   onDrop: (id: string) => void
   onMove: (id: string, delta: number) => void
@@ -509,7 +600,7 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
   onEdit: (task: PublicTask) => void
   onDelete: (id: string) => void
 }) {
-  const cols = taskView === "detailed" ? 8 : 4
+  const cols = taskView === "detailed" ? 9 : 5
   return (
     <>
       {grouped ? <tr className="group-row"><td colSpan={cols}>{section.label}</td></tr> : null}
@@ -521,6 +612,9 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => { event.preventDefault(); onDrop(task.id) }}
         >
+          <td>
+            <input type="checkbox" aria-label={task.sku} checked={picked.includes(task.id)} onClick={(event) => event.stopPropagation()} onChange={() => onToggle(task.id)} />
+          </td>
           <td className="row-actions">
             <button type="button" className="drag-handle" draggable aria-label={`Drag ${task.sku}`} onDragStart={(event) => { event.dataTransfer.setData("text/plain", task.id); event.dataTransfer.effectAllowed = "move"; onDrag(task.id) }} onDragEnd={() => onDrag(null)}>Move</button>
             <button type="button" aria-label={`Move ${task.sku} up`} onClick={(event) => { event.stopPropagation(); onMove(task.id, -1) }}>Up</button>
@@ -538,12 +632,12 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
               </div>
             </div>
           </td>
-          {taskView === "detailed" ? <td>{task.quantity}</td> : null}
-          {taskView === "detailed" ? <td>{names.profile.get(task.profileId) ?? "Missing"}</td> : null}
-          {taskView === "detailed" ? <td>{bindingCell(task, accounts, groups, lang).account}</td> : null}
-          {taskView === "detailed" ? <td>{bindingCell(task, accounts, groups, lang).proxy}</td> : null}
+          {taskView === "detailed" ? <td className="col-extra">{task.quantity}</td> : null}
+          {taskView === "detailed" ? <td className="col-extra">{names.profile.get(task.profileId) ?? "Missing"}</td> : null}
+          {taskView === "detailed" ? <td className="col-extra">{bindingCell(task, accounts, groups, lang).account}</td> : null}
+          {taskView === "detailed" ? <td className="col-extra">{bindingCell(task, accounts, groups, lang).proxy}</td> : null}
           <td>
-            <span className={`pill ${task.status}`}>{statusLabel(task.status, lang)}</span>
+            <span className={`status-text status-${task.status}`}>{statusLabel(task.status, lang)}</span>
             {task.detail ? <div className="detail">{task.detail}</div> : null}
             {(checkoutIssues.get(task.id) ?? []).slice(0, 2).map((item) => (
               <div key={item.code} className="detail">{issueText(lang, item)}</div>
@@ -551,17 +645,15 @@ function SectionRows({ section, grouped, taskView, selectedId, globalTest, dragI
           </td>
           <td className="row-actions">
             {isActiveStatus(task.status) ? (
-              <button type="button" onClick={(event) => { event.stopPropagation(); void onStop(task.id) }}>Stop</button>
+              <button type="button" className="icon-btn" title={deskText(lang, "bulkStop")} aria-label={deskText(lang, "bulkStop")} onClick={(event) => { event.stopPropagation(); void onStop(task.id) }}>■</button>
             ) : (
-              <button type="button" className="primary" disabled={!task.confirmPurchase && !task.testMode && task.kind !== "monitor" && !globalTest} onClick={(event) => { event.stopPropagation(); void onStart(task.id) }}>
-                {task.status === "paused" ? "Resume" : "Start"}
-              </button>
+              <button type="button" className="icon-btn primary" title={deskText(lang, "bulkStart")} aria-label={deskText(lang, "bulkStart")} disabled={!task.confirmPurchase && !task.testMode && task.kind !== "monitor" && !globalTest} onClick={(event) => { event.stopPropagation(); void onStart(task.id) }}>▶</button>
             )}
             {!isActiveStatus(task.status) ? (
-              <button type="button" onClick={(event) => { event.stopPropagation(); void onTest(task.id) }}>Run test</button>
+              <button type="button" className="icon-btn" title="Test" aria-label="Test" onClick={(event) => { event.stopPropagation(); void onTest(task.id) }}>◎</button>
             ) : null}
-            <button type="button" onClick={(event) => { event.stopPropagation(); onEdit(task) }}>Edit</button>
-            <button type="button" className="danger" onClick={(event) => { event.stopPropagation(); void onDelete(task.id) }} disabled={isActiveStatus(task.status)}>Delete</button>
+            <button type="button" className="icon-btn" title={deskText(lang, "editSelected")} aria-label={deskText(lang, "editSelected")} onClick={(event) => { event.stopPropagation(); onEdit(task) }}>✎</button>
+            <button type="button" className="icon-btn danger" title={deskText(lang, "bulkDelete")} aria-label={deskText(lang, "bulkDelete")} onClick={(event) => { event.stopPropagation(); void onDelete(task.id) }} disabled={isActiveStatus(task.status)}>✕</button>
           </td>
         </tr>
       ))}
@@ -659,6 +751,7 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
   onSubmit: (event: React.FormEvent) => void
 }) {
   const monitor = form.kind === "monitor"
+  const recommended = settings ? prefillRole(form.store, monitor ? "monitor" : "checkout", settings.storeRoles) : null
   const selectedStore = stores.find((store) => store.id === form.store)
   const accountClient = clientIdOf(accounts.find((account) => account.id === form.accountId)?.clientId)
   const profileChoices = form.accountId ? profiles.filter((profile) => clientIdOf(profile.clientId) === accountClient) : profiles
@@ -668,14 +761,8 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
   const inheritedDelay = settings ? String(resolveModule(form.store, moduleScope(settings), form.overrides).monitorDelayMs.value) : ""
   function chooseKind(kind: TaskKind) {
     if ((form.kind ?? "checkout") === kind) return
-    onChange({
-      ...form,
-      kind,
-      monitorOnly: kind === "monitor",
-      confirmPurchase: kind === "monitor" ? false : form.confirmPurchase,
-      startMode: kind === "monitor" ? (form.startMode === "scheduled" ? "scheduled" : "manual") : "builtin",
-      linkedMonitorId: kind === "monitor" ? null : form.linkedMonitorId ?? null
-    })
+    const next = applyRole(form, kind, settings)
+    onChange(next)
   }
   return (
     <form className="card form-grid" onSubmit={onSubmit}>
@@ -693,8 +780,7 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
       <Field label={taskText(lang, "store")}>
         <Select value={form.store} disabled={live} onChange={(event) => {
           const store = event.target.value as TaskInput["store"]
-          const testMode = form.id ? form.testMode : settings ? resolveModule(store, moduleScope(settings)).testMode.value : false
-          onChange({ ...form, store, accountId: "", testMode })
+          onChange(applyRole({ ...form, store, accountId: "" }, form.kind === "monitor" ? "monitor" : "checkout", settings))
         }}>
           {stores.map((store) => (
             <option key={store.id} value={store.id}>{store.name}{store.implemented ? "" : " (stub)"}</option>
@@ -749,7 +835,7 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
         </>
       ) : (
         <>
-          <Field label={taskText(lang, "quantity")}>
+          <Field label={taskText(lang, "quantity")} hint={recommended ? deskText(lang, fieldMark(form.quantity, recommended.quantity) === "custom" ? "markCustom" : "markDefault") : undefined}>
             <TextInput type="number" min={1} max={12} value={form.quantity} disabled={live} onChange={(event) => onChange({ ...form, quantity: Number(event.target.value) })} required />
           </Field>
           <Field label={taskText(lang, "profile")}>
@@ -817,7 +903,7 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
       {selectedStore && !selectedStore.implemented ? (
         <Banner tone="info">{selectedStore.name} is registered, and starting a task records that checkout is not implemented yet.</Banner>
       ) : null}
-      {settings ? <TaskOverrides form={form} settings={settings} onChange={onChange} /> : null}
+      {settings ? <details className="advanced span-2"><summary>{deskText(lang, "advanced")}</summary><TaskOverrides form={form} settings={settings} onChange={onChange} /></details> : null}
       <BindingNote form={form} accounts={accounts} groups={groups} lang={lang} />
       <div className="actions span-2">
         <button className="primary" type="submit" disabled={busy}>{form.id ? "Save task" : "Create task"}</button>
@@ -846,10 +932,22 @@ function BindingNote({ form, accounts, groups, lang }: { form: TaskInput; accoun
   )
 }
 
-function freshTask(settings: Settings | null): TaskInput {
-  const form = emptyForm()
-  if (!settings) return form
-  return { ...form, testMode: resolveModule(form.store, moduleScope(settings)).testMode.value }
+function applyRole(form: TaskInput, kind: TaskKind, settings: Settings | null): TaskInput {
+  const base: TaskInput = {
+    ...form,
+    kind,
+    monitorOnly: kind === "monitor",
+    confirmPurchase: kind === "monitor" ? false : form.confirmPurchase,
+    startMode: kind === "monitor" ? (form.startMode === "scheduled" ? "scheduled" : "manual") : (form.startMode ?? "builtin"),
+    linkedMonitorId: kind === "monitor" ? null : form.linkedMonitorId ?? null
+  }
+  if (form.id || !settings) return base
+  const role = prefillRole(form.store, kind === "monitor" ? "monitor" : "checkout", settings.storeRoles)
+  return { ...base, quantity: role.quantity, maxPrice: role.maxPrice, checkoutDelayMs: role.checkoutDelayMs, testMode: role.testMode }
+}
+
+function freshTask(settings: Settings | null, kind: TaskKind = "checkout"): TaskInput {
+  return applyRole(emptyForm(), kind, settings)
 }
 
 function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings: Settings; onChange: (next: TaskInput) => void }) {

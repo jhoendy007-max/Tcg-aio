@@ -53,17 +53,17 @@ export function palette(brand?: { theme?: "dark" | "light"; accent?: string }): 
 }
 
 export const STATUS_LABEL: Record<string, string> = {
-  idle: "Idle",
+  idle: "Waiting",
   monitoring: "Monitoring",
   in_stock: "In stock",
-  adding_to_cart: "Adding to cart",
+  adding_to_cart: "Carting",
   checking_out: "Checking out",
   success: "Success",
-  failed: "Failed",
-  paused: "Paused",
+  failed: "Declined",
+  paused: "Waiting",
   stopped: "Stopped",
-  tested: "Tested",
-  challenge: "Solve challenge",
+  tested: "Success",
+  challenge: "Waiting",
   in_queue: "In queue"
 }
 

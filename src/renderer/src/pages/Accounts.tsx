@@ -109,7 +109,8 @@ export function AccountsPage() {
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {form ? (
-        <form className="card stack" onSubmit={save}>
+        <div className="drawer-scrim" onMouseDown={() => setForm(null)}>
+        <form className="drawer stack" onMouseDown={(event) => event.stopPropagation()} onSubmit={save}>
           <div className="form-grid">
             <Field label="Store">
               <Select value={form.store} onChange={(event) => setForm({ ...form, store: event.target.value as StoreId })}>
@@ -147,8 +148,9 @@ export function AccountsPage() {
             <button type="button" onClick={() => setForm(null)}>Cancel</button>
           </div>
         </form>
+        </div>
       ) : null}
-      <div className="table-wrap card">
+      <div className="table-wrap card manager">
         <table>
           <thead><tr><th>Store</th><th>Client</th><th>Label</th><th>Username</th><th>Password</th><th>{consistencyText(lang, "freshness")}</th><th>{consistencyText(lang, "profile")}</th><th>{consistencyText(lang, "stickyProxy")}</th><th></th></tr></thead>
           <tbody>

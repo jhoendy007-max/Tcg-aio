@@ -42,6 +42,7 @@ export interface PhoneDeskSettings {
   declineHoldMin: number
   theme: Settings["theme"]
   accent: Settings["accent"]
+  storeRoles: Settings["storeRoles"]
 }
 
 export interface PhoneProfileDraft {
@@ -102,6 +103,7 @@ export interface PhoneSettingsDraft {
   declineHoldMin?: number
   theme?: Settings["theme"]
   accent?: Settings["accent"]
+  storeRoles?: Settings["storeRoles"]
 }
 
 export interface PhoneQuickDraft {
@@ -211,7 +213,8 @@ export function projectPhoneSettings(settings: Settings): PhoneDeskSettings {
     checkoutHealthBlock: settings.checkoutHealthBlock,
     declineHoldMin: settings.declineHoldMin,
     theme: settings.theme,
-    accent: settings.accent
+    accent: settings.accent,
+    storeRoles: settings.storeRoles ?? {}
   }
 }
 
@@ -229,6 +232,7 @@ export function applyPhoneSettings(current: Settings, draft: PhoneSettingsDraft)
   if (typeof draft.declineHoldMin === "number") next.declineHoldMin = draft.declineHoldMin
   if (draft.theme === "dark" || draft.theme === "light") next.theme = draft.theme
   if (draft.accent === "gold" || draft.accent === "blue" || draft.accent === "green" || draft.accent === "rose") next.accent = draft.accent
+  if (draft.storeRoles && typeof draft.storeRoles === "object") next.storeRoles = draft.storeRoles
   return next
 }
 

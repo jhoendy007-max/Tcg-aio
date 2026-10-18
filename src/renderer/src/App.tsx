@@ -16,10 +16,11 @@ import { DashboardPage } from "./pages/Dashboard"
 import { LogsPage } from "./pages/Logs"
 import { ModulesPage } from "./pages/Modules"
 import { ShipmentsPage } from "./pages/Shipments"
-import { dropOpsText } from "../../shared/drop-ops"
+import { StoreDefaults } from "./pages/StoreDefaults"
 import { Wizard } from "./pages/Wizard"
+import { deskText } from "../../shared/desk-ui"
+import { parseRoute, routeHash, type SectionId } from "../../shared/nav"
 import { SuccessScreen, type WinCard } from "./components/Success"
-import { moduleText } from "../../shared/module-settings"
 import { updateStatusText } from "../../shared/update-status"
 import { APP_VERSION } from "../../shared/version"
 import { DEFAULT_SETTINGS, type Settings, type UpdateStatus } from "../../shared/types"
@@ -27,41 +28,21 @@ import { errorText, unwrap } from "./lib"
 import { applyTheme } from "./theme"
 import { playSuccessChime } from "./sound"
 
-const PRIMARY = [
-  { id: "home", label: "Dashboard" },
-  { id: "tasks", label: "Tasks" },
-  { id: "monitors", label: "Monitors" },
-  { id: "profiles", label: "Profiles" },
-  { id: "accounts", label: "Accounts" },
-  { id: "proxies", label: "Proxies" },
-  { id: "clients", label: "Clients" },
-  { id: "logs", label: "Logs" },
-  { id: "settings", label: "Settings" }
-] as const
+const NAV: Array<{ id: SectionId; icon: string }> = [
+  { id: "home", icon: "home" },
+  { id: "tasks", icon: "tasks" },
+  { id: "people", icon: "profiles" },
+  { id: "clients", icon: "clients" },
+  { id: "settings", icon: "settings" }
+]
 
-const MORE = [
-  { id: "keeper", label: "Session Keeper" },
-  { id: "vault", label: "Session Sync" },
-  { id: "drops", label: "Drops" },
-  { id: "stats", label: "Analytics" },
-  { id: "ship", label: "Shipments" },
-  { id: "alerts", label: "Alerts" },
-  { id: "autopilot", label: "Autopilot" },
-  { id: "phone", label: "Phone" },
-  { id: "stores", label: "Stores" }
-] as const
-
-const PAGES = [...PRIMARY, ...MORE] as const
-
-type PageId = (typeof PAGES)[number]["id"]
-
-function pageFromHash(): PageId {
-  const hash = window.location.hash.replace("#", "")
-  return PAGES.some((page) => page.id === hash) ? (hash as PageId) : "home"
+function readRail(): boolean {
+  try { return localStorage.getItem("tcgaio-rail") !== "open" } catch { return true }
 }
 
 export function App() {
-  const [page, setPage] = useState<PageId>(pageFromHash)
+  const [route, setRoute] = useState(() => parseRoute(window.location.hash))
+  const [rail, setRail] = useState(readRail)
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
   const [updateError, setUpdateError] = useState("")
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
@@ -71,7 +52,7 @@ export function App() {
   const seen = useRef(new Map<string, string>())
 
   useEffect(() => {
-    const onHash = () => setPage(pageFromHash())
+    const onHash = () => setRoute(parseRoute(window.location.hash))
     window.addEventListener("hashchange", onHash)
     return () => window.removeEventListener("hashchange", onHash)
   }, [])
@@ -143,40 +124,35 @@ export function App() {
     }
   }
 
-  function go(id: PageId) {
-    window.location.hash = id
-    setPage(id)
+  function go(section: SectionId, tab = "") {
+    window.location.hash = routeHash(section, tab)
+    setRoute({ section, tab: parseRoute(routeHash(section, tab)).tab })
   }
 
+  const lang = settings.language === "es" ? "es" : "en"
+  const page = route.section
+  const tab = route.tab
+
   return (
-    <div className="shell">
+    <div className={rail ? "shell rail" : "shell expanded"}>
       <aside className="sidebar">
         <div className="brand">
           {settings.logoDataUrl ? <img className="brand-logo" src={settings.logoDataUrl} alt="" /> : <Mark />}
-          <div>
+          <div className="brand-copy">
             <strong>{settings.appName || "TCGAIO"}</strong>
-            <span>Pokémon · One Piece</span>
+            <span>v{APP_VERSION}</span>
           </div>
         </div>
         <nav aria-label="Sections">
-          <div className="nav-label">Desk</div>
-          {PRIMARY.map((item) => (
-            <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined}>
-              <NavIcon name={item.id} />
-              {item.label}
-            </a>
-          ))}
-          <div className="nav-label">More</div>
-          {MORE.map((item) => (
-            <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined}>
-              <NavIcon name={item.id} />
-              {item.id === "stores" ? moduleText(settings.language === "es" ? "es" : "en", "nav") : item.id === "ship" ? dropOpsText(settings.language === "es" ? "es" : "en", "navShip") : item.label}
+          {NAV.map((item) => (
+            <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined} title={deskText(lang, item.id === "home" ? "navHome" : item.id === "tasks" ? "navTasks" : item.id === "people" ? "navPeople" : item.id === "clients" ? "navClients" : "navSettings")}>
+              <NavIcon name={item.icon} />
+              <span className="nav-text">{deskText(lang, item.id === "home" ? "navHome" : item.id === "tasks" ? "navTasks" : item.id === "people" ? "navPeople" : item.id === "clients" ? "navClients" : "navSettings")}</span>
             </a>
           ))}
         </nav>
         <footer>
-          <span>v{APP_VERSION}</span>
-          <span>Desktop, phone, browser</span>
+          <button type="button" className="icon-btn" title={rail ? deskText(lang, "showNames") : deskText(lang, "iconsOnly")} onClick={() => { const next = !rail; setRail(next); try { localStorage.setItem("tcgaio-rail", next ? "icons" : "open") } catch { /* keep the choice for this session */ } }}>{rail ? "»" : "«"}</button>
         </footer>
       </aside>
       <main>
@@ -197,25 +173,12 @@ export function App() {
           </div>
         ) : null}
         {booting ? <section className="page" aria-busy="true" aria-label="Loading"><div className="skeleton sk-title" /><div className="skeleton sk-card" /></section> : null}
-        {!booting && wizard ? <Wizard onDone={(next) => { setSettings(next); applyTheme(next); document.title = next.appName || "TCGAIO"; setWizard(false); go("home") }} /> : null}
-        {!booting && !wizard && page === "home" ? <DashboardPage onTasks={() => go("tasks")} /> : null}
-        {!booting && !wizard && page === "tasks" ? <TasksPage /> : null}
-        {!booting && !wizard && page === "monitors" ? <TasksPage lockedKind="monitor" /> : null}
-        {!booting && !wizard && page === "logs" ? <LogsPage /> : null}
-        {!booting && !wizard && page === "keeper" ? <KeeperPage /> : null}
-        {!booting && !wizard && page === "vault" ? <VaultPage /> : null}
-        {!booting && !wizard && page === "drops" ? <DropsPage /> : null}
-        {!booting && !wizard && page === "stats" ? <AnalyticsPage /> : null}
-        {!booting && !wizard && page === "ship" ? <ShipmentsPage /> : null}
-        {!booting && !wizard && page === "alerts" ? <AlertsPage /> : null}
-        {!booting && !wizard && page === "autopilot" ? <AutopilotPage /> : null}
+        {!booting && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = next.appName || "TCGAIO"; setWizard(false); go("home") }} /> : null}
+        {!booting && !wizard && page === "home" ? <DashboardPage lang={lang} onTasks={() => go("tasks")} /> : null}
+        {!booting && !wizard && page === "tasks" ? <TasksPage lockedKind={tab === "monitor" || tab === "checkout" ? tab : ""} /> : null}
         {!booting && !wizard && page === "clients" ? <ClientsPage /> : null}
-        {!booting && !wizard && page === "profiles" ? <ProfilesPage /> : null}
-        {!booting && !wizard && page === "proxies" ? <ProxiesPage /> : null}
-        {!booting && !wizard && page === "accounts" ? <AccountsPage /> : null}
-        {!booting && !wizard && page === "phone" ? <PhonePage /> : null}
-        {!booting && !wizard && page === "settings" ? <SettingsPage /> : null}
-        {!booting && !wizard && page === "stores" ? <ModulesPage /> : null}
+        {!booting && !wizard && page === "people" ? <PeopleTabs tab={tab === "accounts" || tab === "proxies" ? tab : "profiles"} lang={lang} /> : null}
+        {!booting && !wizard && page === "settings" ? <SettingsTabs tab={tab || "general"} lang={lang} onSettings={setSettings} /> : null}
       </main>
       {win ? <SuccessScreen win={win} sound={settings.successSound} onSound={(on) => void setSound(on)} onClose={() => setWin(null)} /> : null}
     </div>
@@ -241,6 +204,67 @@ const NAV_PATH: Record<string, string> = {
   autopilot: "M8 2.5 9.2 6.2 13 6.4 10.1 8.8 11.2 12.5 8 10.4 4.8 12.5 5.9 8.8 3 6.4 6.8 6.2z",
   phone: "M5.2 2.5h5.6v11H5.2zM7 11.8h2",
   stores: "M3 6.2 8 3l5 3.2V13H3zM6.5 13V8.5h3V13"
+}
+
+function PeopleTabs({ tab, lang }: { tab: "profiles" | "accounts" | "proxies"; lang: "en" | "es" }) {
+  return (
+    <section className="page">
+      <div className="segments" role="tablist">
+        <a href="#people/profiles" aria-current={tab === "profiles" ? "page" : undefined}>{deskText(lang, "tabProfiles")}</a>
+        <a href="#people/accounts" aria-current={tab === "accounts" ? "page" : undefined}>{deskText(lang, "tabAccounts")}</a>
+        <a href="#people/proxies" aria-current={tab === "proxies" ? "page" : undefined}>{deskText(lang, "tabProxies")}</a>
+      </div>
+      {tab === "accounts" ? <AccountsPage /> : tab === "proxies" ? <ProxiesPage /> : <ProfilesPage />}
+    </section>
+  )
+}
+
+function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es"; onSettings: (next: Settings) => void }) {
+  const items = [
+    ["general", deskText(lang, "setGeneral")],
+    ["logs", deskText(lang, "setLogs")],
+    ["stores", deskText(lang, "storeDefaults")],
+    ["phone", deskText(lang, "setPhone")],
+    ["alerts", deskText(lang, "setAlerts")],
+    ["drops", deskText(lang, "setDrops")],
+    ["stats", deskText(lang, "setStats")],
+    ["ship", deskText(lang, "setShip")],
+    ["autopilot", deskText(lang, "setAutopilot")],
+    ["keeper", deskText(lang, "setKeeper")],
+    ["vault", deskText(lang, "setVault")]
+  ] as const
+  return (
+    <section className="page">
+      <div className="segments scroll-x" role="tablist">
+        {items.map(([id, label]) => <a key={id} href={id === "general" ? "#settings" : `#settings/${id}`} aria-current={tab === id ? "page" : undefined}>{label}</a>)}
+      </div>
+      {tab === "logs" ? <LogsPage /> : null}
+      {tab === "stores" ? <StoresTab onSettings={onSettings} /> : null}
+      {tab === "phone" ? <PhonePage /> : null}
+      {tab === "alerts" ? <AlertsPage /> : null}
+      {tab === "drops" ? <DropsPage /> : null}
+      {tab === "stats" ? <AnalyticsPage /> : null}
+      {tab === "ship" ? <ShipmentsPage /> : null}
+      {tab === "autopilot" ? <AutopilotPage /> : null}
+      {tab === "keeper" ? <KeeperPage /> : null}
+      {tab === "vault" ? <VaultPage /> : null}
+      {tab === "general" || !items.some(([id]) => id === tab) ? <SettingsPage /> : null}
+    </section>
+  )
+}
+
+function StoresTab({ onSettings }: { onSettings: (next: Settings) => void }) {
+  const [settings, setSettings] = useState<Settings | null>(null)
+  useEffect(() => {
+    void unwrap(window.aio.settings.get()).then((payload) => setSettings(payload.settings)).catch(() => undefined)
+  }, [])
+  if (!settings) return null
+  return (
+    <>
+      <StoreDefaults settings={settings} onSaved={(next) => { setSettings(next); onSettings(next); window.dispatchEvent(new CustomEvent("tcgaio-settings", { detail: next })) }} />
+      <ModulesPage />
+    </>
+  )
 }
 
 function NavIcon({ name }: { name: string }) {
