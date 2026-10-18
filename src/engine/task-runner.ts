@@ -45,10 +45,28 @@ export class TaskService {
     return this.inflight.has(id)
   }
 
+  validateStart(id: string): void {
+    const task = this.db.getTask(id)
+    if (task.kind === "monitor" || task.monitorOnly === true) return
+    if (!task.profileId) throw new Error("Choose a saved profile before starting this task.")
+    if (!task.accountId) throw new Error("Choose a saved account before starting this task.")
+    try {
+      this.db.readProfile(task.profileId)
+    } catch {
+      throw new Error("Choose a saved profile before starting this task.")
+    }
+    try {
+      this.db.readAccount(task.accountId)
+    } catch {
+      throw new Error("Choose a saved account before starting this task.")
+    }
+  }
+
   start(id: string, options?: { test?: boolean }): void {
     if (this.inflight.has(id)) return
     if (!this.db.licenseAllows()) throw new Error("This PC is not activated. Add a license key in Settings.")
     const task = this.db.getTask(id)
+    this.validateStart(id)
     const testMode = options?.test === true || task.testMode === true || this.db.getSettings().testMode === true
     if (!testMode && !task.confirmPurchase && task.monitorOnly !== true && task.kind !== "monitor") {
       throw new Error("Confirm that this task may place a real shipping order before starting it.")
@@ -401,7 +419,6 @@ export class TaskService {
       }
       ctx.http = {
         request: async (input) => {
-          // Monitors with no account leave partition blank. Block recovery may rotate the proxy first, and the Chromium client then isolates that proxy.
           const stamped = account.id ? { ...input, partition: accountPartition(account.id) } : input
           if (isFinalSubmit(task.store, stamped)) {
             if (!testMode) {
@@ -466,7 +483,7 @@ export class TaskService {
           }
           return
         }
-        await this.finishResult(update, result, { store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4 }, module.displayName, profile.name)
+        await this.finishResult(update, result, { store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4 }, module.displayName, profileName())
         return
       }
     } catch (err) {
@@ -851,4 +868,3 @@ function tuneSettings(settings: Settings, store: StoreId, pace: ModulePace): Set
 function line(level: LogLevel, message: string) {
   return { ts: Date.now(), level, message: redact(message).slice(0, 500) }
 }
-
