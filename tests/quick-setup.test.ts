@@ -37,6 +37,25 @@ describe("quick setup", () => {
       confirmPurchase: false,
       keywords: "elite trainer"
     })
+    expect(pair.monitor.clientId).toBe("me")
+  })
+
+  it("assigns the monitor to the client chosen in quick setup", () => {
+    const pair = planQuickPair({
+      store: "target",
+      sku: "88897904",
+      keywords: "",
+      profileId: "profile-1",
+      accountId: "account-1",
+      proxyGroupId: null,
+      quantity: 1,
+      testMode: true,
+      confirmPurchase: false,
+      clientId: "north"
+    })
+    expect(pair.monitor.clientId).toBe("north")
+    expect(pair.checkout.accountId).toBe("account-1")
+    expect(pair.checkout.profileId).toBe("profile-1")
   })
 
   it("adds a second account as another checkout on the same monitor", () => {

@@ -11,6 +11,10 @@ import { parseProxyList } from "../shared/proxy"
 import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
 import { accountPartition, sessionFreshness } from "../shared/consistency"
+import { clientIdOf, clientSummary, feeOwed, ledgerCsv as ledgerCsvText, ME_CLIENT_ID, meClient, proxyGroupTakenBy, roundMoney, type Client, type ClientExport, type ClientInput, type ClientSummary, type LedgerEntry } from "../shared/clients"
+import { assessCheckout, assessClient, startOfLocalDay, type CardDecline, type CheckoutSubject, type HealthIssue, type HealthReport, type HealthWorld } from "../shared/checkout-health"
+import { activeDropStart } from "./limits"
+import { assertDiscordWebhook } from "./discord"
 import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
 import { openBackup, sealBackup, type BackupAccount, type BackupDocument, type BackupProfile } from "./backup"
@@ -78,8 +82,24 @@ import type {
 } from "../shared/types"
 import { isMailProvider, providerForHost } from "../shared/mail"
 
-interface ProfileRecord extends PublicProfile {
+interface ProfilePii {
+  email: string
+  phone: string
+  shipping: Address
+  billing: Address
+}
+
+interface ProfileRecord {
+  id: string
+  name: string
+  cardName: string
+  last4: string
+  expMonth: string
+  expYear: string
   cardSecret: string
+  /** Encrypted email, phone, and addresses. The file does not store those in the clear. */
+  piiSecret: string
+  clientId: string
 }
 
 interface AccountRecord {
@@ -92,6 +112,7 @@ interface AccountRecord {
   proxyGroupId?: string | null
   sessionState?: PublicAccount["sessionState"]
   lastWarmAt?: number | null
+  clientId?: string
 }
 
 interface HygieneFile {
@@ -179,6 +200,9 @@ interface DbFile {
   imap?: { enabled: boolean; host: string; port: number; user: string; mailbox: string; passwordSecret?: string }
   mailboxes?: MailboxFile[]
   vault?: VaultLink[]
+  clients?: Client[]
+  ledger?: LedgerEntry[]
+  declines?: CardDecline[]
 }
 
 interface MailboxFile {
@@ -206,6 +230,7 @@ interface MailboxFile {
 export class Database {
   private data: DbFile = emptyDb()
   private interrupted: string[] = []
+  private moduleAddressCaps: HealthWorld["moduleAddressCaps"] = {}
 
   constructor(
     private readonly file: string,
@@ -225,10 +250,10 @@ export class Database {
       version: 1,
       pcId,
       settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
-      profiles: parsed.profiles ?? [],
-      accounts: parsed.accounts ?? [],
+      profiles: (parsed.profiles ?? []).map((profile) => sealProfile(profile, this.cipher)),
+      accounts: (parsed.accounts ?? []).map((account) => ({ ...account, clientId: clientIdOf(account.clientId) })),
       proxyGroups: parsed.proxyGroups ?? [],
-      tasks: parsed.tasks ?? [],
+      tasks: (parsed.tasks ?? []).map((task) => ({ ...task, clientId: clientIdOf(task.clientId) })),
       devices: Array.isArray(parsed.devices) ? parsed.devices : [],
       restock: normalizeRestock(parsed.restock),
       hygiene: normalizeHygiene(parsed.hygiene),
@@ -247,10 +272,14 @@ export class Database {
       reportDay: typeof parsed.reportDay === "string" ? parsed.reportDay : "",
       imap: normalizeImap(parsed.imap),
       mailboxes: loadMailboxes(parsed.mailboxes, parsed.imap),
-      vault: Array.isArray(parsed.vault) ? parsed.vault : []
+      vault: Array.isArray(parsed.vault) ? parsed.vault : [],
+      clients: normalizeClients(parsed.clients),
+      ledger: normalizeLedger(parsed.ledger),
+      declines: normalizeDeclines(parsed.declines)
     }
     const migratedMail = !Array.isArray(parsed.mailboxes) && (this.data.mailboxes?.length ?? 0) > 0
-    let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices) || migratedMail
+    const migratedPii = (parsed.profiles ?? []).some((profile) => !profile.piiSecret || !profile.clientId)
+    let changed = pcId !== parsed.pcId || !Array.isArray(parsed.devices) || migratedMail || migratedPii || !parsed.clients
     const interrupted: string[] = []
     for (const task of this.data.tasks) {
       task.group = typeof task.group === "string" ? task.group : ""
@@ -299,7 +328,7 @@ export class Database {
   }
 
   listProfiles(): PublicProfile[] {
-    return this.data.profiles.map(toPublicProfile)
+    return this.data.profiles.map((record) => this.openProfile(record))
   }
 
   saveProfile(input: ProfileInput): PublicProfile {
@@ -363,23 +392,23 @@ export class Database {
       last4 = existing.last4
     }
     if (!cardSecret || !last4) throw new AppError("Card number and CVV are required.")
+    const clientId = this.requireClient(clientIdOf(input.clientId || existing?.clientId)).id
+    if (existing) this.assertProfileClient(existing.id, clientId)
     const record: ProfileRecord = {
       id: existing?.id ?? randomUUID(),
       name,
-      email,
-      phone,
-      shipping,
-      billing,
       cardName,
       last4,
       expMonth,
       expYear,
-      cardSecret
+      cardSecret,
+      piiSecret: this.cipher.encrypt(JSON.stringify({ email, phone, shipping, billing } satisfies ProfilePii)),
+      clientId
     }
     if (existing) this.data.profiles = this.data.profiles.map((profile) => (profile.id === record.id ? record : profile))
     else this.data.profiles.push(record)
     this.flush()
-    return toPublicProfile(record)
+    return this.openProfile(record)
   }
 
   deleteProfile(id: string): void {
@@ -392,7 +421,58 @@ export class Database {
 
   readProfile(id: string): FullProfile {
     const record = this.requireProfile(id)
-    return { ...toPublicProfile(record), card: this.decryptCard(record) }
+    return { ...this.openProfile(record), card: this.decryptCard(record) }
+  }
+
+  private openProfile(record: ProfileRecord): PublicProfile {
+    const pii = this.readPii(record)
+    return {
+      id: record.id,
+      name: record.name,
+      email: pii.email,
+      phone: pii.phone,
+      shipping: pii.shipping,
+      billing: pii.billing,
+      cardName: record.cardName,
+      last4: record.last4,
+      expMonth: record.expMonth,
+      expYear: record.expYear,
+      clientId: clientIdOf(record.clientId)
+    }
+  }
+
+  private readPii(record: ProfileRecord): ProfilePii {
+    try {
+      const parsed = JSON.parse(this.cipher.decrypt(record.piiSecret)) as Partial<ProfilePii>
+      return {
+        email: typeof parsed.email === "string" ? parsed.email : "",
+        phone: typeof parsed.phone === "string" ? parsed.phone : "",
+        shipping: addressOrBlank(parsed.shipping),
+        billing: addressOrBlank(parsed.billing)
+      }
+    } catch {
+      throw new AppError("This profile could not be decrypted on this PC.")
+    }
+  }
+
+  private assertProfileClient(profileId: string, clientId: string): void {
+    for (const task of this.data.tasks) {
+      if (task.profileId !== profileId || !task.accountId) continue
+      const account = this.data.accounts.find((item) => item.id === task.accountId)
+      if (account && clientIdOf(account.clientId) !== clientId) {
+        throw new AppError("This profile is used with another client's account. Move the task first.")
+      }
+    }
+  }
+
+  private assertAccountClient(accountId: string, clientId: string): void {
+    for (const task of this.data.tasks) {
+      if (task.accountId !== accountId || !task.profileId) continue
+      const profile = this.data.profiles.find((item) => item.id === task.profileId)
+      if (profile && clientIdOf(profile.clientId) !== clientId) {
+        throw new AppError("This account is used with another client's profile. Move the task first.")
+      }
+    }
   }
 
   listAccounts(): PublicAccount[] {
@@ -409,7 +489,8 @@ export class Database {
         stickyProxyId: pin?.proxyId ?? null,
         stickyProxyLabel: proxy ? `${proxy.host}:${proxy.port}` : null,
         profilePartition: accountPartition(account.id),
-        freshness: sessionFreshness(account, now, freshMin)
+        freshness: sessionFreshness(account, now, freshMin),
+        clientId: clientIdOf(record.clientId)
       }
     })
   }
@@ -432,6 +513,10 @@ export class Database {
       sessionSecret = this.cipher.encrypt(JSON.stringify(parseSession(input.session)))
     }
     const proxyGroupId = input.proxyGroupId ? this.getProxyGroup(input.proxyGroupId).id : input.proxyGroupId === null ? null : existing?.proxyGroupId ?? null
+    const clientId = this.requireClient(clientIdOf(input.clientId || existing?.clientId)).id
+    const taken = proxyGroupTakenBy(this.data.accounts.map((account) => ({ id: account.id, clientId: account.clientId, proxyGroupId: account.proxyGroupId ?? null })), existing?.id, clientId, proxyGroupId)
+    if (taken) throw new AppError("That proxy group already belongs to another client. Each client needs their own proxy group.")
+    if (existing) this.assertAccountClient(existing.id, clientId)
     const record: AccountRecord = {
       id: existing?.id ?? randomUUID(),
       store,
@@ -441,7 +526,8 @@ export class Database {
       sessionSecret,
       proxyGroupId,
       sessionState: sessionSecret ? existing?.sessionState === "expired" && input.sessionAction !== "replace" ? "expired" : "saved" : "missing",
-      lastWarmAt: sessionSecret ? existing?.lastWarmAt ?? null : null
+      lastWarmAt: sessionSecret ? existing?.lastWarmAt ?? null : null,
+      clientId
     }
     if (existing) this.data.accounts = this.data.accounts.map((account) => (account.id === record.id ? record : account))
     else this.data.accounts.push(record)
@@ -741,6 +827,14 @@ export class Database {
           nextQuantity = quantity
         }
         if (input.testMode === true) testMode = true
+        if (!structuralError && roleNow.kind === "checkout" && profileId && accountId) {
+          const boundProfile = this.data.profiles.find((item) => item.id === profileId)
+          const boundAccount = this.data.accounts.find((item) => item.id === accountId)
+          if (boundProfile && boundAccount && clientIdOf(boundProfile.clientId) !== clientIdOf(boundAccount.clientId)) {
+            throw new AppError("The profile and the account have to belong to the same client.")
+          }
+          if (boundAccount) task.clientId = clientIdOf(boundAccount.clientId)
+        }
         const role = cleanRole({
           ...task,
           quantity: nextQuantity,
@@ -799,13 +893,19 @@ export class Database {
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
     let profileId = input.profileId || ""
     let accountId = input.accountId || ""
+    let clientId = ME_CLIENT_ID
     if (role.kind === "checkout") {
-      this.requireProfile(profileId)
+      const profile = this.requireProfile(profileId)
       const account = this.requireAccount(accountId)
       if (account.store !== store) throw new AppError("Choose an account for the same store as the task.")
+      const profileClient = clientIdOf(profile.clientId)
+      const accountClient = clientIdOf(account.clientId)
+      if (profileClient !== accountClient) throw new AppError("The profile and the account have to belong to the same client.")
+      clientId = accountClient
     } else {
       profileId = ""
       accountId = ""
+      clientId = this.requireClient(clientIdOf(input.clientId || existing?.clientId)).id
     }
     if (input.proxyGroupId) this.getProxyGroup(input.proxyGroupId)
     if (input.monitorProxyGroupId) this.getProxyGroup(input.monitorProxyGroupId)
@@ -827,6 +927,7 @@ export class Database {
       rank: existing?.rank ?? (ranks.length ? Math.min(...ranks) - 1 : 0),
       imageUrl: input.imageUrl === undefined ? existing?.imageUrl ?? "" : cleanImageUrl(input.imageUrl),
       monitorOnly: role.kind === "monitor",
+      clientId,
       overrides: cleanTaskOverrides(store, input.overrides === undefined ? existing?.overrides : input.overrides),
       ...role,
       status: existing?.status === "paused" ? "paused" : "idle",
@@ -967,8 +1068,12 @@ export class Database {
   createCalendarDrop(input: CalendarDropInput): { tasks: PublicTask[]; schedule: DropSchedule } {
     const event = this.data.calendar?.find((item) => item.id === input.eventId)
     if (!event) throw new AppError("That release was not found.")
-    this.requireProfile(input.profileId)
+    const profile = this.requireProfile(input.profileId)
     const accounts = [...new Set(input.accountIds)].map((id) => this.requireAccount(id))
+    const profileClient = clientIdOf(profile.clientId)
+    if (accounts.some((account) => clientIdOf(account.clientId) !== profileClient)) {
+      throw new AppError("The profile and the account have to belong to the same client.")
+    }
     const quantity = Math.round(Number(input.quantity))
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
     const planned = calendarTaskInputs({
@@ -1010,6 +1115,7 @@ export class Database {
       profileId: input.profileId,
       quantity: input.quantity,
       last4: cardLast4(input.last4),
+      clientId: input.clientId ? clientIdOf(input.clientId) : undefined,
       detail
     }
     if (!this.data.checkouts) this.data.checkouts = []
@@ -1017,6 +1123,289 @@ export class Database {
     this.data.checkouts = this.data.checkouts.slice(0, 400)
     this.flush()
     return { ...record }
+  }
+
+  healthWorld(): HealthWorld {
+    const settings = this.getSettings()
+    return {
+      profiles: this.listProfiles().map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        phone: profile.phone,
+        cardName: profile.cardName,
+        last4: profile.last4,
+        clientId: profile.clientId,
+        shipping: profile.shipping,
+        billing: profile.billing
+      })),
+      accounts: this.listAccounts().map((account) => ({
+        id: account.id,
+        clientId: account.clientId,
+        hasSession: account.hasSession,
+        sessionState: account.sessionState,
+        lastWarmAt: account.lastWarmAt
+      })),
+      tasks: this.listTasks().map((task) => ({
+        id: task.id,
+        store: task.store,
+        sku: task.sku,
+        quantity: task.quantity,
+        clientId: task.clientId,
+        profileId: task.profileId,
+        accountId: task.accountId,
+        kind: task.kind,
+        monitorOnly: task.monitorOnly,
+        status: task.status
+      })),
+      checkouts: this.listCheckouts().map((record) => ({
+        outcome: record.outcome,
+        store: record.store,
+        sku: record.sku,
+        quantity: record.quantity,
+        clientId: record.clientId,
+        profileId: record.profileId,
+        last4: record.last4,
+        at: record.at
+      })),
+      declines: (this.data.declines ?? []).map((row) => ({ ...row })),
+      now: Date.now(),
+      freshMin: settings.sessionWarmupMin,
+      block: settings.checkoutHealthBlock === true,
+      skuLimit: settings.clientSkuLimit,
+      declineHoldMin: settings.declineHoldMin,
+      addressOrderLimits: settings.addressOrderLimits,
+      addressWindowStart: activeDropStart(this.listSchedules(), Date.now()) ?? startOfLocalDay(Date.now(), settings.healthReportZone),
+      moduleAddressCaps: { ...this.moduleAddressCaps }
+    }
+  }
+
+  setModuleAddressCaps(caps: HealthWorld["moduleAddressCaps"]): void {
+    this.moduleAddressCaps = { ...caps }
+  }
+
+  assessTask(id: string): HealthReport {
+    const task = this.requireTask(id)
+    if (task.kind === "monitor" || task.monitorOnly === true) return { issues: [], blocked: false }
+    return assessCheckout(this.healthWorld(), {
+      taskId: task.id,
+      store: task.store,
+      sku: task.sku,
+      quantity: task.quantity,
+      profileId: task.profileId,
+      accountId: task.accountId,
+      clientId: task.clientId
+    })
+  }
+
+  previewCheckoutHealth(input: CheckoutSubject): HealthReport {
+    const store = assertStore(input.store)
+    const quantity = Math.round(Number(input.quantity))
+    const clamped = Number.isInteger(quantity) && quantity >= 1 && quantity <= 12 ? quantity : 1
+    return assessCheckout(this.healthWorld(), {
+      store,
+      sku: typeof input.sku === "string" ? input.sku : "",
+      quantity: clamped,
+      profileId: input.profileId || undefined,
+      accountId: input.accountId || undefined,
+      clientId: input.clientId || undefined,
+      taskId: input.taskId || undefined
+    })
+  }
+
+  clientCheckoutHealth(clientId: string): HealthReport {
+    this.requireClient(clientIdOf(clientId))
+    return assessClient(this.healthWorld(), clientId)
+  }
+
+  listTaskHealth(): Array<{ taskId: string; issues: HealthIssue[] }> {
+    const world = this.healthWorld()
+    const rows: Array<{ taskId: string; issues: HealthIssue[] }> = []
+    for (const task of world.tasks) {
+      if (task.kind === "monitor" || task.monitorOnly) continue
+      const report = assessCheckout(world, {
+        taskId: task.id,
+        store: task.store,
+        sku: task.sku,
+        quantity: task.quantity,
+        profileId: task.profileId,
+        accountId: task.accountId,
+        clientId: task.clientId
+      })
+      if (report.issues.length) rows.push({ taskId: task.id, issues: report.issues })
+    }
+    return rows
+  }
+
+  recordDecline(input: { taskId: string; last4: string; store: StoreId; sku: string }): CardDecline | null {
+    const last4 = /^\d{4}$/.test(input.last4) ? input.last4 : ""
+    if (!last4 || !input.taskId) return null
+    const row: CardDecline = {
+      taskId: input.taskId.slice(0, 80),
+      last4,
+      at: Date.now(),
+      store: assertStore(input.store),
+      sku: (input.sku || "").slice(0, 180)
+    }
+    const rest = (this.data.declines ?? []).filter((item) => !(item.taskId === row.taskId && item.last4 === row.last4))
+    rest.unshift(row)
+    this.data.declines = rest.slice(0, 200)
+    this.flush()
+    return { ...row }
+  }
+
+  listClients(): Client[] {
+    return (this.data.clients ?? []).map((client) => ({ ...client }))
+  }
+
+  clientById(id: string): Client | undefined {
+    const found = (this.data.clients ?? []).find((client) => client.id === clientIdOf(id))
+    return found ? { ...found } : undefined
+  }
+
+  summarizeClients(): ClientSummary[] {
+    const rows = this.data.ledger ?? []
+    return this.listClients().map((client) => clientSummary(client, rows))
+  }
+
+  private requireClient(id: string): Client {
+    const found = (this.data.clients ?? []).find((client) => client.id === id)
+    if (!found) throw new AppError("That client was not found.")
+    return found
+  }
+
+  saveClient(input: ClientInput): Client {
+    const name = (input.name ?? "").trim()
+    if (!name) throw new AppError("Client name is required.")
+    const existing = input.id ? this.requireClient(input.id) : undefined
+    const fee = roundMoney(Number(input.fee ?? existing?.fee ?? 0))
+    if (!Number.isFinite(fee) || fee < 0 || fee > 10000) throw new AppError("Fee has to be from 0 to 10000.")
+    const basis = input.feeBasis ?? existing?.feeBasis ?? "success"
+    if (basis !== "success" && basis !== "item") throw new AppError("Fee basis has to be per success or per item.")
+    const status = input.status ?? existing?.status ?? "active"
+    if (status !== "active" && status !== "paused") throw new AppError("Client status has to be active or paused.")
+    const webhook = (input.webhook ?? existing?.webhook ?? "").trim()
+    assertDiscordWebhook(webhook)
+    const client: Client = {
+      id: existing?.id ?? randomUUID(),
+      name: name.slice(0, 80),
+      contact: (input.contact ?? "").trim().slice(0, 120),
+      notes: (input.notes ?? "").trim().slice(0, 1000),
+      feeBasis: basis,
+      fee,
+      status,
+      webhook,
+      createdAt: existing?.createdAt ?? Date.now()
+    }
+    if (!this.data.clients) this.data.clients = [meClient()]
+    if (existing) this.data.clients = this.data.clients.map((item) => (item.id === client.id ? client : item))
+    else this.data.clients.push(client)
+    this.flush()
+    return { ...client }
+  }
+
+  deleteClient(id: string): { accountIds: string[] } {
+    if (id === ME_CLIENT_ID) throw new AppError("The Me client stays on this PC.")
+    const client = (this.data.clients ?? []).find((item) => item.id === id)
+    if (!client) throw new AppError("That client was not found.")
+    const accountIds = this.data.accounts.filter((account) => clientIdOf(account.clientId) === client.id).map((account) => account.id)
+    const accountSet = new Set(accountIds)
+    const profileIds = new Set(this.data.profiles.filter((profile) => clientIdOf(profile.clientId) === client.id).map((profile) => profile.id))
+    const active = this.data.tasks.some((task) => isActiveStatus(task.status) && (clientIdOf(task.clientId) === client.id || (task.accountId ? accountSet.has(task.accountId) : false)))
+    if (active) throw new AppError("Stop this client's tasks before deleting their data.")
+    const removedTasks = new Set(this.data.tasks.filter((task) => clientIdOf(task.clientId) === client.id || (task.accountId && accountSet.has(task.accountId)) || (task.profileId && profileIds.has(task.profileId))).map((task) => task.id))
+    this.data.tasks = this.data.tasks.filter((task) => !removedTasks.has(task.id))
+    this.data.declines = (this.data.declines ?? []).filter((row) => !removedTasks.has(row.taskId))
+    this.data.profiles = this.data.profiles.filter((profile) => !profileIds.has(profile.id))
+    this.data.accounts = this.data.accounts.filter((account) => !accountSet.has(account.id))
+    this.data.ledger = (this.data.ledger ?? []).filter((row) => row.clientId !== client.id)
+    this.data.clients = (this.data.clients ?? []).filter((item) => item.id !== client.id)
+    this.data.vault = (this.data.vault ?? []).filter((link) => !accountSet.has(link.accountId))
+    if (this.data.hygiene) this.data.hygiene.pins = this.data.hygiene.pins.filter((pin) => !accountSet.has(pin.accountId))
+    this.flush()
+    return { accountIds }
+  }
+
+  /** Caller asked to download this client's own card and address. Do not log the result. */
+  exportClient(id: string): ClientExport {
+    const client = this.requireClient(clientIdOf(id))
+    return {
+      client: { ...client },
+      profiles: this.data.profiles.filter((record) => clientIdOf(record.clientId) === client.id).map((record) => {
+        const open = this.openProfile(record)
+        return {
+          id: open.id,
+          name: open.name,
+          email: open.email,
+          phone: open.phone,
+          shipping: open.shipping,
+          billing: open.billing,
+          cardName: open.cardName,
+          last4: open.last4,
+          expMonth: open.expMonth,
+          expYear: open.expYear,
+          clientId: clientIdOf(open.clientId),
+          card: this.decryptCard(record)
+        }
+      }),
+      accounts: this.data.accounts.filter((record) => clientIdOf(record.clientId) === client.id).map((record) => ({
+        store: record.store,
+        label: record.label,
+        username: record.username
+      }))
+    }
+  }
+
+  listLedger(clientId?: string): LedgerEntry[] {
+    const id = clientId ? clientIdOf(clientId) : ""
+    return (this.data.ledger ?? []).filter((row) => !id || row.clientId === id).map((row) => ({ ...row }))
+  }
+
+  recordLedger(input: { clientId: string; store: StoreId; sku: string; product: string; quantity: number; price: number | null; orderId?: string }): LedgerEntry {
+    const client = this.requireClient(clientIdOf(input.clientId))
+    const store = assertStore(input.store)
+    const quantity = Math.round(Number(input.quantity))
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) throw new AppError("Quantity must be from 1 to 12.")
+    const price = input.price === null || input.price === undefined || !Number.isFinite(Number(input.price)) ? null : roundMoney(Number(input.price))
+    const entry: LedgerEntry = {
+      id: randomUUID(),
+      at: Date.now(),
+      clientId: client.id,
+      clientName: client.name,
+      store,
+      sku: (input.sku || "").slice(0, 180),
+      product: (input.product || input.sku || "").slice(0, 180),
+      quantity,
+      price,
+      orderId: (input.orderId ?? "").slice(0, 80),
+      fee: feeOwed(client, quantity),
+      paid: false,
+      paidAt: null
+    }
+    if (!this.data.ledger) this.data.ledger = []
+    this.data.ledger.unshift(entry)
+    this.data.ledger = this.data.ledger.slice(0, 2000)
+    this.flush()
+    return { ...entry }
+  }
+
+  markLedgerPaid(clientId: string, ids: string[], paid: boolean): LedgerEntry[] {
+    const client = this.requireClient(clientIdOf(clientId))
+    const wanted = new Set((ids ?? []).filter((id) => typeof id === "string" && id))
+    const now = Date.now()
+    for (const row of this.data.ledger ?? []) {
+      if (row.clientId !== client.id) continue
+      const hit = wanted.size === 0 ? (paid ? !row.paid : row.paid) : wanted.has(row.id)
+      if (!hit) continue
+      row.paid = paid
+      row.paidAt = paid ? now : null
+    }
+    this.flush()
+    return this.listLedger(client.id)
+  }
+
+  ledgerExport(clientId?: string): string {
+    return ledgerCsvText(this.listLedger(clientId))
   }
 
   analytics(): AnalyticsReport {
@@ -1283,19 +1672,20 @@ export class Database {
         }
       }),
       profiles: this.data.profiles.map((record) => {
-        const card = this.decryptCard(record)
+        const open = this.openProfile(record)
         return {
-          id: record.id,
-          name: record.name,
-          email: record.email,
-          phone: record.phone,
-          shipping: record.shipping,
-          billing: record.billing,
-          cardName: record.cardName,
-          last4: record.last4,
-          expMonth: record.expMonth,
-          expYear: record.expYear,
-          card
+          id: open.id,
+          name: open.name,
+          email: open.email,
+          phone: open.phone,
+          shipping: open.shipping,
+          billing: open.billing,
+          cardName: open.cardName,
+          last4: open.last4,
+          expMonth: open.expMonth,
+          expYear: open.expYear,
+          card: this.decryptCard(record),
+          clientId: open.clientId
         }
       }),
       accounts: this.data.accounts.map((record) => ({
@@ -1307,11 +1697,14 @@ export class Database {
         session: record.sessionSecret ? (JSON.parse(this.cipher.decrypt(record.sessionSecret)) as SessionCookies) : undefined,
         proxyGroupId: record.proxyGroupId ?? null,
         sessionState: record.sessionState ?? "missing",
-        lastWarmAt: record.lastWarmAt ?? null
+        lastWarmAt: record.lastWarmAt ?? null,
+        clientId: clientIdOf(record.clientId)
       })),
       proxyGroups: this.listProxyGroups(),
       schedules: this.listSchedules(),
-      templates: this.listTemplates()
+      templates: this.listTemplates(),
+      clients: this.listClients(),
+      ledger: this.listLedger()
     }
   }
 
@@ -1331,6 +1724,15 @@ export class Database {
       const knownProxies = new Set(this.data.proxyGroups.map((group) => group.id))
       for (const account of this.data.accounts) {
         if (account.proxyGroupId && !knownProxies.has(account.proxyGroupId)) account.proxyGroupId = null
+      }
+      for (const account of this.data.accounts) {
+        const taken = proxyGroupTakenBy(
+          this.data.accounts.map((item) => ({ id: item.id, clientId: item.clientId, proxyGroupId: item.proxyGroupId ?? null })),
+          account.id,
+          clientIdOf(account.clientId),
+          account.proxyGroupId ?? null
+        )
+        if (taken) throw new AppError("That proxy group already belongs to another client. Each client needs their own proxy group.")
       }
       const tasks: PublicTask[] = []
       this.data.tasks = []
@@ -1362,6 +1764,8 @@ export class Database {
       this.data.updates = updates
       this.data.backup = backup
       this.data.checkouts = checkouts
+      this.data.clients = Array.isArray(doc.clients) ? normalizeClients(doc.clients) : normalizeClients(this.data.clients)
+      this.data.ledger = Array.isArray(doc.ledger) ? normalizeLedger(doc.ledger) : normalizeLedger(this.data.ledger)
       this.flush()
     } catch (err) {
       this.data = snapshot
@@ -1379,18 +1783,18 @@ export class Database {
       { cardName: input.card.name, cardNumber: input.card.number, expMonth: input.card.expMonth, expYear: input.card.expYear, cvv: input.card.cvv },
       name
     )
+    const email = cleanEmail(input.email)
+    const phone = cleanPhone(input.phone)
     return {
       id: safeId(input.id),
       name,
-      email: cleanEmail(input.email),
-      phone: cleanPhone(input.phone),
-      shipping,
-      billing,
       cardName: card.name,
       last4: card.last4,
       expMonth: card.expMonth,
       expYear: card.expYear,
-      cardSecret: this.cipher.encrypt(JSON.stringify(cardSecretFrom(card)))
+      cardSecret: this.cipher.encrypt(JSON.stringify(cardSecretFrom(card))),
+      piiSecret: this.cipher.encrypt(JSON.stringify({ email, phone, shipping, billing } satisfies ProfilePii)),
+      clientId: clientIdOf(input.clientId)
     }
   }
 
@@ -1409,7 +1813,8 @@ export class Database {
       sessionSecret,
       proxyGroupId: input.proxyGroupId || null,
       sessionState: sessionSecret ? input.sessionState === "expired" ? "expired" : "saved" : "missing",
-      lastWarmAt: typeof input.lastWarmAt === "number" ? input.lastWarmAt : null
+      lastWarmAt: typeof input.lastWarmAt === "number" ? input.lastWarmAt : null,
+      clientId: clientIdOf(input.clientId)
     }
   }
 
@@ -2305,6 +2710,9 @@ function emptyDb(): DbFile {
     imap: { enabled: false, host: "", port: 993, user: "", mailbox: "INBOX" },
     mailboxes: [],
     vault: [],
+    clients: [meClient()],
+    ledger: [],
+    declines: [],
     updates: emptyUpdates()
   }
 }
@@ -2396,19 +2804,149 @@ function cardLast4(value: string | undefined): string | undefined {
   return value && /^\d{4}$/.test(value) ? value : undefined
 }
 
-function toPublicProfile(record: ProfileRecord): PublicProfile {
+function blankAddress(): Address {
+  return { firstName: "", lastName: "", line1: "", line2: "", city: "", state: "", zip: "", country: "US" }
+}
+
+function addressOrBlank(value: Partial<Address> | undefined): Address {
+  const blank = blankAddress()
+  if (!value || typeof value !== "object") return blank
   return {
-    id: record.id,
-    name: record.name,
-    email: record.email,
-    phone: record.phone,
-    shipping: record.shipping,
-    billing: record.billing,
-    cardName: record.cardName,
-    last4: record.last4,
-    expMonth: record.expMonth,
-    expYear: record.expYear
+    firstName: typeof value.firstName === "string" ? value.firstName : "",
+    lastName: typeof value.lastName === "string" ? value.lastName : "",
+    line1: typeof value.line1 === "string" ? value.line1 : "",
+    line2: typeof value.line2 === "string" ? value.line2 : "",
+    city: typeof value.city === "string" ? value.city : "",
+    state: typeof value.state === "string" ? value.state : "",
+    zip: typeof value.zip === "string" ? value.zip : "",
+    country: "US"
   }
+}
+
+function sealProfile(raw: {
+  id?: string
+  name?: string
+  cardName?: string
+  last4?: string
+  expMonth?: string
+  expYear?: string
+  cardSecret?: string
+  piiSecret?: string
+  clientId?: string
+  email?: string
+  phone?: string
+  shipping?: Address
+  billing?: Address
+}, cipher: Cipher): ProfileRecord {
+  if (!raw || typeof raw.id !== "string" || !raw.id || typeof raw.cardSecret !== "string" || !raw.cardSecret) {
+    throw new AppError("A profile in the data file is incomplete.")
+  }
+  const clientId = clientIdOf(raw.clientId)
+  const base = {
+    id: raw.id,
+    name: typeof raw.name === "string" ? raw.name : "",
+    cardName: typeof raw.cardName === "string" ? raw.cardName : "",
+    last4: typeof raw.last4 === "string" ? raw.last4 : "",
+    expMonth: typeof raw.expMonth === "string" ? raw.expMonth : "",
+    expYear: typeof raw.expYear === "string" ? raw.expYear : "",
+    cardSecret: raw.cardSecret,
+    clientId
+  }
+  if (typeof raw.piiSecret === "string" && raw.piiSecret) return { ...base, piiSecret: raw.piiSecret }
+  const pii: ProfilePii = {
+    email: typeof raw.email === "string" ? raw.email : "",
+    phone: typeof raw.phone === "string" ? raw.phone : "",
+    shipping: addressOrBlank(raw.shipping),
+    billing: addressOrBlank(raw.billing)
+  }
+  return { ...base, piiSecret: cipher.encrypt(JSON.stringify(pii)) }
+}
+
+function normalizeClients(value: Client[] | undefined): Client[] {
+  const rows: Client[] = []
+  const seen = new Set<string>()
+  if (Array.isArray(value)) {
+    for (const raw of value) {
+      const client = cleanStoredClient(raw)
+      if (!client || seen.has(client.id)) continue
+      seen.add(client.id)
+      rows.push(client)
+    }
+  }
+  if (!seen.has(ME_CLIENT_ID)) rows.unshift(meClient(0))
+  return rows.slice(0, 200)
+}
+
+function cleanStoredClient(raw: Partial<Client> | undefined): Client | null {
+  if (!raw || typeof raw.id !== "string" || !raw.id.trim()) return null
+  const id = raw.id === ME_CLIENT_ID ? ME_CLIENT_ID : /^[0-9a-f-]{36}$/i.test(raw.id) ? raw.id : ""
+  if (!id) return null
+  const name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 80) : id === ME_CLIENT_ID ? "Me" : ""
+  if (!name) return null
+  const fee = roundMoney(Number(raw.fee) || 0)
+  return {
+    id,
+    name,
+    contact: typeof raw.contact === "string" ? raw.contact.slice(0, 120) : "",
+    notes: typeof raw.notes === "string" ? raw.notes.slice(0, 1000) : "",
+    feeBasis: raw.feeBasis === "item" ? "item" : "success",
+    fee: fee < 0 || fee > 10000 ? 0 : fee,
+    status: raw.status === "paused" ? "paused" : "active",
+    webhook: typeof raw.webhook === "string" ? raw.webhook.slice(0, 400) : "",
+    createdAt: typeof raw.createdAt === "number" ? raw.createdAt : 0
+  }
+}
+
+function normalizeDeclines(value: CardDecline[] | undefined): CardDecline[] {
+  if (!Array.isArray(value)) return []
+  const rows: CardDecline[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue
+    const store = typeof raw.store === "string" && (STORE_IDS as readonly string[]).includes(raw.store) ? raw.store as StoreId : null
+    const last4 = typeof raw.last4 === "string" && /^\d{4}$/.test(raw.last4) ? raw.last4 : ""
+    if (!store || !last4 || typeof raw.taskId !== "string" || !raw.taskId) continue
+    rows.push({
+      taskId: raw.taskId.slice(0, 80),
+      last4,
+      at: typeof raw.at === "number" ? raw.at : Date.now(),
+      store,
+      sku: typeof raw.sku === "string" ? raw.sku.slice(0, 180) : ""
+    })
+    if (rows.length >= 200) break
+  }
+  return rows
+}
+
+function normalizeLedger(value: LedgerEntry[] | undefined): LedgerEntry[] {
+  if (!Array.isArray(value)) return []
+  const rows: LedgerEntry[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue
+    const store = typeof raw.store === "string" && (STORE_IDS as readonly string[]).includes(raw.store) ? raw.store as StoreId : null
+    if (!store || typeof raw.id !== "string" || !raw.id) continue
+    const quantity = Math.round(Number(raw.quantity))
+    const fee = roundMoney(Number(raw.fee))
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 12) continue
+    if (!Number.isFinite(fee) || fee < 0 || fee > 100000) continue
+    const price = raw.price === null || raw.price === undefined ? null : Number(raw.price)
+    rows.push({
+      id: raw.id,
+      at: typeof raw.at === "number" ? raw.at : Date.now(),
+      clientId: clientIdOf(raw.clientId),
+      clientName: typeof raw.clientName === "string" ? raw.clientName.slice(0, 80) : "Me",
+      store,
+      sku: typeof raw.sku === "string" ? raw.sku.slice(0, 180) : "",
+      product: typeof raw.product === "string" ? raw.product.slice(0, 180) : "",
+      quantity,
+      price: price !== null && Number.isFinite(price) ? roundMoney(price) : null,
+      orderId: typeof raw.orderId === "string" ? raw.orderId.slice(0, 80) : "",
+      fee,
+      paid: raw.paid === true,
+      paidAt: raw.paid === true && typeof raw.paidAt === "number" ? raw.paidAt : null
+    })
+    if (rows.length >= 2000) break
+  }
+  return rows
 }
 
 function toPublicAccount(record: AccountRecord): PublicAccount {
@@ -2422,7 +2960,8 @@ function toPublicAccount(record: AccountRecord): PublicAccount {
     hasSession,
     proxyGroupId: record.proxyGroupId ?? null,
     sessionState: hasSession ? record.sessionState === "expired" ? "expired" : "saved" : "missing",
-    lastWarmAt: record.lastWarmAt ?? null
+    lastWarmAt: record.lastWarmAt ?? null,
+    clientId: clientIdOf(record.clientId)
   }
 }
 
@@ -2531,7 +3070,8 @@ function taskInputFromBackup(task: PublicTask): TaskInput {
     maxPrice: task.maxPrice,
     startMode: task.startMode,
     linkedMonitorId: task.linkedMonitorId,
-    jitterPct: task.jitterPct
+    jitterPct: task.jitterPct,
+    clientId: task.clientId
   }
 }
 

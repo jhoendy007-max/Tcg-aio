@@ -44,6 +44,8 @@ export interface PublicProfile {
   last4: string
   expMonth: string
   expYear: string
+  /** Owner of this shipping profile. Missing values are the default Me client. */
+  clientId?: string
 }
 
 export interface ProfileInput {
@@ -59,6 +61,7 @@ export interface ProfileInput {
   expYear: string
   cvv: string
   cardAction: "keep" | "replace"
+  clientId?: string
 }
 
 export interface CardSecret {
@@ -97,8 +100,10 @@ export interface PublicAccount {
   /** Host:port of the proxy pinned to this account. Empty until the first task start. */
   stickyProxyId?: string | null
   stickyProxyLabel?: string | null
-  /** Persistent Chromium partition. One per account. */
+  /** Persistent Chromium partition. One per account, so clients do not share cookies. */
   profilePartition?: string
+  /** Owner of this store login. Missing values are the default Me client. */
+  clientId?: string
   freshness?: "missing" | "expired" | "fresh" | "due" | "stale"
 }
 
@@ -112,6 +117,7 @@ export interface AccountInput {
   session: string
   sessionAction: "keep" | "replace" | "clear"
   proxyGroupId?: string | null
+  clientId?: string
 }
 
 export interface FullAccount {
@@ -257,6 +263,8 @@ export interface PublicTask {
   startMode?: StartMode
   linkedMonitorId?: string | null
   jitterPct?: number | null
+  /** Owner of this task. A checkout uses the account's client. */
+  clientId?: string
   /** Last shared stock-read time, in milliseconds. */
   monitorMs?: number
   /** Milliseconds from an in-stock reading to the add-to-cart call. */
@@ -295,6 +303,7 @@ export interface TaskInput {
   startMode?: StartMode
   linkedMonitorId?: string | null
   jitterPct?: number | null
+  clientId?: string
 }
 
 export type QueueMode = "wait" | "skip" | "pause"
@@ -393,6 +402,14 @@ export interface Settings {
   cardDailyOrders: number
   /** Lines like target:1. Max quantity of one SKU per account per day. */
   storePurchaseLimits: string
+  /** When on, checkout warnings stop the task. A same-task card decline always stops it. */
+  checkoutHealthBlock: boolean
+  /** 0 means no per-client cap for one SKU at one store. */
+  clientSkuLimit: number
+  /** Lines like target:3. Blank uses 3 orders per shipping address at each store. */
+  addressOrderLimits: string
+  /** Minutes a declined card stays flagged for other tasks. */
+  declineHoldMin: number
   /** Local time HH:MM. Blank turns the daily report off. */
   healthReportTime: string
   /** IANA timezone for budgets and the daily report. Blank uses UTC. */
@@ -463,6 +480,10 @@ export const DEFAULT_SETTINGS: Settings = {
   cardDailySpend: 0,
   cardDailyOrders: 0,
   storePurchaseLimits: "",
+  checkoutHealthBlock: false,
+  clientSkuLimit: 0,
+  addressOrderLimits: "",
+  declineHoldMin: 1440,
   healthReportTime: "",
   healthReportZone: "",
   theme: "dark",
@@ -866,6 +887,7 @@ export interface CheckoutRecord {
   quantity?: number
   /** Card last four from the profile. Never the full card number. */
   last4?: string
+  clientId?: string
   detail: string
   /** Current value of this purchase. Empty until the user enters one. */
   marketValue?: number | null

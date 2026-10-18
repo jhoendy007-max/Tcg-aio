@@ -7,6 +7,8 @@ import type { RequestTiming } from "./http"
 import { productImage } from "../shared/image"
 import { cleanImageUrl } from "./validate"
 import { postDiscord } from "./discord"
+import { clientCanStart, clientIdOf, clientSuccessNotice } from "../shared/clients"
+import { isCardDecline, issueText } from "../shared/checkout-health"
 import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../shared/module-settings"
 import { checkoutsToStart, triggerDecision } from "../shared/task-role"
 import { accountPartition } from "../shared/consistency"
@@ -67,9 +69,33 @@ export class TaskService {
     if (!this.db.licenseAllows()) throw new Error("This PC is not activated. Add a license key in Settings.")
     const task = this.db.getTask(id)
     this.validateStart(id)
+    const client = this.db.clientById(clientIdOf(task.clientId))
+    if (client && !clientCanStart(client.status)) {
+      throw new Error("This client is paused. Set the client back to active before starting tasks.")
+    }
     const testMode = options?.test === true || task.testMode === true || this.db.getSettings().testMode === true
     if (!testMode && !task.confirmPurchase && task.monitorOnly !== true && task.kind !== "monitor") {
       throw new Error("Confirm that this task may place a real shipping order before starting it.")
+    }
+    if (task.kind !== "monitor" && task.monitorOnly !== true) {
+      const report = this.db.assessTask(id)
+      const lang = this.db.getSettings().language === "es" ? "es" : "en"
+      if (report.blocked) {
+        const message = report.issues.filter((item) => item.level === "block").map((item) => issueText(lang, item)).join(" ")
+        void this.notify({
+          kind: "paused",
+          storeName: task.store,
+          sku: task.sku,
+          profileName: client?.name || "Checkout",
+          detail: message
+        }).catch(() => undefined)
+        throw new Error(message)
+      }
+      if (report.issues.length) {
+        this.db.patchTask(id, {
+          log: line("warn", report.issues.map((item) => issueText(lang, item)).join(" ").slice(0, 240))
+        })
+      }
     }
     const controller = new AbortController()
     this.controllers.set(id, controller)
@@ -247,6 +273,12 @@ export class TaskService {
       const guarded = testMode ? guardTestMode(task.store, http) : http
       const ctx = {
         task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store, maxPrice: task.maxPrice },
+        healthCheck: () => {
+          const report = this.db.assessTask(id)
+          if (!report.blocked) return { ok: true as const }
+          const lang = this.db.getSettings().language === "es" ? "es" : "en"
+          return { ok: false as const, reason: report.issues.filter((item) => item.level === "block").map((item) => issueText(lang, item)).join(" ") }
+        },
         spendCheck: (price: number | null) => {
           if (testMode) return { ok: true as const }
           const fresh = this.db.getTask(id)
@@ -484,7 +516,7 @@ export class TaskService {
           }
           return
         }
-        await this.finishResult(update, result, { store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4 }, module.displayName, profileName())
+        await this.finishResult(update, result, { id, store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4, clientId: task.clientId }, module.displayName, profileName())
         return
       }
     } catch (err) {
@@ -669,14 +701,17 @@ export class TaskService {
   private async finishResult(
     update: (patch: Parameters<Database["patchTask"]>[1]) => void,
     result: StoreRunResult,
-    task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string },
+    task: { id: string; store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string; clientId?: string },
     storeNameText: string,
     profileNameText: string
   ): Promise<void> {
     const sku = task.sku
     if (result.outcome === "success") {
+      const watch = this.watches.get(`${task.store}:${sku}`)
+      const product = watch?.title?.trim() || sku
+      const price = typeof watch?.price === "number" ? watch.price : undefined
       finish(update, "success", result.detail, "success")
-      this.remember(task, "success", profileNameText, result.detail, result.orderId)
+      this.remember(task, "success", profileNameText, result.detail, result.orderId, { product, price })
       if (result.orderId) {
         this.db.rememberOrder({
           at: Date.now(),
@@ -688,6 +723,39 @@ export class TaskService {
           quantity: task.quantity,
           detail: result.detail
         })
+      }
+      try {
+        const entry = this.db.recordLedger({
+          clientId: clientIdOf(task.clientId),
+          store: task.store,
+          sku,
+          product,
+          quantity: task.quantity,
+          price: price ?? null,
+          orderId: result.orderId
+        })
+        const owner = this.db.clientById(entry.clientId)
+        if (owner?.webhook) {
+          try {
+            await postDiscord(owner.webhook, clientSuccessNotice({
+              clientName: owner.name,
+              storeName: storeNameText,
+              sku,
+              product,
+              quantity: task.quantity,
+              price: price ?? null,
+              orderId: result.orderId,
+              fee: entry.fee
+            }))
+            update({ log: line("info", "Client notification sent.") })
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err)
+            update({ log: line("warn", `Client notification failed: ${redact(message)}`) })
+          }
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        update({ log: line("warn", `Success ledger was not recorded: ${redact(message)}`) })
       }
       await this.safeNotify(update, {
         kind: "success",
@@ -727,22 +795,30 @@ export class TaskService {
       finish(update, "stopped", "Stopped", "info")
       return
     }
-    finish(update, "failed", result.reason, "error")
-    this.remember(task, "failure", profileNameText, result.reason)
+    const declined = Boolean(task.last4) && isCardDecline(result.reason)
+    const detail = declined
+      ? issueText(this.db.getSettings().language === "es" ? "es" : "en", { code: "decline-task", level: "block", vars: { last4: task.last4 ?? "" } })
+      : result.reason
+    if (declined && task.last4) {
+      this.db.recordDecline({ taskId: task.id, last4: task.last4, store: task.store, sku: task.sku })
+    }
+    finish(update, "failed", detail, "error")
+    this.remember(task, "failure", profileNameText, detail)
     await this.safeNotify(update, {
       kind: "failure",
       storeName: storeNameText,
       sku,
       profileName: profileNameText,
-      detail: result.reason
+      detail
     })
   }
 
-  private remember(task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string): void {
+  private remember(task: { store: StoreId; sku: string; accountId: string; profileId: string; quantity: number; last4?: string; clientId?: string }, outcome: "success" | "failure" | "paused" | "tested", profileName: string, detail: string, orderId?: string, extra?: { product?: string; price?: number }): void {
     this.db.recordCheckout({
       store: task.store,
       sku: task.sku,
-      product: task.sku,
+      product: extra?.product || task.sku,
+      price: extra?.price,
       outcome,
       profileName,
       detail,
@@ -750,7 +826,8 @@ export class TaskService {
       accountId: task.accountId,
       profileId: task.profileId,
       quantity: task.quantity,
-      last4: task.last4
+      last4: task.last4,
+      clientId: task.clientId
     })
   }
 

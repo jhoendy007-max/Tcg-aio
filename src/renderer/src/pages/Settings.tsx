@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { healthText } from "../../../shared/checkout-health"
 import { consistencyText } from "../../../shared/consistency"
 import { dropOpsText } from "../../../shared/drop-ops"
 import { DEFAULT_SETTINGS, type LicenseView, type Settings, type SettingsPayload } from "../../../shared/types"
@@ -241,6 +242,19 @@ export function SettingsPage() {
         </Field>
         <Field className="span-2" label="Store purchase limits" hint="One line per store, like target:1. That is the most of one SKU an account can win today.">
           <TextInput value={form.storePurchaseLimits} onChange={(event) => setForm({ ...form, storePurchaseLimits: event.target.value })} placeholder="target:1" />
+        </Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.checkoutHealthBlock} onChange={(event) => setForm({ ...form, checkoutHealthBlock: event.target.checked })} />
+          <span>{healthText(form.language, "blockLabel")}. {healthText(form.language, "blockHint")}</span>
+        </label>
+        <Field label={healthText(form.language, "limitLabel")} hint={healthText(form.language, "limitHint")}>
+          <TextInput type="number" min={0} max={99} value={form.clientSkuLimit} onChange={(event) => setForm({ ...form, clientSkuLimit: Number(event.target.value) })} />
+        </Field>
+        <Field className="span-2" label={healthText(form.language, "addressLabel")} hint={healthText(form.language, "addressHint")}>
+          <TextInput value={form.addressOrderLimits} onChange={(event) => setForm({ ...form, addressOrderLimits: event.target.value })} placeholder="target:3" />
+        </Field>
+        <Field label={healthText(form.language, "holdLabel")} hint={healthText(form.language, "holdHint")}>
+          <TextInput type="number" min={15} max={10080} value={form.declineHoldMin} onChange={(event) => setForm({ ...form, declineHoldMin: Number(event.target.value) })} />
         </Field>
         <Field label="Health report time" hint="HH:MM in the timezone below. Blank turns the report off.">
           <TextInput value={form.healthReportTime} onChange={(event) => setForm({ ...form, healthReportTime: event.target.value })} placeholder="08:00" />

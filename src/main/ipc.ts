@@ -1,4 +1,4 @@
-import { ipcMain, shell, type BrowserWindow } from "electron"
+import { ipcMain, session, shell, type BrowserWindow } from "electron"
 import QRCode from "qrcode"
 import { relayRestockUrl, type AlertService } from "../engine/alerts"
 import type { ChallengeController } from "./challenge-window"
@@ -19,6 +19,7 @@ import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
 import type { PhoneServer } from "../phone/server"
 import { encodePairingPayload } from "../phone/protocol"
+import { accountPartition } from "../shared/consistency"
 import { channels } from "../shared/ipc"
 import { openMailbox, testMailbox } from "../engine/imap"
 import { refreshShipments } from "../engine/shipments"
@@ -103,6 +104,27 @@ export function registerIpc(
     db.deleteAccount(id)
     return { id }
   })
+  handle(channels.clientsList, () => db.listClients())
+  handle(channels.clientsSummaries, () => db.summarizeClients())
+  handle(channels.clientsSave, (input) => db.saveClient(input))
+  handle(channels.clientsDelete, async (id: string) => {
+    const removed = db.deleteClient(id)
+    for (const accountId of removed.accountIds) {
+      try {
+        await session.fromPartition(accountPartition(accountId)).clearStorageData()
+      } catch {
+        // The account browser may never have been opened.
+      }
+    }
+    return removed
+  })
+  handle(channels.clientsExport, (id: string) => db.exportClient(id))
+  handle(channels.clientsLedger, (clientId?: string) => db.listLedger(clientId))
+  handle(channels.clientsMarkPaid, (input: { clientId: string; ids: string[]; paid: boolean }) => db.markLedgerPaid(input.clientId, input.ids ?? [], input.paid === true))
+  handle(channels.clientsCsv, (clientId?: string) => ({ csv: db.ledgerExport(clientId) }))
+  handle(channels.checkoutHealthPreview, (input) => db.previewCheckoutHealth(input))
+  handle(channels.checkoutHealthClient, (clientId: string) => db.clientCheckoutHealth(clientId))
+  handle(channels.checkoutHealthTasks, () => db.listTaskHealth())
   handle(channels.sessionOpen, async (id: string) => {
     await sessions.open(id)
     return { opened: true as const }

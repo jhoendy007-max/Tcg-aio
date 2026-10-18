@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { issueText, type HealthReport } from "../../../shared/checkout-health"
+import { clientIdOf, clientText, ME_CLIENT_ID, proxyGroupTakenBy, type Client } from "../../../shared/clients"
 import { planExtraCheckout, planQuickPair } from "../../../shared/quick-setup"
 import { taskText } from "../../../shared/task-role"
 import type { MailLang } from "../../../shared/mail"
@@ -11,6 +13,7 @@ export function QuickSetup({
   stores,
   profiles,
   accounts,
+  clients,
   groups,
   tasks,
   globalTest,
@@ -22,6 +25,7 @@ export function QuickSetup({
   stores: StoreInfo[]
   profiles: PublicProfile[]
   accounts: PublicAccount[]
+  clients: Client[]
   groups: ProxyGroup[]
   tasks: PublicTask[]
   globalTest: boolean
@@ -30,9 +34,10 @@ export function QuickSetup({
   onWarm: (enabled: boolean) => Promise<void>
 }) {
   const [store, setStore] = useState<StoreId>(stores[0]?.id ?? "target")
+  const [clientId, setClientId] = useState(ME_CLIENT_ID)
   const [sku, setSku] = useState("")
   const [keywords, setKeywords] = useState("")
-  const [profileId, setProfileId] = useState(profiles[0]?.id ?? "")
+  const [profileId, setProfileId] = useState(() => profiles.find((profile) => clientIdOf(profile.clientId) === ME_CLIENT_ID)?.id ?? "")
   const [accountId, setAccountId] = useState("")
   const [proxyGroupId, setProxyGroupId] = useState("")
   const [quantity, setQuantity] = useState(1)
@@ -48,10 +53,60 @@ export function QuickSetup({
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const [report, setReport] = useState<HealthReport | null>(null)
 
-  const storeAccounts = useMemo(() => accounts.filter((account) => account.store === store), [accounts, store])
+  const storeAccounts = useMemo(
+    () => accounts.filter((account) => account.store === store && clientIdOf(account.clientId) === clientId),
+    [accounts, store, clientId]
+  )
+  const clientProfiles = useMemo(
+    () => profiles.filter((profile) => clientIdOf(profile.clientId) === clientId),
+    [profiles, clientId]
+  )
+  const openGroups = useMemo(
+    () => groups.filter((group) => proxyGroupTakenBy(
+      accounts.map((account) => ({ id: account.id, clientId: account.clientId, proxyGroupId: account.proxyGroupId ?? null })),
+      undefined,
+      clientId,
+      group.id
+    ) === null),
+    [groups, accounts, clientId]
+  )
   const selectedStore = stores.find((item) => item.id === store)
   const made = tasks.find((task) => task.id === monitorId && task.kind === "monitor") ?? null
+  const clientOptions = clients.length ? clients : [{ id: ME_CLIENT_ID, name: clientText(lang, "me") }]
+  const blocked = report?.blocked === true
+
+  useEffect(() => {
+    let cancel = false
+    void unwrap(window.aio.checkoutHealth.preview({
+      store,
+      sku,
+      quantity,
+      profileId: profileId || undefined,
+      accountId: newAccount ? undefined : accountId || undefined,
+      clientId
+    })).then((next) => {
+      if (!cancel) setReport(next)
+    }).catch(() => {
+      if (!cancel) setReport(null)
+    })
+    return () => { cancel = true }
+  }, [store, sku, quantity, profileId, accountId, clientId, newAccount])
+
+  function chooseClient(next: string) {
+    setClientId(next)
+    const nextProfiles = profiles.filter((profile) => clientIdOf(profile.clientId) === next)
+    setProfileId(nextProfiles[0]?.id ?? "")
+    setAccountId("")
+    setExtraAccountId("")
+    if (proxyGroupId && proxyGroupTakenBy(
+      accounts.map((account) => ({ id: account.id, clientId: account.clientId, proxyGroupId: account.proxyGroupId ?? null })),
+      undefined,
+      next,
+      proxyGroupId
+    )) setProxyGroupId("")
+  }
 
   async function ensureAccount(): Promise<string> {
     if (!newAccount) {
@@ -65,7 +120,9 @@ export function QuickSetup({
       password,
       passwordAction: "replace",
       session: "",
-      sessionAction: "keep"
+      sessionAction: "keep",
+      proxyGroupId: proxyGroupId || null,
+      clientId
     }))
     setPassword("")
     setAccountId(saved.id)
@@ -81,6 +138,21 @@ export function QuickSetup({
     try {
       if (warm !== warmOnStart) await onWarm(warm)
       const chosen = await ensureAccount()
+      const account = accounts.find((item) => item.id === chosen)
+      const profile = profiles.find((item) => item.id === profileId)
+      if (account && clientIdOf(account.clientId) !== clientId) throw new Error(taskText(lang, "quickSameClient"))
+      if (profile && clientIdOf(profile.clientId) !== clientId) throw new Error(taskText(lang, "quickSameClient"))
+      const preview = await unwrap(window.aio.checkoutHealth.preview({
+        store,
+        sku,
+        quantity,
+        profileId: profileId || undefined,
+        accountId: chosen,
+        clientId
+      }))
+      if (preview.blocked) {
+        throw new Error(preview.issues.filter((item) => item.level === "block").map((item) => issueText(lang, item)).join(" "))
+      }
       const pair = planQuickPair({
         store,
         sku,
@@ -90,7 +162,8 @@ export function QuickSetup({
         proxyGroupId: proxyGroupId || null,
         quantity,
         testMode: testMode || globalTest,
-        confirmPurchase
+        confirmPurchase,
+        clientId
       })
       const monitor = await unwrap(window.aio.tasks.save(pair.monitor))
       const checkout = await unwrap(window.aio.tasks.save({ ...pair.checkout, linkedMonitorId: monitor.id }))
@@ -116,6 +189,23 @@ export function QuickSetup({
     setError("")
     setMessage("")
     try {
+      const owner = clientIdOf(made.clientId)
+      const profile = profiles.find((item) => item.id === profileId)
+      const account = accounts.find((item) => item.id === extraAccountId)
+      if (!profile || clientIdOf(profile.clientId) !== owner || !account || clientIdOf(account.clientId) !== owner) {
+        throw new Error(taskText(lang, "quickSameClient"))
+      }
+      const preview = await unwrap(window.aio.checkoutHealth.preview({
+        store: made.store,
+        sku: made.sku,
+        quantity,
+        profileId,
+        accountId: extraAccountId,
+        clientId: owner
+      }))
+      if (preview.blocked) {
+        throw new Error(preview.issues.filter((item) => item.level === "block").map((item) => issueText(lang, item)).join(" "))
+      }
       const extra = planExtraCheckout({
         id: made.id,
         store: made.store,
@@ -155,6 +245,14 @@ export function QuickSetup({
       </div>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {message ? <Banner tone="info">{message}</Banner> : null}
+      {report?.issues.length ? report.issues.map((item) => (
+        <Banner key={`${item.code}:${JSON.stringify(item.vars ?? {})}`} tone={item.level === "block" ? "error" : "info"}>{issueText(lang, item)}</Banner>
+      )) : null}
+      <Field label={clientText(lang, "filter")}>
+        <Select value={clientId} disabled={Boolean(made)} onChange={(event) => chooseClient(event.target.value)} aria-label={clientText(lang, "filter")}>
+          {clientOptions.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+        </Select>
+      </Field>
       <Field label={taskText(lang, "store")}>
         <Select value={store} onChange={(event) => { setStore(event.target.value as StoreId); setAccountId("") }} aria-label={taskText(lang, "store")}>
           {stores.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -172,13 +270,13 @@ export function QuickSetup({
       <Field label={taskText(lang, "profile")}>
         <Select value={profileId} onChange={(event) => setProfileId(event.target.value)} aria-label={taskText(lang, "profile")}>
           <option value="">{taskText(lang, "profile")}</option>
-          {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+          {clientProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.last4}</option>)}
         </Select>
       </Field>
       <Field label={taskText(lang, "proxy")}>
         <Select value={proxyGroupId} onChange={(event) => setProxyGroupId(event.target.value)} aria-label={taskText(lang, "proxy")}>
           <option value="">{taskText(lang, "direct")}</option>
-          {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+          {openGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
         </Select>
       </Field>
       <div className="span-2 actions">
@@ -217,16 +315,16 @@ export function QuickSetup({
         <input type="checkbox" checked={warm} onChange={(event) => setWarm(event.target.checked)} />
         <span>{taskText(lang, "quickWarm")}</span>
       </label>
-      {!profiles.length ? <p className="span-2 hint">{taskText(lang, "quickNeedProfile")} <a href="#profiles">{taskText(lang, "quickProfiles")}</a></p> : null}
+      {!clientProfiles.length ? <p className="span-2 hint">{taskText(lang, "quickNeedProfile")} <a href="#profiles">{taskText(lang, "quickProfiles")}</a></p> : null}
       <div className="actions span-2">
-        <button className="primary" type="submit" disabled={busy || !profiles.length}>{taskText(lang, "quickCreate")}</button>
+        <button className="primary" type="submit" disabled={busy || !clientProfiles.length || blocked}>{taskText(lang, "quickCreate")}</button>
       </div>
       {made ? (
         <div className="span-2 actions">
           <span className="hint">{taskText(lang, "quickAnotherHint")}</span>
           <Select value={extraAccountId} onChange={(event) => setExtraAccountId(event.target.value)} aria-label={taskText(lang, "quickAnother")}>
             <option value="">{taskText(lang, "account")}</option>
-            {accounts.filter((account) => account.store === made.store).map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
+            {accounts.filter((account) => account.store === made.store && clientIdOf(account.clientId) === clientIdOf(made.clientId)).map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
           </Select>
           <button type="button" onClick={() => void addAccount()} disabled={busy || !extraAccountId}>{taskText(lang, "quickAnother")}</button>
         </div>

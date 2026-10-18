@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { ME_CLIENT_ID, type Client } from "../../../shared/clients"
 import { consistencyText } from "../../../shared/consistency"
 import type { AccountInput, ProxyGroup, PublicAccount, StoreId, StoreInfo } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
@@ -13,6 +14,7 @@ interface FormState {
   session: string
   clearSession: boolean
   proxyGroupId: string
+  clientId: string
 }
 
 const blank = (): FormState => ({
@@ -22,28 +24,32 @@ const blank = (): FormState => ({
   password: "",
   session: "",
   clearSession: false,
-  proxyGroupId: ""
+  proxyGroupId: "",
+  clientId: ME_CLIENT_ID
 })
 
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<PublicAccount[]>([])
   const [stores, setStores] = useState<StoreInfo[]>([])
   const [groups, setGroups] = useState<ProxyGroup[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [form, setForm] = useState<FormState | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [lang, setLang] = useState<"en" | "es">("en")
 
   async function reload() {
-    const [nextAccounts, nextStores, nextGroups, settings] = await Promise.all([
+    const [nextAccounts, nextStores, nextGroups, nextClients, settings] = await Promise.all([
       unwrap(window.aio.accounts.list()),
       unwrap(window.aio.stores.list()),
       unwrap(window.aio.proxies.list()),
+      unwrap(window.aio.clients.list()),
       unwrap(window.aio.settings.get())
     ])
     setAccounts(nextAccounts)
     setStores(nextStores)
     setGroups(nextGroups)
+    setClients(nextClients)
     setLang(settings.settings.language === "es" ? "es" : "en")
   }
 
@@ -66,7 +72,8 @@ export function AccountsPage() {
         passwordAction: form.password ? "replace" : form.id ? "keep" : "clear",
         session: form.session,
         sessionAction: form.clearSession ? "clear" : form.session.trim() ? "replace" : form.id ? "keep" : "clear",
-        proxyGroupId: form.proxyGroupId || null
+        proxyGroupId: form.proxyGroupId || null,
+        clientId: form.clientId || ME_CLIENT_ID
       }
       await unwrap(window.aio.accounts.save(input))
       setForm(null)
@@ -111,6 +118,11 @@ export function AccountsPage() {
             </Field>
             <Field label="Label"><TextInput value={form.label} onChange={(event) => setForm({ ...form, label: event.target.value })} required /></Field>
             <Field label="Username"><TextInput type="email" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} required /></Field>
+            <Field label="Client" hint="Each client keeps a separate browser session. A proxy group cannot be shared with another client.">
+              <Select value={form.clientId} onChange={(event) => setForm({ ...form, clientId: event.target.value })}>
+                {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+              </Select>
+            </Field>
             <Field label="Proxy group" hint={consistencyText(lang, "stickyHint")}>
               <Select value={form.proxyGroupId} onChange={(event) => setForm({ ...form, proxyGroupId: event.target.value })}>
                 <option value="">No assigned proxy</option>
@@ -138,11 +150,12 @@ export function AccountsPage() {
       ) : null}
       <div className="table-wrap card">
         <table>
-          <thead><tr><th>Store</th><th>Label</th><th>Username</th><th>Password</th><th>{consistencyText(lang, "freshness")}</th><th>{consistencyText(lang, "profile")}</th><th>{consistencyText(lang, "stickyProxy")}</th><th></th></tr></thead>
+          <thead><tr><th>Store</th><th>Client</th><th>Label</th><th>Username</th><th>Password</th><th>{consistencyText(lang, "freshness")}</th><th>{consistencyText(lang, "profile")}</th><th>{consistencyText(lang, "stickyProxy")}</th><th></th></tr></thead>
           <tbody>
-            {accounts.length === 0 ? <tr><td colSpan={8} className="empty">No accounts yet.</td></tr> : accounts.map((account) => (
+            {accounts.length === 0 ? <tr><td colSpan={9} className="empty">No accounts yet.</td></tr> : accounts.map((account) => (
               <tr key={account.id}>
                 <td>{storeName.get(account.store) ?? account.store}</td>
+                <td>{clients.find((client) => client.id === (account.clientId || ME_CLIENT_ID))?.name ?? "Me"}</td>
                 <td>{account.label}</td>
                 <td>{account.username}</td>
                 <td>{account.hasPassword ? "Saved" : "None"}</td>
@@ -152,7 +165,7 @@ export function AccountsPage() {
                 <td className="row-actions">
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.openBrowser(account.id)).catch((err) => setError(errorText(err)))}>Sign in</button>
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.captureBrowser(account.id)).then(() => reload()).catch((err) => setError(errorText(err)))}>Save cookies</button>
-                  <button type="button" onClick={() => setForm({ id: account.id, store: account.store, label: account.label, username: account.username, password: "", session: "", clearSession: false, proxyGroupId: account.proxyGroupId ?? "" })}>Edit</button>
+                  <button type="button" onClick={() => setForm({ id: account.id, store: account.store, label: account.label, username: account.username, password: "", session: "", clearSession: false, proxyGroupId: account.proxyGroupId ?? "", clientId: account.clientId || ME_CLIENT_ID })}>Edit</button>
                   <button type="button" className="danger" onClick={() => void remove(account.id)}>Delete</button>
                 </td>
               </tr>

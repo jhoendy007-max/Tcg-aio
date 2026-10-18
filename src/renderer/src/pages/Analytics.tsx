@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
+import { clientIdOf, clientText, type Client } from "../../../shared/clients"
 import type { AnalyticsReport, CheckoutRecord, InventoryReport, ResaleQuote } from "../../../shared/types"
 import { formatAst } from "../../../engine/time"
 import { SpeedChart, SpendChart, WinChart } from "../components/charts"
-import { Banner, Field } from "../components/ui"
+import { Banner, Field, Select } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
 const empty: AnalyticsReport = {
@@ -14,10 +15,21 @@ const empty: AnalyticsReport = {
 
 export function AnalyticsPage() {
   const [report, setReport] = useState<AnalyticsReport>(empty)
+  const [clients, setClients] = useState<Client[]>([])
+  const [clientFilter, setClientFilter] = useState("")
+  const [lang, setLang] = useState<"en" | "es">("en")
   const [error, setError] = useState("")
 
   useEffect(() => {
-    void unwrap(window.aio.analytics.get()).then(setReport).catch((err) => setError(errorText(err)))
+    void Promise.all([
+      unwrap(window.aio.analytics.get()),
+      unwrap(window.aio.clients.list()),
+      unwrap(window.aio.settings.get())
+    ]).then(([nextReport, nextClients, settings]) => {
+      setReport(nextReport)
+      setClients(nextClients)
+      setLang(settings.settings.language === "es" ? "es" : "en")
+    }).catch((err) => setError(errorText(err)))
   }, [])
 
   async function download() {
@@ -32,6 +44,8 @@ export function AnalyticsPage() {
   }
 
   const max = Math.max(1, ...report.timeline.map((point) => point.success + point.failure + point.paused))
+  const clientName = new Map(clients.map((client) => [client.id, client.name]))
+  const recent = report.recent.filter((row) => !clientFilter || clientIdOf(row.clientId) === clientFilter)
 
   return (
     <section className="page">
@@ -42,6 +56,14 @@ export function AnalyticsPage() {
         </div>
         <button type="button" onClick={() => void download().catch((err) => setError(errorText(err)))}>Export CSV</button>
       </header>
+      <div className="card toolbar">
+        <Field label={clientText(lang, "filter")}>
+          <Select value={clientFilter} onChange={(event) => setClientFilter(event.target.value)} aria-label={clientText(lang, "filter")}>
+            <option value="">{clientText(lang, "allClients")}</option>
+            {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+          </Select>
+        </Field>
+      </div>
       {error ? <Banner tone="error">{error}</Banner> : null}
       <div className="stats">
         <div className="stat"><strong>{Math.round(report.winRate * 100)}%</strong><span>win rate</span></div>
@@ -139,10 +161,10 @@ export function AnalyticsPage() {
       <InventoryCard />
       <div className="table-wrap card">
         <table>
-          <thead><tr><th>When</th><th>Store</th><th>Product</th><th>Price</th><th>Result</th></tr></thead>
+          <thead><tr><th>When</th><th>{clientText(lang, "filter")}</th><th>Store</th><th>Product</th><th>Price</th><th>Result</th></tr></thead>
           <tbody>
-            {report.recent.length === 0 ? <tr><td colSpan={5} className="empty">History appears after a task finishes.</td></tr> : report.recent.map((row) => (
-              <tr key={row.id}><td>{formatAst(row.at)}</td><td>{row.store}</td><td className="sku">{row.sku}</td><td>{row.price === null ? "—" : `$${row.price.toFixed(2)}`}</td><td>{row.outcome}</td></tr>
+            {recent.length === 0 ? <tr><td colSpan={6} className="empty">History appears after a task finishes.</td></tr> : recent.map((row) => (
+              <tr key={row.id}><td>{formatAst(row.at)}</td><td>{clientName.get(clientIdOf(row.clientId)) ?? clientText(lang, "me")}</td><td>{row.store}</td><td className="sku">{row.sku}</td><td>{row.price === null ? "—" : `$${row.price.toFixed(2)}`}</td><td>{row.outcome}</td></tr>
             ))}
           </tbody>
         </table>

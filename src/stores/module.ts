@@ -20,6 +20,8 @@ export interface StoreRunContext {
   task: { id: string; sku: string; quantity: number; store: StoreId; maxPrice?: number | null }
   /** Spend and quantity limits. The runner sets this. Test mode does not ask. */
   spendCheck?: (price: number | null) => { ok: true } | { ok: false; reason: string }
+  /** Profile, address, session, and decline checks. The runner sets this from the same report used at start. */
+  healthCheck?: () => { ok: true } | { ok: false; reason: string }
   profile: FullProfile
   account: FullAccount
   settings: Settings
@@ -67,6 +69,8 @@ export async function paceAddToCart(ctx: StoreRunContext): Promise<void> {
 }
 
 export function checkoutPreflight(ctx: StoreRunContext, price?: number): { outcome: "paused"; reason: string } | null {
+  const health = ctx.healthCheck?.()
+  if (health && !health.ok) return { outcome: "paused", reason: health.reason }
   if (ctx.testMode) return null
   const verifiedPrice = typeof price === "number" && Number.isFinite(price) && price >= 0 ? price : undefined
   const cap = ctx.task.maxPrice
@@ -101,5 +105,7 @@ export interface StoreModule {
   implemented: boolean
   /** The module polls its own waiting room. The runner does not poll those GETs again. */
   handlesQueue?: boolean
+  /** Orders allowed to one shipping address. Only a value under 3 is stricter than the default. */
+  addressOrderCap?: number
   run(ctx: StoreRunContext): Promise<StoreRunResult>
 }

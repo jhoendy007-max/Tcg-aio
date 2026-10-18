@@ -1,3 +1,4 @@
+import { clientIdOf } from "./clients"
 import { AppError } from "./errors"
 import type { StoreId, TaskInput } from "./types"
 
@@ -12,6 +13,8 @@ export interface QuickSetupInput {
   testMode: boolean
   confirmPurchase: boolean
   group?: string
+  /** Monitor owner. A blank value is the default Me client. The checkout uses the account's client. */
+  clientId?: string
 }
 
 export interface QuickPair {
@@ -43,7 +46,8 @@ export function planQuickPair(input: QuickSetupInput): QuickPair {
     kind: "monitor",
     keywords,
     startMode: "manual",
-    linkedCheckoutIds: []
+    linkedCheckoutIds: [],
+    clientId: clientIdOf(input.clientId)
   }
   const checkout: TaskInput = {
     store: input.store,

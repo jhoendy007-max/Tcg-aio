@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { AccountsPage } from "./pages/Accounts"
+import { ClientsPage } from "./pages/Clients"
 import { ProfilesPage } from "./pages/Profiles"
 import { ProxiesPage } from "./pages/Proxies"
 import { PhonePage } from "./pages/Phone"
@@ -34,6 +35,7 @@ const PAGES = [
   { id: "ship", label: "Shipments" },
   { id: "alerts", label: "Alerts" },
   { id: "autopilot", label: "Autopilot" },
+  { id: "clients", label: "Clients" },
   { id: "profiles", label: "Profiles" },
   { id: "proxies", label: "Proxies" },
   { id: "accounts", label: "Accounts" },
@@ -184,6 +186,7 @@ export function App() {
         {!booting && !wizard && page === "ship" ? <ShipmentsPage /> : null}
         {!booting && !wizard && page === "alerts" ? <AlertsPage /> : null}
         {!booting && !wizard && page === "autopilot" ? <AutopilotPage /> : null}
+        {!booting && !wizard && page === "clients" ? <ClientsPage /> : null}
         {!booting && !wizard && page === "profiles" ? <ProfilesPage /> : null}
         {!booting && !wizard && page === "proxies" ? <ProxiesPage /> : null}
         {!booting && !wizard && page === "accounts" ? <AccountsPage /> : null}

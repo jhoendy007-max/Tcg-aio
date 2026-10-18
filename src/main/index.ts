@@ -16,7 +16,7 @@ import type { Notice, TaskEvent } from "../shared/types"
 import { createPhoneHost } from "../phone/backend"
 import { projectTask } from "../phone/protocol"
 import { PhoneServer } from "../phone/server"
-import { createRegistry } from "../stores/registry"
+import { createRegistry, moduleAddressCaps } from "../stores/registry"
 import { warmupDue } from "../engine/session-care"
 import { moduleScope, resolveModule } from "../shared/module-settings"
 import { storeName } from "../shared/stores"
@@ -97,6 +97,7 @@ if (gotLock) void app.whenReady().then(async () => {
   const db = new Database(join(app.getPath("userData"), "tcgaio.json"), createCipher())
   db.load()
   const registry = createRegistry()
+  db.setModuleAddressCaps(moduleAddressCaps(registry.values()))
   const gate = new ChallengeGate()
   const challenge = createChallengeController(gate, () => window)
   sessions = createSessionBrowser(db, () => window, sessionWindows)
