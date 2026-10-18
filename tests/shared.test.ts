@@ -123,6 +123,14 @@ describe("sessions and stock", () => {
     expect(parseStock(JSON.stringify({
       data: { product_summaries: [{ fulfillment: { sold_out: true, shipping_options: { availability_status: "IN_STOCK" } } }] }
     }))).toMatchObject({ inStock: false, status: "SOLD_OUT" })
+    expect(parseStock(JSON.stringify({
+      data: {
+        product_summaries: [{
+          price: { current_retail: "49.99" },
+          fulfillment: { shipping_options: { availability_status: "IN_STOCK" } }
+        }]
+      }
+    }))).toMatchObject({ inStock: true, price: 49.99 })
   })
 
   it("parses live Target fulfillment shapes", () => {

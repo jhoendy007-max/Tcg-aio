@@ -20,6 +20,8 @@ export interface StoreRunContext {
   task: { id: string; sku: string; quantity: number; store: StoreId; maxPrice?: number | null }
   /** Spend and quantity limits. The runner sets this. Test mode does not ask. */
   spendCheck?: (price: number | null) => { ok: true } | { ok: false; reason: string }
+  /** Profile, address, session, and decline checks. The runner sets this from the same report used at start. */
+  healthCheck?: () => { ok: true } | { ok: false; reason: string }
   profile: FullProfile
   account: FullAccount
   settings: Settings
@@ -64,6 +66,25 @@ export async function paceAddToCart(ctx: StoreRunContext): Promise<void> {
   if (ctx.module?.atcMode !== "standard") return
   ctx.log("info", "Standard add-to-cart is on for this store. Waiting one retry interval before adding.")
   await ctx.sleep(ctx.module.retryDelayMs)
+}
+
+export function checkoutPreflight(ctx: StoreRunContext, price?: number): { outcome: "paused"; reason: string } | null {
+  const health = ctx.healthCheck?.()
+  if (health && !health.ok) return { outcome: "paused", reason: health.reason }
+  if (ctx.testMode) return null
+  const verifiedPrice = typeof price === "number" && Number.isFinite(price) && price >= 0 ? price : undefined
+  const cap = ctx.task.maxPrice
+  if (typeof cap === "number" && cap > 0) {
+    if (verifiedPrice === undefined) {
+      return { outcome: "paused", reason: `A verified price is required to enforce this checkout's $${cap.toFixed(2)} max. No cart or payment request was sent.` }
+    }
+    if (verifiedPrice > cap) {
+      return { outcome: "paused", reason: `The price $${verifiedPrice.toFixed(2)} is above this checkout's max of $${cap.toFixed(2)}.` }
+    }
+  }
+  const decision = ctx.spendCheck?.(verifiedPrice ?? null)
+  if (decision && !decision.ok) return { outcome: "paused", reason: decision.reason }
+  return null
 }
 
 export function retryWait(ctx: StoreRunContext): number {

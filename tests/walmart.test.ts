@@ -371,7 +371,7 @@ describe("walmart module", () => {
     if (result.outcome === "failed") expect(result.reason).toMatch(/declined/i)
   })
 
-  it("resubmits the card once when checkout asks for the CVV", async () => {
+  it("does not retry place order when checkout asks for the CVV", async () => {
     let orders = 0
     const fake = client((req) => {
       if (req.url.includes("/placeOrder/")) {
@@ -382,12 +382,23 @@ describe("walmart module", () => {
       return happy(req)
     })
     const result = await createWalmartModule().run(ctx(fake.http))
-    expect(result).toMatchObject({ outcome: "success", orderId: "WM555" })
+    expect(result).toMatchObject({ outcome: "paused" })
+    if (result.outcome === "paused") expect(result.reason).toMatch(/did not retry the place-order request/i)
+    expect(orders).toBe(1)
     const cards = fake.calls.filter((call) => call.url.includes("CreateAccountCreditCard"))
-    expect(cards).toHaveLength(2)
+    expect(cards).toHaveLength(1)
     expect(cards.every((call) => new URL(call.url).hostname === "www.walmart.com")).toBe(true)
-    expect(fake.calls.filter((call) => call.url.includes("getkey.js"))).toHaveLength(2)
+    expect(fake.calls.filter((call) => call.url.includes("getkey.js"))).toHaveLength(1)
     expect(cards.every((call) => !(call.body ?? "").includes(pieFixture.pan))).toBe(true)
+  })
+
+  it("does not retry place order when Walmart reports unavailable stock", async () => {
+    const fake = client((req) => isFinalSubmit("walmart", req)
+      ? json(409, { errors: [{ message: "OUT_OF_STOCK" }] })
+      : happy(req))
+    const result = await createWalmartModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(fake.calls.filter((call) => isFinalSubmit("walmart", call))).toHaveLength(1)
   })
 
   it("runs payment and never sends place order in test mode", async () => {

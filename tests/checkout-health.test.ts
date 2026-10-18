@@ -7,7 +7,7 @@ import { Database } from "../src/engine/database"
 import { TaskService } from "../src/engine/task-runner"
 import { addressKey, assessCheckout, isCardDecline, issueText, type HealthProfile, type HealthWorld } from "../src/shared/checkout-health"
 import type { Address, Notice, StoreId } from "../src/shared/types"
-import type { StoreModule } from "../src/stores/module"
+import { checkoutPreflight, type StoreModule, type StoreRunContext } from "../src/stores/module"
 
 const now = Date.now()
 
@@ -393,5 +393,87 @@ describe("checkout health", () => {
     const service = new TaskService(db, new Map([["target", module]]), () => undefined, async () => false)
     expect(() => service.start(task.id)).toThrow(/does not match/)
     expect(runs).toBe(0)
+  })
+
+  it("pauses inside checkout preflight when the address cap is reached while the task is running", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tcgaio-health-preflight-"))
+    const db = new Database(join(dir, "tcgaio.json"), createAesCipher(dir))
+    db.load()
+    const shipping = address()
+    const profileRow = db.saveProfile({
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      phone: "2125550100",
+      shipping,
+      billing: shipping,
+      cardName: "Ada Lovelace",
+      cardNumber: "4242424242424242",
+      expMonth: "12",
+      expYear: "2030",
+      cvv: "123",
+      cardAction: "replace"
+    })
+    const account = db.saveAccount({
+      store: "target",
+      label: "Main",
+      username: "ada@example.com",
+      password: "secret",
+      passwordAction: "replace",
+      session: "accessToken=token-1; visitorId=visitor-1",
+      sessionAction: "replace"
+    })
+    const task = db.saveTask({
+      store: "target",
+      sku: "88897904",
+      quantity: 1,
+      profileId: profileRow.id,
+      accountId: account.id,
+      proxyGroupId: null,
+      confirmPurchase: true
+    })
+    const module: StoreModule = {
+      id: "target",
+      displayName: "Target",
+      skuHint: "TCIN",
+      implemented: true,
+      async run(ctx) {
+        for (let n = 0; n < 3; n += 1) {
+          db.recordCheckout({
+            store: "target",
+            sku: "other",
+            product: "Other",
+            outcome: "success",
+            profileName: "Ada Lovelace",
+            detail: "Order",
+            accountId: account.id,
+            profileId: profileRow.id,
+            quantity: 1,
+            clientId: "me"
+          })
+        }
+        return checkoutPreflight(ctx, 20) ?? { outcome: "success" as const, detail: "should not place" }
+      }
+    }
+    const service = new TaskService(db, new Map([["target", module]]), () => undefined, async () => false)
+    service.start(task.id)
+    await service.wait(task.id)
+    expect(db.getTask(task.id).status).toBe("paused")
+    expect(db.getTask(task.id).detail).toMatch(/already has 3 orders/)
+  })
+
+  it("asks checkout preflight for a verified price after the health check passes", () => {
+    const health = checkoutPreflight({
+      testMode: false,
+      task: { id: "t", sku: "1", quantity: 1, store: "target", maxPrice: 10 },
+      healthCheck: () => ({ ok: false, reason: "This shipping address already has 3 orders at this store. The limit is 3." })
+    } as StoreRunContext)
+    expect(health).toMatchObject({ outcome: "paused" })
+    expect(health?.reason).toMatch(/3 orders/)
+    const price = checkoutPreflight({
+      testMode: false,
+      task: { id: "t", sku: "1", quantity: 1, store: "target", maxPrice: 10 },
+      healthCheck: () => ({ ok: true })
+    } as StoreRunContext)
+    expect(price?.reason).toMatch(/verified price/)
   })
 })

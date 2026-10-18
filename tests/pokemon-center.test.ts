@@ -374,6 +374,15 @@ describe("pokémon center checkout", () => {
     if (result.outcome === "failed") expect(result.reason).toMatch(/declined/i)
   })
 
+  it("does not retry place order when Pokémon Center reports unavailable stock", async () => {
+    const fake = client((req) => isFinalSubmit("pokemon-center", req)
+      ? json(409, { error: "OUT_OF_STOCK" })
+      : happy(req))
+    const result = await createPokemonCenterModule().run(ctx(fake.http))
+    expect(result).toMatchObject({ outcome: "failed" })
+    expect(fake.calls.filter((call) => isFinalSubmit("pokemon-center", call))).toHaveLength(1)
+  })
+
   it("returns to the monitor when add to cart is out of stock", async () => {
     let adds = 0
     const fake = client((req) => {

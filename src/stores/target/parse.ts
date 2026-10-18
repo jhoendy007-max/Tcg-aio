@@ -5,6 +5,7 @@ export interface StockReading {
   status: string
   title?: string
   imageUrl?: string
+  price?: number
 }
 
 export function parseStock(body: string): StockReading | null {
@@ -17,12 +18,14 @@ export function parseStock(body: string): StockReading | null {
   const product = firstProduct(json)
   if (!product) return { inStock: false, status: "NOT_FOUND" }
   const title = readTitle(product)
+  const price = readPrice(product)
   const fulfillment = asRecord(product.fulfillment)
-  if (!fulfillment) return { inStock: false, status: "UNKNOWN", title }
-  if (fulfillment.sold_out === true) return { inStock: false, status: "SOLD_OUT", title }
+  const priceField = price === undefined ? {} : { price }
+  if (!fulfillment) return { inStock: false, status: "UNKNOWN", title, ...priceField }
+  if (fulfillment.sold_out === true) return { inStock: false, status: "SOLD_OUT", title, ...priceField }
   const status = shippingStatus(fulfillment)
-  if (!status) return { inStock: false, status: "UNKNOWN", title }
-  return { inStock: IN_STOCK.has(status), status, title }
+  if (!status) return { inStock: false, status: "UNKNOWN", title, ...priceField }
+  return { inStock: IN_STOCK.has(status), status, title, ...priceField }
 }
 
 export function isChallenge(status: number, body: string): boolean {
@@ -119,6 +122,21 @@ function readTitle(product: Record<string, unknown>): string | undefined {
   const title = description?.title
   if (typeof title !== "string" || !title.trim()) return undefined
   return decodeEntities(title.trim())
+}
+
+function readPrice(product: Record<string, unknown>): number | undefined {
+  const item = asRecord(product.item)
+  const price = asRecord(product.price) ?? asRecord(item?.price)
+  const value = price?.current_retail ?? price?.current_price ?? product.current_retail
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value
+  if (typeof value === "string") {
+    const normalized = value.trim().replace(/^\$/, "")
+    if (/^\d+(?:\.\d{1,2})?$/.test(normalized)) {
+      const parsed = Number(normalized)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return undefined
 }
 
 export function stockProblem(body: string): string | null {

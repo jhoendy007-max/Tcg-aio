@@ -158,15 +158,32 @@ describe("page store checkout", () => {
   })
 
   it("places the order only when the page's place form is submitted", async () => {
-    const entry = modules[0]
-    const fake = client(scripted(entry, "saved"))
-    const result = await entry.module.run(runCtx(entry.id, entry.sku, fake.http))
-    expect(result).toMatchObject({ outcome: "success", orderId: "ORD-1" })
-    const place = fake.calls.find((call) => isFinalSubmit(entry.id, call))
-    expect(place?.method).toBe("POST")
-    expect(new URL(place?.url ?? "").pathname).toBe(entry.place)
-    expect(place?.body ?? "").not.toContain(pan)
-    expect(fake.calls.filter((call) => isFinalSubmit(entry.id, call))).toHaveLength(1)
+    for (const entry of modules) {
+      const fake = client(scripted(entry, "saved"))
+      const result = await entry.module.run(runCtx(entry.id, entry.sku, fake.http))
+      expect(result, entry.id).toMatchObject({ outcome: "success", orderId: "ORD-1" })
+      const place = fake.calls.find((call) => isFinalSubmit(entry.id, call))
+      expect(place?.method, entry.id).toBe("POST")
+      expect(new URL(place?.url ?? "").pathname, entry.id).toBe(entry.place)
+      expect(place?.body ?? "", entry.id).not.toContain(pan)
+      expect(fake.calls.filter((call) => isFinalSubmit(entry.id, call)), entry.id).toHaveLength(1)
+    }
+  })
+
+  it("does not retry a final order request after a rate-limit response", async () => {
+    for (const entry of modules) {
+      let submits = 0
+      const fake = client((req) => {
+        if (isFinalSubmit(entry.id, req)) {
+          submits += 1
+          return json(429, "rate limited")
+        }
+        return scripted(entry, "saved")(req)
+      })
+      const result = await entry.module.run(runCtx(entry.id, entry.sku, fake.http))
+      expect(result.outcome, entry.id).toBe("failed")
+      expect(submits, entry.id).toBe(1)
+    }
   })
 
   it("sends the card only to the tokenization form the page linked", async () => {
@@ -225,6 +242,19 @@ describe("page store checkout", () => {
     if (result.outcome === "paused") expect(result.reason).toContain("$10.00")
     expect(fake.calls.every((call) => call.method === "GET")).toBe(true)
     expect(fake.calls.some((call) => call.url.includes("ecom-api"))).toBe(false)
+  })
+
+  it("does not cart when a configured max price has no verified product price", async () => {
+    const entry = modules[0]
+    const fake = client((req) => req.method === "GET" && new URL(req.url).pathname === new URL(entry.sku).pathname
+      ? json(200, `<html><body><form action="https://${entry.host}/cart/add" method="post"><button>Add to Cart</button></form></body></html>`)
+      : scripted(entry, "saved")(req))
+    const result = await entry.module.run(runCtx(entry.id, entry.sku, fake.http, {
+      task: { id: "t1", sku: entry.sku, quantity: 1, store: entry.id, maxPrice: 40 }
+    }))
+    expect(result).toMatchObject({ outcome: "paused" })
+    if (result.outcome === "paused") expect(result.reason).toMatch(/verified price is required/i)
+    expect(fake.calls.every((call) => call.method === "GET")).toBe(true)
   })
 
   it("does not cart when the spend check refuses", async () => {
