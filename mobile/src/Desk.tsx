@@ -108,6 +108,7 @@ function QuickForm({ snap, session, run }: { snap: PhoneSnapshot | null; session
 
 function ProfileForm({ snap, session, run }: { snap: PhoneSnapshot | null; session: PhoneSession | null; run: Run }) {
   const { styles, colors } = useTheme()
+  const [id, setId] = useState<string | undefined>()
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [card, setCard] = useState("")
@@ -125,6 +126,20 @@ function ProfileForm({ snap, session, run }: { snap: PhoneSnapshot | null; sessi
       {(snap?.profiles ?? []).map((profile) => (
         <View key={profile.id} style={styles.row}>
           <Text style={styles.p}>{profile.name} · ····{profile.last4} · {profile.city}</Text>
+          <Pressable onPress={() => {
+            setId(profile.id)
+            setName(profile.name)
+            setEmail(profile.email)
+            setPhone(profile.phone)
+            setLine1(profile.shipping.line1)
+            setCity(profile.shipping.city)
+            setState(profile.shipping.state)
+            setZip(profile.shipping.zip)
+            setExpMonth(profile.expMonth)
+            setExpYear(profile.expYear)
+            setCard("")
+            setCvv("")
+          }}><Text style={styles.link}>Edit</Text></Pressable>
           <Pressable onPress={() => void run(() => session!.deleteProfile(profile.id))}><Text style={styles.link}>Delete</Text></Pressable>
         </View>
       ))}
@@ -141,7 +156,7 @@ function ProfileForm({ snap, session, run }: { snap: PhoneSnapshot | null; sessi
       <TextInput style={styles.input} value={cvv} onChangeText={setCvv} placeholder="CVV" placeholderTextColor={colors.muted} keyboardType="number-pad" secureTextEntry />
       <Pressable style={styles.primary} onPress={() => {
         const shipping = { ...blankAddress, firstName: name.split(" ")[0] ?? "", lastName: name.split(" ").slice(1).join(" "), line1, city, state, zip }
-        const profile: PhoneProfileDraft = { name, email, phone, shipping, billing: shipping, cardName: name, cardNumber: card, expMonth, expYear, cvv, cardAction: "replace" }
+        const profile: PhoneProfileDraft = { id, name, email, phone, shipping, billing: shipping, cardName: name, cardNumber: card, expMonth, expYear, cvv, cardAction: card.trim() ? "replace" : "keep" }
         void run(async () => {
           const result = await session!.saveProfile(profile)
           if (result.ok) { setCard(""); setCvv("") }
