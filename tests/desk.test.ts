@@ -72,6 +72,12 @@ describe("analytics", () => {
     expect(csv).not.toContain("secret-pass")
     expect(csv).not.toContain("4242")
   })
+
+  it("returns an empty report when the checkout list is missing", () => {
+    expect(summarize(undefined).attempts).toBe(0)
+    expect(summarize(null).timeline).toEqual([])
+    expect(checkoutCsv(undefined).split("\n")).toEqual(["at,store,sku,product,price,outcome,profile,orderId,detail"])
+  })
 })
 
 describe("mass tasks", () => {

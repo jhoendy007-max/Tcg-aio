@@ -26,9 +26,19 @@ export function AnalyticsPage() {
       unwrap(window.aio.clients.list()),
       unwrap(window.aio.settings.get())
     ]).then(([nextReport, nextClients, settings]) => {
-      setReport(nextReport)
-      setClients(nextClients)
-      setLang(settings.settings.language === "es" ? "es" : "en")
+      setReport({
+        ...empty,
+        ...(nextReport ?? {}),
+        monitor: { ...empty.monitor, ...(nextReport?.monitor ?? {}), byStore: nextReport?.monitor?.byStore ?? [] },
+        timeline: nextReport?.timeline ?? [],
+        byStore: nextReport?.byStore ?? [],
+        byProduct: nextReport?.byProduct ?? [],
+        recent: nextReport?.recent ?? [],
+        restockHints: nextReport?.restockHints ?? [],
+        stockLog: nextReport?.stockLog ?? []
+      })
+      setClients(Array.isArray(nextClients) ? nextClients : [])
+      setLang(settings?.settings?.language === "es" ? "es" : "en")
     }).catch((err) => setError(errorText(err)))
   }, [])
 

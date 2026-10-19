@@ -30,6 +30,7 @@ function ask(message) {
 }
 
 function render(state) {
+  try {
   if (!state?.ok && state?.error) showError(state.error)
   else showError(state?.error || "")
   const paired = Boolean(state?.paired)
@@ -71,6 +72,10 @@ function render(state) {
     const empty = document.createElement("li")
     empty.textContent = "No accounts on this PC yet. Add one in TCGAIO, then refresh."
     list.append(empty)
+  }
+  } catch (err) {
+    console.error(err)
+    showError(err instanceof Error ? err.message : "Session Sync could not draw this screen.")
   }
 }
 

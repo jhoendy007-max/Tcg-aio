@@ -5,27 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TCGAIO admin</title>
   <style>
-    :root { color-scheme: dark; font-family: "Segoe UI", sans-serif; background: #101217; color: #f4f1ea; }
+    :root { color-scheme: dark; font-family: "Segoe UI", sans-serif; background: #0e1116; color: #f2f5f8; }
     body { margin: 0 auto; padding: 20px; max-width: 920px; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     h1 { font-size: 26px; margin: 0; }
-    p, small { color: #9aa3b2; }
+    h1 span { color: #e0b15a; font-size: 13px; letter-spacing: 0.12em; margin-right: 8px; }
+    p, small { color: #93a0b5; }
     button, input { font: inherit; color: inherit; border-radius: 8px; border: 1px solid #343b49; background: #181c24; padding: 8px 12px; }
     button.primary { background: #e0b15a; color: #1c1508; border-color: transparent; font-weight: 700; }
-    button.tab { background: transparent; }
-    button.tab.on { background: #2a3140; color: #f4f1ea; }
+    button.tab { background: #171b22; border-radius: 999px; }
+    button.tab.on { background: #e0b15a; color: #1c1508; border-color: transparent; }
+    button.tab.on .badge { background: #1c1508; color: #e0b15a; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
-    .card { border: 1px solid #2a3140; border-radius: 12px; padding: 12px; margin: 10px 0; background: #181c24; }
-    .error { background: #3a1d1d; color: #ffd0d0; padding: 10px 12px; border-radius: 8px; }
+    .card { border: 1px solid #2a3140; border-radius: 16px; padding: 14px; margin: 10px 0; background: #171b22; }
+    .error { background: #3a1d1d; color: #ffd0d0; padding: 10px 12px; border-radius: 12px; }
     .key { word-break: break-all; font-family: ui-monospace, monospace; }
     label { display: flex; flex-direction: column; gap: 4px; min-width: 160px; font-size: 13px; color: #c8cdd4; }
     .pill { border-radius: 999px; padding: 2px 8px; background: #2a3140; font-size: 12px; }
     .pill.pending { background: #3d3420; color: #e0b15a; }
-    .badge { background: #e0b15a; color: #1c1508; border-radius: 999px; padding: 0 7px; font-size: 12px; font-weight: 700; }
+    .pill.active { background: #163528; color: #b7f0d6; }
+    .pill.suspended { background: #3a1d1d; color: #ffd0d0; }
+    .badge { background: #2a3140; color: #e0b15a; border-radius: 999px; padding: 0 7px; font-size: 12px; font-weight: 700; }
     .check { flex-direction: row; align-items: center; gap: 8px; min-width: 0; }
+    .empty { color: #93a0b5; border: 1px dashed #2a3140; border-radius: 16px; text-align: center; padding: 28px 16px; }
   </style>
 </head>
 <body>
-  <h1>TCGAIO admin</h1>
+  <header>
+    <h1><span>TCGAIO</span>Admin</h1>
+    <button id="sign-out" type="button" hidden>Sign out</button>
+  </header>
   <p>Pending accounts come first. A gift key can still be created on its own and redeemed in the customer's account.</p>
   <div id="error"></div>
   <section id="login">
@@ -37,10 +46,10 @@
   </section>
   <section id="desk" hidden>
     <div class="row">
-      <button class="tab on" id="tab-pending" type="button">Pending <span id="badge" class="badge" hidden>0</span></button>
-      <button class="tab" id="tab-active" type="button">Active</button>
-      <button class="tab" id="tab-suspended" type="button">Suspended</button>
-      <button class="tab" id="tab-gifts" type="button">Gift keys</button>
+      <button class="tab on" id="tab-pending" type="button">Pending <span id="count-pending" class="badge" hidden>0</span></button>
+      <button class="tab" id="tab-active" type="button">Active <span id="count-active" class="badge" hidden>0</span></button>
+      <button class="tab" id="tab-suspended" type="button">Suspended <span id="count-suspended" class="badge" hidden>0</span></button>
+      <button class="tab" id="tab-gifts" type="button">Gift keys <span id="count-gifts" class="badge" hidden>0</span></button>
       <input id="search" placeholder="Search email" />
     </div>
     <div id="users"></div>
@@ -63,19 +72,44 @@
   </section>
   <script>
     const error = document.getElementById("error")
+    const emailInput = document.getElementById("email")
     let token = localStorage.getItem("tcgaio-admin") || ""
     let createdId = ""
     let tab = "pending"
+    emailInput.value = localStorage.getItem("tcgaio-admin-email") || ""
     const showError = (message) => { error.className = message ? "error" : ""; error.textContent = message || "" }
+    function showLogin(message) {
+      token = ""
+      localStorage.removeItem("tcgaio-admin")
+      document.getElementById("login").hidden = false
+      document.getElementById("desk").hidden = true
+      document.getElementById("sign-out").hidden = true
+      showError(message || "")
+    }
+    function showDesk() {
+      document.getElementById("login").hidden = true
+      document.getElementById("desk").hidden = false
+      document.getElementById("sign-out").hidden = false
+    }
     async function api(path, options = {}) {
       const response = await fetch(path, {
         method: options.method || "GET",
         headers: { "content-type": "application/json", ...(token ? { authorization: "Bearer " + token } : {}) },
         body: options.body ? JSON.stringify(options.body) : undefined
       })
-      const payload = await response.json()
+      const payload = await response.json().catch(() => ({}))
+      if (response.status === 401 && !options.login) {
+        const err = new Error(payload.error || "Sign in to the admin desk again.")
+        err.session = true
+        throw err
+      }
       if (!response.ok || payload.ok === false) throw new Error(payload.error || "Request failed")
       return payload
+    }
+    function guard(err) {
+      console.error(err)
+      if (err && err.session) showLogin(err.message)
+      else showError(err && err.message ? err.message : "Request failed")
     }
     function setTab(next) {
       tab = next
@@ -84,7 +118,16 @@
       }
       document.getElementById("users").hidden = next === "gifts"
       document.getElementById("gifts").hidden = next !== "gifts"
-      load().catch((err) => showError(err.message))
+      load().catch(guard)
+    }
+    function paintCounts(data) {
+      const counts = { pending: data.pendingCount || 0, active: data.activeCount || 0, suspended: data.suspendedCount || 0, gifts: data.giftCount || 0 }
+      for (const name of Object.keys(counts)) {
+        const badge = document.getElementById("count-" + name)
+        if (!badge) continue
+        badge.hidden = !counts[name]
+        badge.textContent = String(counts[name])
+      }
     }
     function userCard(row) {
       const card = document.createElement("article")
@@ -108,7 +151,7 @@
         method.placeholder = "Not configured"
         method.onchange = async () => {
           showError("")
-          try { await api("/v1/admin/users/" + row.id + "/payment", { method: "POST", body: { paymentMethod: method.value } }) } catch (err) { showError(err.message) }
+          try { await api("/v1/admin/users/" + row.id + "/payment", { method: "POST", body: { paymentMethod: method.value } }) } catch (err) { guard(err) }
         }
         const paid = document.createElement("label")
         paid.className = "check"
@@ -117,7 +160,7 @@
         box.checked = row.paid === true
         box.onchange = async () => {
           showError("")
-          try { await api("/v1/admin/users/" + row.id + "/paid", { method: "POST", body: { paid: box.checked } }); await load() } catch (err) { showError(err.message) }
+          try { await api("/v1/admin/users/" + row.id + "/paid", { method: "POST", body: { paid: box.checked } }); await load() } catch (err) { guard(err) }
         }
         paid.append(box, document.createTextNode("Paid"))
         methodLabel.append(method)
@@ -133,7 +176,7 @@
               const payload = await api("/v1/admin/users/" + row.id + "/license", { method: "POST", body: {} })
               window.alert("License linked. Copy the key if you want a record:\n" + payload.key)
               await load()
-            } catch (err) { showError(err.message) }
+            } catch (err) { guard(err) }
           }
           actions.append(link)
         }
@@ -143,7 +186,7 @@
           button.textContent = label
           button.onclick = async () => {
             showError("")
-            try { await api("/v1/admin/users/" + row.id + "/" + action, { method: "POST", body: {} }); await load() } catch (err) { showError(err.message) }
+            try { await api("/v1/admin/users/" + row.id + "/" + action, { method: "POST", body: {} }); await load() } catch (err) { guard(err) }
           }
           actions.append(button)
         }
@@ -156,25 +199,32 @@
     async function loadUsers() {
       const query = document.getElementById("search").value.trim()
       const data = await api("/v1/admin/users?status=" + encodeURIComponent(tab) + "&q=" + encodeURIComponent(query))
-      const badge = document.getElementById("badge")
-      badge.hidden = !data.pendingCount
-      badge.textContent = String(data.pendingCount || 0)
+      paintCounts(data)
       const host = document.getElementById("users")
       host.textContent = ""
-      if (!data.users.length) {
+      const rows = Array.isArray(data.users) ? data.users : []
+      if (!rows.length) {
         const empty = document.createElement("p")
-        empty.textContent = "No accounts in this list."
+        empty.className = "empty"
+        empty.textContent = query ? "No accounts match that search." : tab === "pending" ? "No pending users" : tab === "active" ? "No active users" : "No suspended users"
         host.append(empty)
       }
-      for (const row of data.users) host.append(userCard(row))
+      for (const row of rows) host.append(userCard(row))
     }
     async function loadGifts() {
       const query = document.getElementById("search").value.trim()
       const data = await api("/v1/admin/overview?q=" + encodeURIComponent(query))
+      paintCounts(data)
       const list = document.getElementById("list")
       list.textContent = ""
-      for (const row of data.licenses) {
-        if (row.email) continue
+      const gifts = (Array.isArray(data.licenses) ? data.licenses : []).filter((row) => !row.email)
+      if (!gifts.length) {
+        const empty = document.createElement("p")
+        empty.className = "empty"
+        empty.textContent = "No gift keys"
+        list.append(empty)
+      }
+      for (const row of gifts) {
         const card = document.createElement("article")
         card.className = "card"
         const title = document.createElement("strong")
@@ -189,7 +239,7 @@
           button.textContent = label
           button.onclick = async () => {
             showError("")
-            try { await api("/v1/admin/licenses/" + row.id + "/" + action, { method: "POST", body: {} }); await load() } catch (err) { showError(err.message) }
+            try { await api("/v1/admin/licenses/" + row.id + "/" + action, { method: "POST", body: {} }); await load() } catch (err) { guard(err) }
           }
           actions.append(button)
         }
@@ -209,19 +259,20 @@
       event.preventDefault()
       showError("")
       try {
-        const payload = await api("/v1/admin/login", { method: "POST", body: { email: email.value, password: password.value } })
+        const payload = await api("/v1/admin/login", { method: "POST", login: true, body: { email: emailInput.value, password: password.value } })
         token = payload.token
         localStorage.setItem("tcgaio-admin", token)
-        document.getElementById("login").hidden = true
-        document.getElementById("desk").hidden = false
+        localStorage.setItem("tcgaio-admin-email", emailInput.value.trim())
+        showDesk()
         await load()
-      } catch (err) { showError(err.message) }
+      } catch (err) { guard(err) }
     }
     for (const name of ["pending", "active", "suspended", "gifts"]) {
       document.getElementById("tab-" + name).onclick = () => setTab(name)
     }
     document.getElementById("create").onclick = () => { document.getElementById("create-form").hidden = false }
-    document.getElementById("search").oninput = () => load().catch((err) => showError(err.message))
+    document.getElementById("search").oninput = () => load().catch(guard)
+    document.getElementById("sign-out").onclick = () => showLogin("")
     document.getElementById("create-form").onsubmit = async (event) => {
       event.preventDefault()
       showError("")
@@ -232,18 +283,21 @@
         document.getElementById("new-key").textContent = "Gift key (copy it now): " + payload.key
         document.getElementById("give").hidden = false
         await load()
-      } catch (err) { showError(err.message) }
+      } catch (err) { guard(err) }
     }
     document.getElementById("give").onclick = async () => {
       showError("")
-      try { await api("/v1/admin/licenses/" + createdId + "/access", { method: "POST", body: {} }); document.getElementById("give").hidden = true; await load() } catch (err) { showError(err.message) }
+      try { await api("/v1/admin/licenses/" + createdId + "/access", { method: "POST", body: {} }); document.getElementById("give").hidden = true; await load() } catch (err) { guard(err) }
     }
+    window.addEventListener("error", (event) => {
+      console.error(event.error || event.message)
+      showError(event.message || "Something went wrong.")
+    })
     if (token) {
-      document.getElementById("login").hidden = true
-      document.getElementById("desk").hidden = false
-      load().catch(() => { token = ""; localStorage.removeItem("tcgaio-admin"); document.getElementById("login").hidden = false; document.getElementById("desk").hidden = true })
+      showDesk()
+      load().catch(guard)
     }
-    setInterval(() => { if (token && tab !== "gifts") loadUsers().catch(() => undefined) }, 15000)
+    setInterval(() => { if (token) load().catch(guard) }, 15000)
   </script>
 </body>
 </html>

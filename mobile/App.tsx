@@ -23,60 +23,14 @@ import { DeskPanel, LogsPanel, PhoneSettingsForm } from "./src/Desk"
 import { PhoneUpdateCard } from "./src/PhoneUpdateCard"
 import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
+import { asList, draftFromPhoneTask, emptyPhoneDraft, phoneTaskStatus, textField, withStoreDefaults } from "../src/phone/task-draft"
+import { isStoreId } from "../src/shared/stores"
 
 type Screen = "boot" | "pair" | "dash" | "edit" | "alerts" | "drops" | "stats" | "mail" | "stores"
 type PhoneTab = "tasks" | "accounts" | "clients" | "settings"
 
 const LETTER: Record<string, string> = { target: "T", walmart: "W", bestbuy: "B", "pokemon-center": "P", amazon: "A", crunchyroll: "C", bandai: "N", gamestop: "G", "barnes-noble": "BN", costco: "Co", sams: "S", tcgplayer: "D" }
 
-const emptyDraft = (snap: PhoneSnapshot | null): PhoneTaskDraft => ({
-  store: snap?.stores[0]?.id ?? "target",
-  sku: "",
-  quantity: 1,
-  profileId: snap?.profiles[0]?.id ?? "",
-  accountId: "",
-  proxyGroupId: null,
-  confirmPurchase: false,
-  testMode: false,
-  kind: "checkout",
-  keywords: "",
-  priceCap: null,
-  webhook: "",
-  activeHours: "",
-  linkedCheckoutIds: [],
-  checkoutDelayMs: null,
-  maxPrice: null,
-  startMode: "builtin",
-  jitterPct: null
-})
-
-function draftFrom(item: PhoneTask): PhoneTaskDraft {
-  return {
-    id: item.id,
-    store: item.store,
-    sku: item.sku,
-    quantity: item.quantity,
-    profileId: item.profileId,
-    accountId: item.accountId,
-    proxyGroupId: item.proxyGroupId,
-    confirmPurchase: item.confirmPurchase,
-    testMode: item.testMode,
-    group: item.group,
-    kind: item.kind === "monitor" || item.monitorOnly ? "monitor" : "checkout",
-    keywords: item.keywords ?? "",
-    priceCap: item.priceCap ?? null,
-    webhook: item.webhook ?? "",
-    activeHours: item.activeHours ?? "",
-    linkedCheckoutIds: item.linkedCheckoutIds ?? [],
-    checkoutDelayMs: item.checkoutDelayMs ?? null,
-    maxPrice: item.maxPrice ?? null,
-    startMode: item.startMode ?? (item.kind === "monitor" ? "manual" : "builtin"),
-    linkedMonitorId: item.linkedMonitorId ?? null,
-    jitterPct: item.jitterPct ?? null,
-    monitorProxyGroupId: item.monitorProxyGroupId ?? null,
-    overrides: item.overrides
-  }
-}
 
 export default function App() {
   const session = useRef<PhoneSession | null>(null)
@@ -103,10 +57,11 @@ export default function App() {
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function applySnapshot(next: PhoneSnapshot) {
-    setSnap(next)
-    setPcName(next.brand?.appName || next.pcName)
-    const active = next.tasks.filter((task) => isActive(task.status)).length
-    updateWidget(next.analytics?.success ?? 0, active)
+    const tasks = asList<PhoneTask>(next?.tasks)
+    setSnap({ ...next, tasks })
+    setPcName(next?.brand?.appName || next?.pcName || "TCGAIO")
+    const active = tasks.filter((task) => isActive(task.status)).length
+    updateWidget(next?.analytics?.success ?? 0, active)
   }
 
   function bind(next: PhoneSession) {
@@ -133,10 +88,10 @@ export default function App() {
           ts: Date.now()
         })
       }
-      setSnap((current) => current ? { ...current, tasks: upsert(current.tasks, task) } : current)
+      setSnap((current) => current ? { ...current, tasks: upsert(asList<PhoneTask>(current.tasks), task) } : current)
     })
     next.onDeleted((id) => {
-      setSnap((current) => current ? { ...current, tasks: current.tasks.filter((task) => task.id !== id) } : current)
+      setSnap((current) => current ? { ...current, tasks: asList<PhoneTask>(current.tasks).filter((task) => task.id !== id) } : current)
       setSelected((current) => (current === id ? null : current))
     })
     next.onNotice((notice) => {
@@ -373,12 +328,21 @@ export default function App() {
                 ))}
               </View>
               <View style={styles.row}>
-                <Pressable style={styles.primary} onPress={() => { setDraft(emptyDraft(snap)); setScreen("edit"); setError("") }}><Text style={styles.primaryText}>New task</Text></Pressable>
+                <Pressable style={styles.primary} onPress={() => {
+                  try {
+                    setDraft(emptyPhoneDraft(snap))
+                    setScreen("edit")
+                    setError("")
+                  } catch (err) {
+                    console.error(err)
+                    setError(err instanceof Error ? err.message : "Could not open a new task.")
+                  }
+                }}><Text style={styles.primaryText}>Create task</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.startAll())}><Text style={styles.secondaryText}>Start all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.pauseAll())}><Text style={styles.secondaryText}>Pause all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(() => session.current!.stopAll())}><Text style={styles.secondaryText}>Stop all</Text></Pressable>
                 <Pressable style={styles.secondary} onPress={() => void run(async () => {
-                  const result = await session.current!.checkHealth(snap?.proxyGroups[0]?.id ?? null)
+                  const result = await session.current!.checkHealth(asList<{ id?: string }>(snap?.proxyGroups)[0]?.id ?? null)
                   if (result.ok) setHealth(result.health ?? [])
                   return result
                 })}><Text style={styles.secondaryText}>Check stores</Text></Pressable>
@@ -416,11 +380,11 @@ export default function App() {
                   <Text style={styles.p}>Qty {item.quantity} · {item.profileName} · {item.accountLabel} · {item.proxyGroupName ?? "Direct"}</Text>
                   {typeof item.monitorMs === "number" ? <Text style={styles.p}>{item.monitorMs} ms{typeof item.detectToCartMs === "number" ? ` · ${item.detectToCartMs} ms to cart` : ""}</Text> : null}
                   {item.detail ? <Text style={styles.p}>{item.detail}</Text> : null}
-                  {selected === item.id ? <TaskDetail task={item} onRun={run} session={session.current} onEdit={() => { setDraft(draftFrom(item)); setScreen("edit") }} /> : null}
+                  {selected === item.id ? <TaskDetail task={item} onRun={run} session={session.current} onEdit={() => { setDraft(draftFromPhoneTask(item)); setScreen("edit") }} /> : null}
                 </Pressable>
                 </SwipeTask>
               ))}
- {tab === "tasks" && snap && snap.tasks.length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
+ {tab === "tasks" && snap && asList(snap.tasks).length === 0 ? <Text style={styles.p}>No tasks yet. Create one from the profiles and accounts saved on the PC.</Text> : null}
               {links.length > 1 ? (
                 <View style={styles.row}>
                   {links.map((item) => (
@@ -464,10 +428,14 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
   const { styles, colors: theme } = useTheme()
   const lang = snap?.language === "es" ? "es" : "en"
   const monitor = draft.kind === "monitor"
-  const live = Boolean(draft.id && isActive(snap?.tasks.find((task) => task.id === draft.id)?.status ?? "idle"))
-  const accounts = (snap?.accounts ?? []).filter((account) => account.store === draft.store)
-  const checkouts = (snap?.tasks ?? []).filter((task) => task.kind !== "monitor" && task.id !== draft.id)
-  const monitors = (snap?.tasks ?? []).filter((task) => (task.kind === "monitor" || task.monitorOnly) && task.store === draft.store && task.id !== draft.id)
+  const live = Boolean(draft.id && isActive(phoneTaskStatus(snap, draft.id)))
+  const accounts = asList<PhoneSnapshot["accounts"][number]>(snap?.accounts).filter((account) => account?.store === draft.store)
+  const tasks = asList<PhoneTask>(snap?.tasks)
+  const checkouts = tasks.filter((task) => task && task.kind !== "monitor" && task.id !== draft.id)
+  const monitors = tasks.filter((task) => task && (task.kind === "monitor" || task.monitorOnly) && task.store === draft.store && task.id !== draft.id)
+  const stores = asList<PhoneSnapshot["stores"][number]>(snap?.stores)
+  const profiles = asList<PhoneSnapshot["profiles"][number]>(snap?.profiles)
+  const proxyGroups = asList<PhoneSnapshot["proxyGroups"][number]>(snap?.proxyGroups)
   const modes = ["manual", "scheduled", "monitor", "restock", "builtin"] as const
   return (
     <View style={styles.card}>
@@ -477,23 +445,23 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
       <Text style={styles.label}>{taskText(lang, "kind")}</Text>
       <View style={styles.choices}>
         {(["monitor", "checkout"] as const).map((kind) => (
-          <Pressable key={kind} disabled={live} accessibilityRole="button" accessibilityState={{ selected: draft.kind === kind }} style={[styles.choice, draft.kind === kind && styles.choiceOn]} onPress={() => setDraft({ ...draft, kind, confirmPurchase: kind === "monitor" ? false : draft.confirmPurchase, startMode: kind === "monitor" ? (draft.startMode === "scheduled" ? "scheduled" : "manual") : "builtin", linkedMonitorId: kind === "monitor" ? null : draft.linkedMonitorId ?? null })}>
+          <Pressable key={kind} disabled={live} accessibilityRole="button" accessibilityState={{ selected: draft.kind === kind }} style={[styles.choice, draft.kind === kind && styles.choiceOn]} onPress={() => setDraft(withStoreDefaults({ ...draft, kind }, snap?.storeRoles, kind))}>
             <Text style={styles.choiceText}>{taskText(lang, kind)}</Text>
           </Pressable>
         ))}
       </View>
       <Text style={styles.label}>{taskText(lang, "store")}</Text>
       <View style={styles.choices}>
-        {(snap?.stores ?? []).map((store) => (
-          <Pressable key={store.id} disabled={live} style={[styles.choice, draft.store === store.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, store: store.id, accountId: "" })}>
+        {stores.map((store) => (
+          <Pressable key={store.id} disabled={live} style={[styles.choice, draft.store === store.id && styles.choiceOn]} onPress={() => setDraft(withStoreDefaults({ ...draft, store: store.id, accountId: "" }, snap?.storeRoles, draft.kind === "monitor" ? "monitor" : "checkout"))}>
             <Text style={styles.choiceText}>{store.name}</Text>
           </Pressable>
         ))}
       </View>
       <Text style={styles.label}>{taskText(lang, "sku")}</Text>
-      <TextInput style={styles.input} editable={!live} value={draft.sku} onChangeText={(sku) => setDraft({ ...draft, sku })} autoCapitalize="none" placeholderTextColor={theme.muted} />
+      <TextInput style={styles.input} editable={!live} value={textField(draft.sku)} onChangeText={(sku) => setDraft({ ...draft, sku })} autoCapitalize="none" placeholderTextColor={theme.muted} />
       <Text style={styles.label}>{taskText(lang, "keywords")}</Text>
-      <TextInput style={styles.input} value={draft.keywords ?? ""} onChangeText={(keywords) => setDraft({ ...draft, keywords })} autoCapitalize="none" placeholderTextColor={theme.muted} />
+      <TextInput style={styles.input} value={textField(draft.keywords)} onChangeText={(keywords) => setDraft({ ...draft, keywords })} autoCapitalize="none" placeholderTextColor={theme.muted} />
       {monitor ? (
         <>
           <Text style={styles.label}>{taskText(lang, "monitorDelay")}</Text>
@@ -508,7 +476,7 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
             <Pressable disabled={live} style={[styles.choice, !draft.monitorProxyGroupId && styles.choiceOn]} onPress={() => setDraft({ ...draft, monitorProxyGroupId: null, proxyGroupId: null })}>
               <Text style={styles.choiceText}>{taskText(lang, "direct")}</Text>
             </Pressable>
-            {(snap?.proxyGroups ?? []).map((group) => (
+            {proxyGroups.map((group) => (
               <Pressable key={group.id} disabled={live} style={[styles.choice, draft.monitorProxyGroupId === group.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, monitorProxyGroupId: group.id, proxyGroupId: null })}>
                 <Text style={styles.choiceText}>{group.name}</Text>
               </Pressable>
@@ -517,9 +485,9 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
           <Text style={styles.label}>{taskText(lang, "priceCap")}</Text>
           <TextInput style={styles.input} value={draft.priceCap == null ? "" : String(draft.priceCap)} keyboardType="decimal-pad" onChangeText={(value) => setDraft({ ...draft, priceCap: value.trim() === "" ? null : Number(value) })} placeholderTextColor={theme.muted} />
           <Text style={styles.label}>{taskText(lang, "webhook")}</Text>
-          <TextInput style={styles.input} value={draft.webhook ?? ""} onChangeText={(webhook) => setDraft({ ...draft, webhook })} autoCapitalize="none" placeholder="https://discord.com/api/webhooks/" placeholderTextColor={theme.muted} />
+          <TextInput style={styles.input} value={textField(draft.webhook)} onChangeText={(webhook) => setDraft({ ...draft, webhook })} autoCapitalize="none" placeholder="https://discord.com/api/webhooks/" placeholderTextColor={theme.muted} />
           <Text style={styles.label}>{taskText(lang, "hours")}</Text>
-          <TextInput style={styles.input} value={draft.activeHours ?? ""} onChangeText={(activeHours) => setDraft({ ...draft, activeHours })} autoCapitalize="none" placeholder="09:00-09:30" placeholderTextColor={theme.muted} />
+          <TextInput style={styles.input} value={textField(draft.activeHours)} onChangeText={(activeHours) => setDraft({ ...draft, activeHours })} autoCapitalize="none" placeholder="09:00-09:30" placeholderTextColor={theme.muted} />
           <Text style={styles.label}>{taskText(lang, "links")}</Text>
           <View style={styles.choices}>
             {checkouts.map((task) => {
@@ -540,10 +508,10 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
       ) : (
         <>
           <Text style={styles.label}>{taskText(lang, "quantity")}</Text>
-          <TextInput style={styles.input} editable={!live} value={String(draft.quantity)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, quantity: Number(value) || 1 })} placeholderTextColor={theme.muted} />
+          <TextInput style={styles.input} editable={!live} value={textField(draft.quantity || 1)} keyboardType="number-pad" onChangeText={(value) => setDraft({ ...draft, quantity: Number(value) || 1 })} placeholderTextColor={theme.muted} />
           <Text style={styles.label}>{taskText(lang, "profile")}</Text>
           <View style={styles.choices}>
-            {(snap?.profiles ?? []).map((profile) => (
+            {profiles.map((profile) => (
               <Pressable key={profile.id} disabled={live} style={[styles.choice, draft.profileId === profile.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, profileId: profile.id })}>
                 <Text style={styles.choiceText}>{profile.name} · {profile.last4}</Text>
               </Pressable>
@@ -562,7 +530,7 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
             <Pressable disabled={live} style={[styles.choice, draft.proxyGroupId === null && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: null })}>
               <Text style={styles.choiceText}>{taskText(lang, "direct")}</Text>
             </Pressable>
-            {(snap?.proxyGroups ?? []).map((group) => (
+            {proxyGroups.map((group) => (
               <Pressable key={group.id} disabled={live} style={[styles.choice, draft.proxyGroupId === group.id && styles.choiceOn]} onPress={() => setDraft({ ...draft, proxyGroupId: group.id })}>
                 <Text style={styles.choiceText}>{group.name}</Text>
               </Pressable>
@@ -648,8 +616,8 @@ function DropsPanel({ snap, now, session, onRun, onBack }: {
   const [group, setGroup] = useState("")
   const [text, setText] = useState("")
   const { styles, colors } = useTheme()
-  const account = snap?.accounts[0]
-  const profile = snap?.profiles[0]
+  const account = asList<PhoneSnapshot["accounts"][number]>(snap?.accounts)[0]
+  const profile = asList<PhoneSnapshot["profiles"][number]>(snap?.profiles)[0]
   return (
     <View style={styles.card}>
       <Text style={styles.h2}>Drops</Text>
@@ -696,10 +664,10 @@ function StatsPanel({ snap, session, onRun, onBack }: {
       <Text style={styles.p}>Win rate {Math.round((stats?.winRate ?? 0) * 100)}% · spend ${ (stats?.spend ?? 0).toFixed(2) } · {stats?.success ?? 0} success · {stats?.failure ?? 0} failed · {stats?.paused ?? 0} paused · {stats?.tested ?? 0} tested</Text>
       <Text style={styles.p}>Monitor {stats?.monitorSamples ?? 0} reads · avg {stats?.monitorAvgMs ?? 0} ms · p50 {stats?.monitorP50Ms ?? 0} ms · p95 {stats?.monitorP95Ms ?? 0} ms · block rate {Math.round((stats?.monitorBlockRate ?? 0) * 100)}%</Text>
       {(stats?.byStore ?? []).map((row) => (
-        <Text key={row.store} style={styles.p}>{row.storeName} · {row.success} won · {row.failure} failed · ${row.spend.toFixed(2)}</Text>
+        <Text key={row.store} style={styles.p}>{row.storeName} · {row.success} won · {row.failure} failed · ${Number(row.spend ?? 0).toFixed(2)}</Text>
       ))}
       {(stats?.recent ?? []).map((row) => (
-        <Text key={`${row.at}-${row.sku}`} style={styles.log}>{row.outcome} · {row.storeName} · {row.sku}{row.price === null ? "" : ` · $${row.price.toFixed(2)}`}</Text>
+        <Text key={`${row.at}-${row.sku}`} style={styles.log}>{row.outcome} · {row.storeName} · {row.sku}{row.price == null ? "" : ` · $${Number(row.price).toFixed(2)}`}</Text>
       ))}
       <Pressable style={styles.secondary} onPress={() => void onRun(async () => {
         const result = await session!.analyticsCsv()
@@ -735,7 +703,7 @@ function TaskDetail({ task, onRun, session, onEdit }: {
         <Pressable style={styles.secondary} onPress={onEdit}><Text style={styles.secondaryText}>Edit</Text></Pressable>
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.deleteTask(task.id))}><Text style={styles.secondaryText}>Delete</Text></Pressable>
       </View>
-      {task.logs.map((line, index) => (
+      {asList<PhoneTask["logs"][number]>(task.logs).map((line, index) => (
         <Text key={`${line.ts}-${index}`} style={styles.log}>{line.message}</Text>
       ))}
     </View>
@@ -791,12 +759,12 @@ function AlertsPanel({ snap, onRun, session, onBack }: {
       ) : <Pressable style={styles.secondary} onPress={() => setRule({
         name: "Restock",
         enabled: true,
-        store: snap?.stores[0]?.id ?? "target",
+        store: (() => { const id = asList<{ id?: string }>(snap?.stores)[0]?.id; return id && isStoreId(id) ? id : "target" })(),
         sku: "",
         keywords: "",
         taskId: null,
-        profileId: snap?.profiles[0]?.id ?? "",
-        accountId: snap?.accounts[0]?.id ?? "",
+        profileId: asList<{ id?: string }>(snap?.profiles)[0]?.id ?? "",
+        accountId: asList<{ id?: string }>(snap?.accounts)[0]?.id ?? "",
         proxyGroupId: null,
         quantity: 1,
         maxQuantity: 1,
@@ -850,8 +818,8 @@ function AlertsPanel({ snap, onRun, session, onBack }: {
         maxPrice: 60,
         soldByRetailer: true,
         proxyGroupId: null,
-        profileId: snap?.profiles[0]?.id ?? "",
-        accountId: snap?.accounts.find((account) => account.store === "target")?.id ?? "",
+        profileId: asList<{ id?: string }>(snap?.profiles)[0]?.id ?? "",
+        accountId: asList<{ id?: string; store?: string }>(snap?.accounts).find((account) => account.store === "target")?.id ?? "",
         quantity: 1,
         maxQuantity: 1,
         autoStart: false,

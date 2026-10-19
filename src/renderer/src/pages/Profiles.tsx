@@ -134,7 +134,7 @@ export function ProfilesPage() {
               <tr key={profile.id}>
                 <td>{profile.name}</td>
                 <td>{clients.find((client) => client.id === (profile.clientId || ME_CLIENT_ID))?.name ?? "Me"}</td>
-                <td>{profile.shipping.city}, {profile.shipping.state} {profile.shipping.zip}</td>
+                <td>{profile.shipping?.city ?? ""}, {profile.shipping?.state ?? ""} {profile.shipping?.zip ?? ""}</td>
                 <td>{profile.cardName} · {profile.last4} · {profile.expMonth}/{profile.expYear}</td>
                 <td className="row-actions">
                   <button type="button" onClick={() => setForm(fromProfile(profile))}>Edit</button>
@@ -171,8 +171,8 @@ function fromProfile(profile: PublicProfile): ProfileInput & { sameBilling: bool
     name: profile.name,
     email: profile.email,
     phone: profile.phone,
-    shipping: profile.shipping,
-    billing: profile.billing,
+    shipping: profile.shipping ?? blankAddress(),
+    billing: profile.billing ?? profile.shipping ?? blankAddress(),
     cardName: profile.cardName,
     cardNumber: "",
     expMonth: profile.expMonth,

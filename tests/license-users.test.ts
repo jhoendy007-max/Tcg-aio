@@ -55,6 +55,9 @@ describe("pending accounts and admin updates", () => {
     const admin = json(post(server, "/v1/admin/login", { email: OWNER_EMAIL, password: "owner-password" }))
     const listed = json(get(server, "/v1/admin/users?status=pending", String(admin.token)))
     expect(listed.pendingCount).toBe(1)
+    expect(listed.activeCount).toBe(1)
+    expect(listed.suspendedCount).toBe(0)
+    expect(listed.giftCount).toBe(0)
     const row = (listed.users as Array<{ id: string; email: string; status: string; paymentMethod: string; paid: boolean; createdAt: number }>)[0]
     expect(row.email).toBe("ada@example.com")
     expect(row.status).toBe("pending")

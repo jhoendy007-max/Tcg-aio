@@ -18,7 +18,7 @@ export function LogsPage() {
       .catch((err) => setError(errorText(err)))
   }, [])
 
-  const lines = (tasks ?? []).flatMap((task) => task.logs.slice(-4).map((line) => ({
+  const lines = (tasks ?? []).flatMap((task) => (task.logs ?? []).slice(-4).map((line) => ({
     key: `${task.id}-${line.ts}-${line.message}`,
     at: line.ts,
     level: line.level,

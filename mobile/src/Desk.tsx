@@ -3,6 +3,7 @@ import { Alert, Pressable, Text, TextInput, View } from "react-native"
 import type { PhoneSession } from "../../src/phone/client"
 import type { PhoneSnapshot } from "../../src/phone/protocol"
 import type { PhoneAccountDraft, PhoneClientDraft, PhoneProfileDraft, PhoneProxyDraft, PhoneQuickDraft } from "../../src/phone/desk"
+import { asList } from "../../src/phone/task-draft"
 import { useTheme } from "./theme-context"
 
 type Run = (action: () => Promise<{ ok: boolean; error?: string; csv?: string; created?: number }>) => Promise<unknown>
@@ -34,7 +35,7 @@ export function DeskPanel({ snap, session, run, focus = "all" }: { snap: PhoneSn
 
 export function LogsPanel({ snap }: { snap: PhoneSnapshot | null }) {
   const { styles } = useTheme()
-  const lines = (snap?.tasks ?? []).flatMap((task) => task.logs.slice(-3).map((line) => ({ id: `${task.id}-${line.ts}-${line.message}`, text: `${task.storeName} · ${task.sku || task.keywords || "task"} · ${line.message}` }))).slice(-30)
+  const lines = asList<NonNullable<PhoneSnapshot["tasks"]>[number]>(snap?.tasks).flatMap((task) => asList<NonNullable<typeof task.logs>[number]>(task.logs).slice(-3).map((line) => ({ id: `${task.id}-${line.ts}-${line.message}`, text: `${task.storeName} · ${task.sku || task.keywords || "task"} · ${line.message}` }))).slice(-30)
   const history = snap?.analytics?.recent ?? []
   return (
     <View style={{ gap: 12 }}>
@@ -90,8 +91,8 @@ export function PhoneSettingsForm({ snap, session, run }: { snap: PhoneSnapshot 
 function QuickForm({ snap, session, run }: { snap: PhoneSnapshot | null; session: PhoneSession | null; run: Run }) {
   const { styles, colors } = useTheme()
   const [sku, setSku] = useState("")
-  const [profileId, setProfileId] = useState(snap?.profiles[0]?.id ?? "")
-  const [accountId, setAccountId] = useState(snap?.accounts[0]?.id ?? "")
+  const [profileId, setProfileId] = useState(asList<{ id?: string }>(snap?.profiles)[0]?.id ?? "")
+  const [accountId, setAccountId] = useState(asList<{ id?: string }>(snap?.accounts)[0]?.id ?? "")
   return (
     <View style={styles.card}>
       <Text style={styles.h2}>Quick setup</Text>
@@ -100,7 +101,7 @@ function QuickForm({ snap, session, run }: { snap: PhoneSnapshot | null; session
       <ChoiceRow label="Profile" options={(snap?.profiles ?? []).map((profile) => ({ id: profile.id, label: `${profile.name} · ${profile.last4}` }))} value={profileId} onChange={setProfileId} />
       <ChoiceRow label="Account" options={(snap?.accounts ?? []).map((account) => ({ id: account.id, label: account.label }))} value={accountId} onChange={setAccountId} />
       <Pressable style={styles.primary} onPress={() => void run(() => {
-        const setup: PhoneQuickDraft = { store: snap?.accounts.find((account) => account.id === accountId)?.store ?? "target", sku, keywords: "", profileId, accountId, proxyGroupId: null, quantity: 1, testMode: true, confirmPurchase: false }
+        const setup: PhoneQuickDraft = { store: asList<{ id?: string; store?: PhoneQuickDraft["store"] }>(snap?.accounts).find((account) => account.id === accountId)?.store ?? "target", sku, keywords: "", profileId, accountId, proxyGroupId: null, quantity: 1, testMode: true, confirmPurchase: false }
         return session!.quickSetup(setup)
       })}><Text style={styles.primaryText}>Create monitor and checkout</Text></Pressable>
     </View>
@@ -132,10 +133,10 @@ function ProfileForm({ snap, session, run }: { snap: PhoneSnapshot | null; sessi
             setName(profile.name)
             setEmail(profile.email)
             setPhone(profile.phone)
-            setLine1(profile.shipping.line1)
-            setCity(profile.shipping.city)
-            setState(profile.shipping.state)
-            setZip(profile.shipping.zip)
+            setLine1(profile.shipping?.line1 ?? "")
+            setCity(profile.shipping?.city ?? "")
+            setState(profile.shipping?.state ?? "")
+            setZip(profile.shipping?.zip ?? "")
             setExpMonth(profile.expMonth)
             setExpYear(profile.expYear)
             setCard("")
@@ -173,7 +174,7 @@ function AccountForm({ snap, session, run }: { snap: PhoneSnapshot | null; sessi
   const [label, setLabel] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [store, setStore] = useState(snap?.stores[0]?.id ?? "target")
+  const [store, setStore] = useState(asList<{ id?: string }>(snap?.stores)[0]?.id ?? "target")
   return (
     <View style={styles.card}>
       <Text style={styles.h2}>Accounts</Text>

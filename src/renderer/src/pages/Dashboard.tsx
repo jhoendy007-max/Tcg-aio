@@ -21,10 +21,10 @@ export function DashboardPage({ onTasks, lang = "en" }: { onTasks: () => void; l
       unwrap(window.aio.proxies.health()),
       unwrap(window.aio.accounts.list())
     ])
-    setTasks(nextTasks)
-    setReport(nextReport)
-    setScores(nextScores)
-    setAccounts(nextAccounts)
+    setTasks(Array.isArray(nextTasks) ? nextTasks : [])
+    setReport(nextReport ?? null)
+    setScores(Array.isArray(nextScores) ? nextScores : [])
+    setAccounts(Array.isArray(nextAccounts) ? nextAccounts : [])
   }
 
   useEffect(() => {
@@ -41,12 +41,15 @@ export function DashboardPage({ onTasks, lang = "en" }: { onTasks: () => void; l
   if (!tasks || !report || !scores || !accounts) return <DashboardSkeleton />
 
   const now = Date.now()
-  const active = tasks.filter((task) => isActiveStatus(task.status)).length
-  const today = todayCheckoutStats(report.recent, now)
-  const benched = scores.filter((score) => score.benchedUntil > now).length
-  const saved = accounts.filter((account) => account.sessionState === "saved").length
-  const expired = accounts.filter((account) => account.sessionState === "expired").length
-  const missing = accounts.filter((account) => account.sessionState === "missing").length
+  const taskList = Array.isArray(tasks) ? tasks : []
+  const recent = Array.isArray(report.recent) ? report.recent : []
+  const active = taskList.filter((task) => task && isActiveStatus(task.status)).length
+  const today = todayCheckoutStats(recent, now)
+  const benched = (Array.isArray(scores) ? scores : []).filter((score) => score && score.benchedUntil > now).length
+  const accountList = Array.isArray(accounts) ? accounts : []
+  const saved = accountList.filter((account) => account?.sessionState === "saved").length
+  const expired = accountList.filter((account) => account?.sessionState === "expired").length
+  const missing = accountList.filter((account) => account?.sessionState === "missing").length
 
   return (
     <section className="page">
@@ -65,7 +68,7 @@ export function DashboardPage({ onTasks, lang = "en" }: { onTasks: () => void; l
         <span className="chip"><strong>${today.spend.toFixed(0)}</strong> {deskText(lang, "chipSpend")}</span>
         <span className="chip"><strong>{Math.round(today.winRate * 100)}%</strong> {deskText(lang, "chipSuccess")}</span>
       </div>
-      {tasks.length === 0 ? (
+      {taskList.length === 0 ? (
         <div className="card empty-next">
           <h2>{deskText(lang, "emptyTasks")}</h2>
           <p>{deskText(lang, "emptyHint")}</p>
@@ -76,7 +79,7 @@ export function DashboardPage({ onTasks, lang = "en" }: { onTasks: () => void; l
         <div className="log-head"><h2>{deskText(lang, "feed")}</h2><span>{today.success} today</span></div>
         <table>
           <tbody>
-            {report.recent.length === 0 ? <tr><td className="empty">Checkouts show up here after a task runs.</td></tr> : report.recent.slice(0, 6).map((row) => (
+            {recent.length === 0 ? <tr><td className="empty">Checkouts show up here after a task runs.</td></tr> : recent.slice(0, 6).map((row) => (
               <tr key={`${row.id}-${row.at}`}>
                 <td>{storeName(row.store)} · {row.sku}</td>
                 <td className={`status-text status-${row.outcome}`}>{row.outcome === "success" || row.outcome === "tested" ? deskText(lang, "outcomeSuccess") : row.outcome === "failure" ? deskText(lang, "outcomeDeclined") : row.outcome === "paused" ? deskText(lang, "outcomeWaiting") : row.outcome}</td>
@@ -91,7 +94,7 @@ export function DashboardPage({ onTasks, lang = "en" }: { onTasks: () => void; l
         <table>
           <thead><tr><th>Product</th><th>Status</th></tr></thead>
           <tbody>
-            {tasks.length === 0 ? <tr><td colSpan={2} className="empty">No tasks yet. The setup wizard or the Tasks page can add a test-mode task.</td></tr> : tasks.slice(0, 8).map((task) => (
+            {taskList.length === 0 ? <tr><td colSpan={2} className="empty">No tasks yet. The setup wizard or the Tasks page can add a test-mode task.</td></tr> : taskList.slice(0, 8).map((task) => (
               <tr key={task.id}>
                 <td>
                   <div className="product-cell">

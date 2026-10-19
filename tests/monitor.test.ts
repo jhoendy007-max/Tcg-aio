@@ -68,6 +68,7 @@ describe("stock changes and restock memory", () => {
     expect(hints[0]?.warmupMin).toBe(15)
     expect(hints[0]?.hourAst).toBe(9)
     expect(suggestWarmups([{ store: "target", sku: "1", at, price: null, title: "" }])).toEqual([])
+    expect(suggestWarmups(undefined)).toEqual([])
   })
 
   it("summarizes monitor speed and block rate", () => {
@@ -83,6 +84,8 @@ describe("stock changes and restock memory", () => {
     expect(stats.p95Ms).toBe(300)
     expect(stats.byStore.find((row) => row.store === "target")?.blockRate).toBe(0.5)
     expect(percentile([10, 20, 30, 40], 50)).toBe(20)
+    expect(summarizeMonitor(undefined).samples).toBe(0)
+    expect(summarizeMonitor(null).byStore).toEqual([])
   })
 
   it("stays on the monitor when the task is monitor only", async () => {

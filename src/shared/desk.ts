@@ -13,9 +13,9 @@ export function startOfLocalDay(now: number): number {
   return new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime()
 }
 
-export function todayCheckoutStats(records: Pick<CheckoutRecord, "at" | "outcome" | "price">[], now: number): DayStats {
+export function todayCheckoutStats(records: Pick<CheckoutRecord, "at" | "outcome" | "price">[] | null | undefined, now: number): DayStats {
   const start = startOfLocalDay(now)
-  const rows = records.filter((record) => record.at >= start && record.at < start + 86_400_000)
+  const rows = (Array.isArray(records) ? records : []).filter((record) => record && record.at >= start && record.at < start + 86_400_000)
   const success = rows.filter((record) => record.outcome === "success").length
   const failure = rows.filter((record) => record.outcome === "failure").length
   const paused = rows.filter((record) => record.outcome === "paused").length

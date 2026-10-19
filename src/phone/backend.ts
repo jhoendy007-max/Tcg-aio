@@ -98,7 +98,8 @@ export function createPhoneHost(
       ledger: db.listLedger().slice(0, 80).map(projectPhoneLedger),
       desk: projectPhoneSettings(settings),
       licenseOk: db.licenseAllows(),
-      accountPending: db.accountView().pending
+      accountPending: db.accountView().pending,
+      storeRoles: settings.storeRoles ?? {}
     }
   }
   const schedules = (): PhoneSchedule[] => db.listSchedules().map((schedule) => ({

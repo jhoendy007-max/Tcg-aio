@@ -583,20 +583,24 @@ function linkGeneratedLicense(db: DatabaseSync, user: UserRow, body: Record<stri
   return json(200, { ok: true, id, key, email: user.email, status: suspended ? "suspended" : "active", fingerprint: "" })
 }
 
-function listUsers(db: DatabaseSync, query: string, status: string): { users: unknown[]; pendingCount: number } {
+function listUsers(db: DatabaseSync, query: string, status: string): { users: unknown[]; pendingCount: number; activeCount: number; suspendedCount: number; giftCount: number } {
   const needle = query.trim().toLowerCase()
   const wanted = status.trim().toLowerCase()
   const rows = db.prepare(`SELECT users.id, users.email, users.role, users.created_at, users.account_status, users.payment_method, users.paid, users.license_id,
       licenses.status AS license_status, licenses.fingerprint, licenses.last_seen, licenses.plan
     FROM users LEFT JOIN licenses ON licenses.id = users.license_id
     ORDER BY CASE users.account_status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 ELSE 2 END, users.created_at DESC`).all() as unknown as UserListRow[]
-  const pendingCount = rows.filter((row) => row.role !== "owner" && row.account_status === "pending").length
+  const pendingCount = rows.filter((row) => row.account_status === "pending").length
+  const activeCount = rows.filter((row) => row.account_status === "active").length
+  const suspendedCount = rows.filter((row) => row.account_status === "suspended").length
+  const giftRow = db.prepare("SELECT COUNT(*) AS n FROM licenses WHERE user_id IS NULL").get() as { n: number } | undefined
+  const giftCount = Number(giftRow?.n ?? 0)
   const users = rows.filter((row) => {
     if (wanted && row.account_status !== wanted) return false
     if (!needle) return true
     return `${row.email} ${row.payment_method} ${row.account_status}`.toLowerCase().includes(needle)
   }).map(publicUser)
-  return { users, pendingCount }
+  return { users, pendingCount, activeCount, suspendedCount, giftCount }
 }
 
 function publicUser(row: UserListRow) {
@@ -634,7 +638,7 @@ function meta(db: DatabaseSync, key: string): string {
   return row?.value ?? ""
 }
 
-function overview(db: DatabaseSync, query: string, now: () => number): { licenses: unknown[]; users: unknown[]; pendingCount: number } {
+function overview(db: DatabaseSync, query: string, now: () => number): { licenses: unknown[]; users: unknown[]; pendingCount: number; activeCount: number; suspendedCount: number; giftCount: number } {
   sweepExpiry(db, now)
   const needle = query.trim().toLowerCase()
   const licenses = (db.prepare("SELECT * FROM licenses ORDER BY rowid DESC").all() as unknown as LicenseRow[]).filter((row) => {
@@ -656,7 +660,7 @@ function overview(db: DatabaseSync, query: string, now: () => number): { license
     }
   })
   const listed = listUsers(db, needle, "")
-  return { licenses, users: listed.users, pendingCount: listed.pendingCount }
+  return { licenses, users: listed.users, pendingCount: listed.pendingCount, activeCount: listed.activeCount, suspendedCount: listed.suspendedCount, giftCount: listed.giftCount }
 }
 
 function bindAndIssue(db: DatabaseSync, privateKey: string, user: UserRow, fingerprint: string, now: () => number, push?: LicenseApiOptions["push"], sameDevice = false): { status: number; body: string } {

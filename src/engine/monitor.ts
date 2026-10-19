@@ -257,9 +257,9 @@ export function monitorPlaces(settings: Pick<Settings, "targetZip" | "targetStor
   return places
 }
 
-export function suggestWarmups(events: RestockEvent[], _now = Date.now()): RestockHint[] {
+export function suggestWarmups(events: RestockEvent[] | null | undefined, _now = Date.now()): RestockHint[] {
   const groups = new Map<string, { store: StoreId; sku: string; hour: number; samples: number }>()
-  for (const event of events) {
+  for (const event of Array.isArray(events) ? events.filter((row) => row != null) : []) {
     const hour = astHour(event.at)
     const key = `${event.store}:${event.sku}:${hour}`
     const group = groups.get(key) ?? { store: event.store, sku: event.sku, hour, samples: 0 }
@@ -279,11 +279,12 @@ export function suggestWarmups(events: RestockEvent[], _now = Date.now()): Resto
     }))
 }
 
-export function summarizeMonitor(samples: MonitorSample[]): MonitorStats {
+export function summarizeMonitor(samples: MonitorSample[] | null | undefined): MonitorStats {
+  const rows = Array.isArray(samples) ? samples.filter((sample) => sample != null) : []
   const byStore = new Map<StoreId, { samples: number; blocked: number; ms: number }>()
   let blocked = 0
   let ms = 0
-  for (const sample of samples) {
+  for (const sample of rows) {
     blocked += sample.blocked ? 1 : 0
     ms += sample.ms
     const row = byStore.get(sample.store) ?? { samples: 0, blocked: 0, ms: 0 }
@@ -292,8 +293,8 @@ export function summarizeMonitor(samples: MonitorSample[]): MonitorStats {
     row.ms += sample.ms
     byStore.set(sample.store, row)
   }
-  const total = samples.length
-  const all = samples.map((sample) => sample.ms)
+  const total = rows.length
+  const all = rows.map((sample) => sample.ms)
   return {
     samples: total,
     blocked,
@@ -302,7 +303,7 @@ export function summarizeMonitor(samples: MonitorSample[]): MonitorStats {
     p50Ms: percentile(all, 50),
     p95Ms: percentile(all, 95),
     byStore: [...byStore.entries()].map(([store, row]) => {
-      const times = samples.filter((sample) => sample.store === store).map((sample) => sample.ms)
+      const times = rows.filter((sample) => sample.store === store).map((sample) => sample.ms)
       return {
         store,
         samples: row.samples,

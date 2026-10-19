@@ -109,10 +109,10 @@ export function ProxiesPage() {
             <div className="proxy-head">
               <div>
                 <h2>{group.name}</h2>
-                <span>{group.proxies.length} proxies · {group.network}</span>
+                <span>{group.proxies?.length ?? 0} proxies · {group.network}</span>
               </div>
               <div className="actions">
-                <button type="button" onClick={() => { setEditing(group.id); setName(group.name); setNetwork(group.network); setText(group.proxies.map(formatProxy).join("\n")) }}>Edit</button>
+                <button type="button" onClick={() => { setEditing(group.id); setName(group.name); setNetwork(group.network); setText((group.proxies ?? []).map(formatProxy).join("\n")) }}>Edit</button>
                 <button type="button" onClick={() => void test(group.id)} disabled={testing === group.id}>{testing === group.id ? "Testing…" : "Test"}</button>
                 <button type="button" className="danger" onClick={() => void remove(group.id)}>Delete</button>
               </div>
@@ -128,7 +128,7 @@ export function ProxiesPage() {
               </ul>
             ) : null}
             <ul className="proxy-results">
-              {group.proxies.map((proxy) => {
+              {(group.proxies ?? []).map((proxy) => {
                 const score = scores.find((item) => item.proxyId === proxy.id)
                 const benched = score && score.benchedUntil > Date.now()
                 return (

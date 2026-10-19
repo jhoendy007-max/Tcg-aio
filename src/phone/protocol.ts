@@ -5,6 +5,7 @@ import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils"
 import { parseDeskMessage } from "./desk"
 import { redact } from "../shared/redact"
 import { isStoreId, storeName } from "../shared/stores"
+import type { StoreRoles } from "../shared/store-defaults"
 import type { DeskMessage, PhoneClientRow, PhoneDeskSettings, PhoneLedgerRow } from "./desk"
 import type { AlertLog, KeywordWatch, KeywordWatchInput, LogLine, ModuleRecord, PublicAccount, PublicChallenge, PublicProfile, PublicTask, RestockRule, RestockRuleInput, StartMode, StoreHealth, StoreId, StoreInfo, TaskKind, TaskOverrides, TaskStatus } from "../shared/types"
 
@@ -239,6 +240,8 @@ export interface PhoneSnapshot {
   clients?: PhoneClientRow[]
   ledger?: PhoneLedgerRow[]
   desk?: PhoneDeskSettings
+  /** Per-store monitor and checkout defaults. Missing means the built-in pace. */
+  storeRoles?: StoreRoles
   /** True when this paired PC has a valid license. The phone does not use its own seat. */
   licenseOk?: boolean
   /** True when the paired PC is signed in and still waiting for a license. */
@@ -510,14 +513,14 @@ export function projectProfile(profile: PublicProfile): PhoneProfile {
     last4: profile.last4,
     expMonth: profile.expMonth,
     expYear: profile.expYear,
-    city: profile.shipping.city,
-    state: profile.shipping.state,
+    city: profile.shipping?.city ?? "",
+    state: profile.shipping?.state ?? "",
     clientId: profile.clientId
   }
 }
 
-export function projectProxyGroup(group: { id: string; name: string; proxies: unknown[] }): PhoneProxyGroup {
-  return { id: group.id, name: group.name, count: group.proxies.length }
+export function projectProxyGroup(group: { id: string; name: string; proxies?: unknown[] | null }): PhoneProxyGroup {
+  return { id: group.id, name: group.name, count: Array.isArray(group.proxies) ? group.proxies.length : 0 }
 }
 
 export function projectAccount(account: PublicAccount): PhoneAccount {
@@ -570,7 +573,7 @@ export function projectTask(task: PublicTask, profiles: PublicProfile[], account
     detectToCartMs: task.detectToCartMs,
     status: task.status,
     detail: redact(task.detail).slice(0, 240),
-    logs: task.logs.slice(-LOG_LIMIT).map((line) => ({ ...line, message: redact(line.message).slice(0, 500) })),
+    logs: (task.logs ?? []).slice(-LOG_LIMIT).map((line) => ({ ...line, message: redact(line.message).slice(0, 500) })),
     createdAt: task.createdAt
   }
 }

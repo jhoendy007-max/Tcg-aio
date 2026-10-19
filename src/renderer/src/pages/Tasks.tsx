@@ -392,7 +392,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
         <div className="actions">
           <Select value={healthGroup} onChange={(event) => setHealthGroup(event.target.value)}>
             <option value="">{taskText(lang, "direct")}</option>
-            {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies.length})</option>)}
+            {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies?.length ?? 0})</option>)}
           </Select>
           <button type="button" onClick={() => void runHealth()} disabled={busy}>{taskText(lang, "healthRun")}</button>
         </div>
@@ -564,7 +564,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
           <span>{selected ? selected.sku : "Select a task"}</span>
         </div>
         <div className="log" aria-live="polite">
-          {selected && selected.logs.length > 0 ? selected.logs.map((line, index) => (
+          {selected && (selected.logs ?? []).length > 0 ? (selected.logs ?? []).map((line, index) => (
             <div key={`${line.ts}-${index}`} className={`log-line ${line.level}`}>
               <time>{formatTime(line.ts)}</time>
               <span>{line.message}</span>
@@ -865,7 +865,7 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
           <Field label={taskText(lang, "checkoutProxy")}>
             <Select value={form.proxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, proxyGroupId: event.target.value || null })}>
               <option value="">{taskText(lang, "direct")}</option>
-              {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies.length})</option>)}
+              {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies?.length ?? 0})</option>)}
             </Select>
           </Field>
           <Field label={taskText(lang, "checkoutDelay")}>

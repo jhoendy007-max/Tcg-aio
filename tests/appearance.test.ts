@@ -117,5 +117,6 @@ describe("appearance", () => {
     expect(stats.count).toBe(4)
     expect(stats.spend).toBe(10)
     expect(stats.winRate).toBeCloseTo(1 / 3)
+    expect(todayCheckoutStats(undefined, now).count).toBe(0)
   })
 })

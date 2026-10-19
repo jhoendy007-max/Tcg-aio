@@ -9,7 +9,8 @@ export function priceFromDetail(detail: string): number | null {
   return Number.isFinite(value) ? Math.round(value * 100) / 100 : null
 }
 
-export function summarize(records: CheckoutRecord[]): AnalyticsReport {
+export function summarize(records: CheckoutRecord[] | null | undefined): AnalyticsReport {
+  const rows = Array.isArray(records) ? records.filter((record) => record != null) : []
   const byStore = new Map<StoreId, StoreAnalytics>()
   const byProduct = new Map<string, ProductAnalytics>()
   const days = new Map<string, TimelinePoint>()
@@ -18,7 +19,7 @@ export function summarize(records: CheckoutRecord[]): AnalyticsReport {
   let paused = 0
   let tested = 0
   let spend = 0
-  for (const record of records) {
+  for (const record of rows) {
     if (record.outcome === "success") success += 1
     else if (record.outcome === "failure") failure += 1
     else if (record.outcome === "paused") paused += 1
@@ -45,7 +46,7 @@ export function summarize(records: CheckoutRecord[]): AnalyticsReport {
   }
   const decided = success + failure + paused
   return {
-    attempts: records.length,
+    attempts: rows.length,
     success,
     failure,
     paused,
@@ -55,7 +56,7 @@ export function summarize(records: CheckoutRecord[]): AnalyticsReport {
     byStore: [...byStore.values()],
     byProduct: [...byProduct.values()].sort((a, b) => b.success - a.success || a.sku.localeCompare(b.sku)),
     timeline: [...days.values()].sort((a, b) => a.day.localeCompare(b.day)),
-    recent: records.slice(0, 40),
+    recent: rows.slice(0, 40),
     monitor: { samples: 0, blocked: 0, blockRate: 0, avgMs: 0, p50Ms: 0, p95Ms: 0, byStore: [] },
     stockLog: [],
     restockHints: []
@@ -70,9 +71,9 @@ function bump(row: { success: number; failure: number; paused: number; tested: n
   if (record.outcome === "success" && record.price !== null) row.spend += record.price
 }
 
-export function checkoutCsv(records: CheckoutRecord[]): string {
+export function checkoutCsv(records: CheckoutRecord[] | null | undefined): string {
   const lines = ["at,store,sku,product,price,outcome,profile,orderId,detail"]
-  for (const record of records) {
+  for (const record of Array.isArray(records) ? records.filter((row) => row != null) : []) {
     lines.push([
       new Date(record.at).toISOString(),
       record.store,
