@@ -2,13 +2,13 @@
   "expo": {
     "name": "TCGAIO Admin",
     "slug": "tcgaio-admin",
-    "version": "0.2.26",
+    "version": "0.2.27",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.tcgaio.admin",
-      "versionCode": 226,
+      "versionCode": 227,
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.INTERNET",
