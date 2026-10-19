@@ -7,7 +7,13 @@ REPO="$(cd "$MOBILE/.." && pwd)"
 cd "$MOBILE"
 
 if [[ "${TCGAIO_REQUIRE_LICENSE:-}" == "1" || "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-  node "$REPO/scripts/require-license-build.mjs" preflight
+  LICENSE_ENV="$(mktemp)"
+  node "$REPO/scripts/require-license-build.mjs" export-env "$LICENSE_ENV"
+  set -a
+  # shellcheck disable=SC1090
+  source "$LICENSE_ENV"
+  set +a
+  rm -f "$LICENSE_ENV"
 fi
 
 bash "$MOBILE/scripts/prepare-release-signing.sh"

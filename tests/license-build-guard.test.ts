@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { createLicenseIdentity } from "../license-server/proof"
 
 const script = "scripts/require-license-build.mjs"
 const url = "https://license.example.test"
-const key = "MCowBQYDK2VwAyEAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa="
+const { publicKey: key, privateKey } = createLicenseIdentity()
 
 function run(mode: string, env: Record<string, string>, roots: string[] = []) {
   return spawnSync("node", [script, mode, ...roots], {
@@ -32,6 +33,40 @@ describe("release license guard", () => {
     expect(run("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: "http://license.example.test", TCGAIO_LICENSE_PUBLIC_KEY: key }).status).toBe(1)
     expect(run("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: "https://license.example.test/admin", TCGAIO_LICENSE_PUBLIC_KEY: key }).status).toBe(1)
     expect(run("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: "https://user:token@license.example.test", TCGAIO_LICENSE_PUBLIC_KEY: key }).status).toBe(1)
+  })
+
+  it("rejects a private key", () => {
+    const result = run("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: url, TCGAIO_LICENSE_PUBLIC_KEY: privateKey })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toMatch(/public key/)
+    expect(result.stderr).not.toContain(privateKey)
+  })
+
+  it("reads the public key out of the full keygen printout", () => {
+    const blob = `TCGAIO_LICENSE_PRIVATE_KEY=${privateKey}\nTCGAIO_LICENSE_PUBLIC_KEY=${key}\n`
+    const result = run("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: url, TCGAIO_LICENSE_PUBLIC_KEY: blob })
+    expect(result.status).toBe(0)
+    expect(result.stderr).not.toContain(privateKey)
+  })
+
+  it("accepts the public key when the secret includes the keygen label", () => {
+    const result = run("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: `${url}/`, TCGAIO_LICENSE_PUBLIC_KEY: `TCGAIO_LICENSE_PUBLIC_KEY=${key}` })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toMatch(/host license\.example\.test/)
+    expect(result.stdout).not.toContain(key)
+  })
+
+  it("writes the canonical key for the phone bundle without printing it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tcgaio-license-env-"))
+    const dest = join(dir, "license.env")
+    const pem = `-----BEGIN PUBLIC KEY-----\n${key.replace(/(.{16})/g, "$1\n")}\n-----END PUBLIC KEY-----`
+    const result = run("export-env", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: `${url}/`, TCGAIO_LICENSE_PUBLIC_KEY: pem }, [dest])
+    expect(result.status).toBe(0)
+    expect(result.stdout).not.toContain(key)
+    expect(result.stderr).not.toContain(key)
+    const body = readFileSync(dest, "utf8")
+    expect(body).toContain(`EXPO_PUBLIC_TCGAIO_LICENSE_PUBLIC_KEY='${key}'`)
+    expect(body).toContain(`EXPO_PUBLIC_TCGAIO_LICENSE_URL='${url}'`)
   })
 
   it("requires the built files to contain the url and the public key", () => {

@@ -1,10 +1,11 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { normalizeLicenseKey, normalizeLicenseUrl } from "./license-build-values.mjs"
 
 const mode = process.argv[2] || "preflight"
 const requireLicense = process.env.TCGAIO_REQUIRE_LICENSE === "1" || process.env.GITHUB_REF_TYPE === "tag"
-const url = (process.env.TCGAIO_LICENSE_URL || process.env.EXPO_PUBLIC_TCGAIO_LICENSE_URL || "").trim().replace(/\/$/, "")
-const key = (process.env.TCGAIO_LICENSE_PUBLIC_KEY || process.env.EXPO_PUBLIC_TCGAIO_LICENSE_PUBLIC_KEY || "").trim()
+const rawUrl = process.env.TCGAIO_LICENSE_URL || process.env.EXPO_PUBLIC_TCGAIO_LICENSE_URL || ""
+const rawKey = process.env.TCGAIO_LICENSE_PUBLIC_KEY || process.env.EXPO_PUBLIC_TCGAIO_LICENSE_PUBLIC_KEY || ""
 
 function fail(message) {
   console.error(message)
@@ -12,36 +13,63 @@ function fail(message) {
 }
 
 function licenseShape() {
-  const needed = requireLicense || Boolean(url || key)
-  if (!needed) return false
-  if (!url || !key) {
+  const needed = requireLicense || Boolean(rawUrl.trim() || rawKey.trim())
+  if (!needed) return null
+  if (!rawUrl.trim() || !rawKey.trim()) {
     fail("Refusing to publish without TCGAIO_LICENSE_URL and TCGAIO_LICENSE_PUBLIC_KEY. An empty public key would lock every customer out.")
   }
-  let parsed
   try {
-    parsed = new URL(url)
-  } catch {
-    fail("TCGAIO_LICENSE_URL is not a URL.")
+    return { url: normalizeLicenseUrl(rawUrl), key: normalizeLicenseKey(rawKey) }
+  } catch (err) {
+    fail(err instanceof Error ? err.message : "The license build values could not be read.")
   }
-  if (parsed.protocol !== "https:" || !parsed.hostname) fail("TCGAIO_LICENSE_URL must be an https URL.")
-  if (parsed.username || parsed.password || parsed.search || parsed.hash || (parsed.pathname !== "/" && parsed.pathname !== "")) {
-    fail("TCGAIO_LICENSE_URL must be the https origin only, with no token or path.")
-  }
-  if (!/^[A-Za-z0-9+/]+=*$/.test(key) || key.length < 40) fail("TCGAIO_LICENSE_PUBLIC_KEY is not a usable Ed25519 public key.")
-  return true
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`
+}
+
+function containsText(data, needle) {
+  if (!needle) return false
+  return data.includes(Buffer.from(needle)) || data.includes(Buffer.from(needle, "utf16le"))
 }
 
 if (mode === "preflight") {
-  if (licenseShape()) console.log(`License release preflight ok: host ${new URL(url).host}, public key ${key.length} characters.`)
+  const baked = licenseShape()
+  if (baked) console.log(`License release preflight ok: host ${new URL(baked.url).host}, public key ${baked.key.length} characters.`)
+  process.exit(0)
+}
+
+if (mode === "export-env") {
+  const dest = process.argv[3]
+  if (!dest) fail("export-env needs a file path.")
+  const baked = licenseShape()
+  const url = baked?.url ?? ""
+  const key = baked?.key ?? ""
+  writeFileSync(
+    dest,
+    [
+      `TCGAIO_LICENSE_URL=${shellQuote(url)}`,
+      `TCGAIO_LICENSE_PUBLIC_KEY=${shellQuote(key)}`,
+      `EXPO_PUBLIC_TCGAIO_LICENSE_URL=${shellQuote(url)}`,
+      `EXPO_PUBLIC_TCGAIO_LICENSE_PUBLIC_KEY=${shellQuote(key)}`,
+      ""
+    ].join("\n"),
+    { mode: 0o600 }
+  )
+  if (baked) console.log(`License values written for the phone bundle: host ${new URL(baked.url).host}, public key ${baked.key.length} characters.`)
   process.exit(0)
 }
 
 if (mode === "verify") {
-  if (!licenseShape()) process.exit(0)
+  const baked = licenseShape()
+  if (!baked) process.exit(0)
   const roots = process.argv.slice(3)
   if (!roots.length) fail("verify needs the built output directory.")
-  const urlBytes = Buffer.from(url)
-  const keyBytes = Buffer.from(key)
+  const needles = {
+    url: [baked.url, rawUrl.trim()].filter(Boolean),
+    key: [baked.key, rawKey.trim()].filter(Boolean)
+  }
   let foundUrl = false
   let foundKey = false
   const walk = (dir) => {
@@ -55,15 +83,15 @@ if (mode === "verify") {
       }
       if (!stat.isFile() || stat.size > 40_000_000) continue
       const data = readFileSync(path)
-      if (!foundUrl && data.includes(urlBytes)) foundUrl = true
-      if (!foundKey && data.includes(keyBytes)) foundKey = true
+      if (!foundUrl && needles.url.some((needle) => containsText(data, needle))) foundUrl = true
+      if (!foundKey && needles.key.some((needle) => containsText(data, needle))) foundKey = true
     }
   }
   for (const root of roots) walk(root)
   if (!foundUrl || !foundKey) {
     fail("The build output does not contain the license server URL and public key. Refusing to publish a build that would lock customers out.")
   }
-  console.log(`License build verified: host ${new URL(url).host}, public key ${key.length} characters.`)
+  console.log(`License build verified: host ${new URL(baked.url).host}, public key ${baked.key.length} characters.`)
   process.exit(0)
 }
 
