@@ -19,13 +19,15 @@ This stays a small program you run yourself. It does not need Cloudflare, Supaba
 | `TCGAIO_LICENSE_URL` | Desktop build secret | `https://your-server` with no path and no token. |
 | `TCGAIO_LICENSE_DB` | Server | Path to the SQLite file, for example `/var/tcgaio/license.sqlite`. |
 | `PORT` | Server | Defaults to `8787`. |
+| `HOST` | Server | Address to bind. Defaults to `127.0.0.1`, which is what Caddy on the same machine should use. Set `HOST=0.0.0.0` only if you want the port open on every network interface. |
+| `TRUST_PROXY` | Server | Set to `1` when the reverse proxy is not on this machine. See the rate-limit note below. |
 | `TCGAIO_OWNER_SETUP_TOKEN` | Server, until the password is set | A long random string you choose. The first boot stores a hash of it. |
 | `TCGAIO_OWNER_PASSWORD` | Server, first boot or `set-password` only | Password for `jhoendy007@gmail.com`, at least 8 characters. Remove it from the environment after it is saved. |
 | `EXPO_ACCESS_TOKEN` | Server, optional | Expo access token. Without it, alerts are stored and push is skipped. |
 
 Tables are created with `CREATE TABLE IF NOT EXISTS` the first time the server starts. You do not run a separate migration.
 
-Login, claim, and admin login are limited to about 8 tries per 10 minutes per IP. The limit is in memory and resets when the process restarts.
+Login, claim, and admin login are limited to about 8 tries per 10 minutes per client IP. The limit is in memory and resets when the process restarts. Caddy on this machine connects from `127.0.0.1` and sends `X-Forwarded-For`. The server uses the last address in that header, which is the visitor Caddy actually saw, so one person's failures do not lock everyone else. The same address is stored on failed-login rows. A connection that is not from loopback ignores `X-Forwarded-For` unless `TRUST_PROXY=1`.
 
 ## Owner account
 
@@ -41,11 +43,15 @@ The admin Android app registers an Expo push token. The server sends it to `http
 
 ## Commands
 
+`license-server/package.json` sets `"type": "module"`. The repo root stays CommonJS for the desktop app. That small file is what lets these commands use top-level await:
+
 ```bash
 npx tsx license-server/cli.ts keygen
 npx tsx license-server/cli.ts serve
 npx tsx license-server/cli.ts set-password
 ```
+
+Behind Caddy, keep the default `HOST=127.0.0.1` and proxy to `127.0.0.1:8787`. Caddy's own connection is loopback, so the real visitor IP is taken from `X-Forwarded-For` without setting `TRUST_PROXY`.
 
 `npm run license:server` is the same as `serve`.
 

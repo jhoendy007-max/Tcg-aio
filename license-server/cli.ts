@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { createLicenseIdentity } from "../src/shared/license-proof"
+import { createLicenseIdentity } from "./proof"
 import { listenLicenseApi, setOwnerPassword } from "./server"
 import { DatabaseSync } from "node:sqlite"
 
@@ -27,9 +27,13 @@ if (command === "keygen") {
 } else if (command === "serve") {
   const adminHtml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "admin.html"), "utf8")
   const port = Number(process.env.PORT || 8787)
+  const host = process.env.HOST?.trim() || "127.0.0.1"
+  const trustProxy = process.env.TRUST_PROXY === "1" || process.env.TRUST_PROXY === "true"
   const started = await listenLicenseApi({
     dbPath,
     port,
+    host,
+    trustProxy,
     adminHtml,
     privateKey: process.env.TCGAIO_LICENSE_PRIVATE_KEY,
     ownerSetupToken: process.env.TCGAIO_OWNER_SETUP_TOKEN,
