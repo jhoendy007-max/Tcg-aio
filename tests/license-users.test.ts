@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import { mkdtempSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
 import { tmpdir } from "node:os"
@@ -108,8 +109,19 @@ describe("pending accounts and admin updates", () => {
     const bytes = Buffer.concat([Buffer.from("PK\u0003\u0004"), Buffer.alloc(80, 1)])
     const rejected = server.storeAdminApk({ version: "0.2.26", versionCode: 226, bytes, authorization: "Bearer wrong" })
     expect(rejected.status).toBe(401)
-    const stored = json(server.storeAdminApk({ version: "0.2.26", versionCode: 226, bytes, authorization: "Bearer upload-token" }))
+    expect(rejected.body).not.toContain("wrong")
+    expect(rejected.body).not.toContain("upload-token")
+    const stored = json(server.storeAdminApk({ version: "0.2.26", versionCode: 226, bytes, authorization: 'Bearer "upload-token"' }))
     expect(stored.ok).toBe(true)
+    const quoted = api({ adminUploadToken: ' TCGAIO_ADMIN_UPLOAD_TOKEN="Bearer upload-token" ' })
+    open.push(quoted)
+    expect(json(quoted.storeAdminApk({ version: "0.2.26", versionCode: 226, bytes, authorization: "upload-token" })).ok).toBe(true)
+    const normalized = spawnSync(process.execPath, ["scripts/normalize-upload-token.mjs"], {
+      encoding: "utf8",
+      env: { ...process.env, TCGAIO_ADMIN_UPLOAD_TOKEN: ' "Bearer upload-token" \n' }
+    })
+    expect(normalized.stdout).toBe("upload-token")
+    expect(normalized.stderr ?? "").toBe("")
     const release = json(get(server, "/v1/admin/app", String(admin.token)))
     expect(release.available).toBe(true)
     expect(release.version).toBe("0.2.26")

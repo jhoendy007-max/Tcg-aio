@@ -145,10 +145,12 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
   }
 
   function storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string }): { status: number; body: string } {
-    const configured = (options.adminUploadToken ?? process.env.TCGAIO_ADMIN_UPLOAD_TOKEN ?? "").trim()
+    const configured = normalizeUploadToken(options.adminUploadToken ?? process.env.TCGAIO_ADMIN_UPLOAD_TOKEN ?? "")
     if (!configured) return json(404, { ok: false, error: "Admin APK upload is not configured." })
-    const presented = input.authorization.replace(/^Bearer\s+/i, "").trim()
-    if (!presented || !safeEqual(sha(presented), sha(configured))) return json(401, { ok: false, error: "The upload token was not accepted." })
+    const presented = normalizeUploadToken(input.authorization)
+    if (!presented || !safeEqual(sha(presented), sha(configured))) {
+      return json(401, { ok: false, error: `The upload token was not accepted. Sent length ${presented.length}, server length ${configured.length}.` })
+    }
     const version = input.version.trim()
     if (!/^\d+\.\d+\.\d+/.test(version)) return json(400, { ok: false, error: "The admin app version is missing." })
     if (!Number.isInteger(input.versionCode) || input.versionCode < 1) return json(400, { ok: false, error: "The admin app version code is missing." })
@@ -218,7 +220,7 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; h
       if (upload) {
         const version = text(headers["x-tcgaio-version"])
         const versionCode = Number(headers["x-tcgaio-version-code"])
-        const result = api.storeAdminApk({ version, versionCode, bytes: Buffer.concat(chunks), authorization: headers.authorization ?? "" })
+        const result = api.storeAdminApk({ version, versionCode, bytes: Buffer.concat(chunks), authorization: headers["x-tcgaio-upload-token"] || headers.authorization || "" })
         res.writeHead(result.status, { "content-type": "application/json" })
         res.end(result.body)
         return
@@ -825,6 +827,24 @@ function verifyPassword(password: string, stored: string): boolean {
   const expected = Buffer.from(parts[2], "hex")
   const actual = Buffer.from(argon2id(Buffer.from(password), salt, ARGON))
   return expected.length === actual.length && timingSafeEqual(expected, actual)
+}
+
+function normalizeUploadToken(value: string): string {
+  let text = value
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = unwrapUploadToken(text)
+    if (next === text) break
+    text = next
+  }
+  return text.replace(/\s+/g, "")
+}
+
+function unwrapUploadToken(value: string): string {
+  let text = value.trim().replace(/^\uFEFF/, "")
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) text = text.slice(1, -1)
+  text = text.replace(/^TCGAIO_ADMIN_UPLOAD_TOKEN=/i, "")
+  text = text.replace(/^Bearer\s+/i, "")
+  return text.trim()
 }
 
 function sha(value: string): string {

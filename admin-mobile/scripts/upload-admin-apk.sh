@@ -4,8 +4,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 URL="${TCGAIO_LICENSE_URL:-}"
-TOKEN="${TCGAIO_ADMIN_UPLOAD_TOKEN:-}"
 URL="${URL%/}"
+TOKEN="$(node "$ROOT/scripts/normalize-upload-token.mjs")"
 
 if [[ -z "$TOKEN" || -z "$URL" ]]; then
   echo "TCGAIO_ADMIN_UPLOAD_TOKEN or TCGAIO_LICENSE_URL is not set. Skipping the admin APK upload."
@@ -20,14 +20,14 @@ fi
 
 VER="$(node -p "require('$ROOT/admin-mobile/package.json').version")"
 CODE="$(node -p "require('$ROOT/admin-mobile/app.json').expo.android.versionCode")"
-echo "Uploading admin ${VER} (${CODE}) to ${URL}"
+echo "Uploading admin ${VER} (${CODE}) to ${URL}. Token length ${#TOKEN}."
+HDR="$(mktemp)"
+printf 'Authorization: Bearer %s\nX-TCGAIO-Upload-Token: %s\nX-TCGAIO-Version: %s\nX-TCGAIO-Version-Code: %s\nContent-Type: application/vnd.android.package-archive\n' "$TOKEN" "$TOKEN" "$VER" "$CODE" > "$HDR"
 curl --fail-with-body --silent --show-error \
   -X POST \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "X-TCGAIO-Version: ${VER}" \
-  -H "X-TCGAIO-Version-Code: ${CODE}" \
-  -H "Content-Type: application/vnd.android.package-archive" \
-  --data-binary @"${APK}" \
+  -H @"$HDR" \
+  --data-binary @"$APK" \
   "${URL}/v1/admin/app"
+rm -f "$HDR"
 echo
 echo "Admin APK uploaded."
