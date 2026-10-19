@@ -6,6 +6,10 @@ MOBILE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$MOBILE/.." && pwd)"
 cd "$MOBILE"
 
+if [[ "${TCGAIO_REQUIRE_LICENSE:-}" == "1" || "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+  node "$REPO/scripts/require-license-build.mjs" preflight
+fi
+
 bash "$MOBILE/scripts/prepare-release-signing.sh"
 export CI="${CI:-1}"
 npx expo prebuild --platform android --no-install --clean --non-interactive
@@ -57,4 +61,19 @@ cd "$MOBILE"
 VER="$(node -p "require('./package.json').version")"
 mkdir -p "$REPO/release"
 cp "$APK" "$REPO/release/TCGAIO-Phone-${VER}.apk"
+if [[ "${TCGAIO_REQUIRE_LICENSE:-}" == "1" || "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+  BUNDLE_DIR="$(mktemp -d)"
+  python3 - "$APK" "$BUNDLE_DIR/index.android.bundle" <<'PY'
+import sys
+import zipfile
+from pathlib import Path
+apk, dest = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(apk) as archive:
+    name = next((item for item in archive.namelist() if item.endswith("index.android.bundle")), None)
+    if not name:
+        sys.exit("Release APK has no JS bundle to check for the license server.")
+    Path(dest).write_bytes(archive.read(name))
+PY
+  node "$REPO/scripts/require-license-build.mjs" verify "$BUNDLE_DIR"
+fi
 echo "Wrote $REPO/release/TCGAIO-Phone-${VER}.apk"
