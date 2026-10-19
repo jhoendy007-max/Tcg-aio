@@ -9,7 +9,7 @@ import {
   createLicenseIdentity,
   signEnvelope,
   type AccessGrant
-} from "../src/shared/license-proof"
+} from "./proof"
 
 export const OWNER_EMAIL = "jhoendy007@gmail.com"
 export const ALERT_TYPES = ["claimed", "foreign_pc", "failed_logins", "expiring", "revoked", "suspended", "server_error", "checkout"] as const
@@ -130,8 +130,9 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
   }
 }
 
-export function listenLicenseApi(options: LicenseApiOptions & { port?: number; adminHtml: string }): Promise<{ url: string; publicKey: string; close(): Promise<void> }> {
+export function listenLicenseApi(options: LicenseApiOptions & { port?: number; host?: string; trustProxy?: boolean; adminHtml: string }): Promise<{ url: string; host: string; publicKey: string; close(): Promise<void> }> {
   const api = openLicenseApi(options)
+  const bindHost = options.host?.trim() || "127.0.0.1"
   const server = createServer((req, res) => {
     const chunks: Buffer[] = []
     req.on("data", (chunk: Buffer) => {
@@ -145,7 +146,9 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; a
         res.end(options.adminHtml)
         return
       }
-      const result = api.handle(req.method ?? "GET", path, headersOf(req), Buffer.concat(chunks).toString("utf8"), req.socket.remoteAddress ?? "local")
+      const forwarded = req.headers["x-forwarded-for"]
+      const ip = clientAddress(req.socket.remoteAddress, Array.isArray(forwarded) ? forwarded[0] : forwarded, options.trustProxy === true)
+      const result = api.handle(req.method ?? "GET", path, headersOf(req), Buffer.concat(chunks).toString("utf8"), ip)
       const contentType = result.body.startsWith("<") ? "text/html; charset=utf-8" : "application/json"
       res.writeHead(result.status, { "content-type": contentType })
       res.end(result.body)
@@ -153,11 +156,14 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; a
   })
   return new Promise((resolve, reject) => {
     server.once("error", reject)
-    server.listen(options.port ?? 0, "0.0.0.0", () => {
+    server.listen(options.port ?? 0, bindHost, () => {
       const address = server.address()
-      const bound = typeof address === "object" && address ? address.port : options.port ?? 0
+      const boundPort = typeof address === "object" && address ? address.port : options.port ?? 0
+      const boundHost = typeof address === "object" && address ? address.address : bindHost
+      const shown = boundHost === "0.0.0.0" || boundHost === "::" ? "127.0.0.1" : boundHost
       resolve({
-        url: `http://127.0.0.1:${bound}`,
+        url: `http://${shown}:${boundPort}`,
+        host: boundHost,
         publicKey: api.publicKey,
         close: () => new Promise((done, fail) => {
           api.close()
@@ -166,6 +172,31 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; a
       })
     })
   })
+}
+
+/** Client IP for rate limits and failure logs. A loopback proxy, or TRUST_PROXY, supplies X-Forwarded-For. */
+export function clientAddress(remoteAddress: string | undefined, forwardedFor: string | undefined, trustProxy = false): string {
+  const remote = normalizeIp(remoteAddress) || "local"
+  const forwarded = lastForwarded(forwardedFor)
+  if (forwarded && (trustProxy || isLoopback(remote))) return forwarded
+  return remote
+}
+
+function normalizeIp(value: string | undefined): string {
+  const raw = (value ?? "").trim()
+  if (!raw) return ""
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(raw)
+  return mapped ? mapped[1] : raw
+}
+
+function isLoopback(ip: string): boolean {
+  return ip === "127.0.0.1" || ip === "::1"
+}
+
+function lastForwarded(header: string | undefined): string {
+  if (!header) return ""
+  const parts = header.split(",").map((part) => normalizeIp(part)).filter(Boolean)
+  return parts.at(-1) ?? ""
 }
 
 function loadIdentity(db: DatabaseSync, fromEnv?: string): { publicKey: string; privateKey: string } {
