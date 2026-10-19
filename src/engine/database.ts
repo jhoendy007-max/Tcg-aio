@@ -1566,7 +1566,7 @@ export class Database {
 
   activateLicense(key: string): LicenseStatus {
     const publicKey = this.getSettings().licensePublicKey || this.licenseFile().publicKey
-    if (!publicKey) throw new AppError("Paste the seller's public key first.")
+    if (!publicKey) throw new AppError("A license is optional for personal use. Add a public key only if you turned on Require a license.")
     const payload = readLicense(key, publicKey)
     assertLicenseAllowed(payload)
     const row = this.licenseFile().issued.find((item) => item.id === payload.id)

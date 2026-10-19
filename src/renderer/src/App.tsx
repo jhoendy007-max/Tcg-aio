@@ -136,7 +136,7 @@ export function App() {
   return (
     <div className={rail ? "shell rail" : "shell expanded"}>
       <aside className="sidebar">
-        <div className="brand">
+        <div className="brand" title={settings.appName || "TCGAIO"}>
           {settings.logoDataUrl ? <img className="brand-logo" src={settings.logoDataUrl} alt="" /> : <Mark />}
           <div className="brand-copy">
             <strong>{settings.appName || "TCGAIO"}</strong>
@@ -144,12 +144,15 @@ export function App() {
           </div>
         </div>
         <nav aria-label="Sections">
-          {NAV.map((item) => (
-            <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined} title={deskText(lang, item.id === "home" ? "navHome" : item.id === "tasks" ? "navTasks" : item.id === "people" ? "navPeople" : item.id === "clients" ? "navClients" : "navSettings")}>
-              <NavIcon name={item.icon} />
-              <span className="nav-text">{deskText(lang, item.id === "home" ? "navHome" : item.id === "tasks" ? "navTasks" : item.id === "people" ? "navPeople" : item.id === "clients" ? "navClients" : "navSettings")}</span>
-            </a>
-          ))}
+          {NAV.map((item) => {
+            const label = deskText(lang, item.id === "home" ? "navHome" : item.id === "tasks" ? "navTasks" : item.id === "people" ? "navPeople" : item.id === "clients" ? "navClients" : "navSettings")
+            return (
+              <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined} aria-label={label} title={label}>
+                <NavIcon name={item.icon} />
+                <span className="nav-text">{label}</span>
+              </a>
+            )
+          })}
         </nav>
         <footer>
           <button type="button" className="icon-btn" title={rail ? deskText(lang, "showNames") : deskText(lang, "iconsOnly")} onClick={() => { const next = !rail; setRail(next); try { localStorage.setItem("tcgaio-rail", next ? "icons" : "open") } catch { /* keep the choice for this session */ } }}>{rail ? "»" : "«"}</button>

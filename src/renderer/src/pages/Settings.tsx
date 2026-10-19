@@ -27,6 +27,7 @@ export function SettingsPage() {
   const [holder, setHolder] = useState("")
   const [seats, setSeats] = useState(1)
   const [minted, setMinted] = useState("")
+  const [licenseNote, setLicenseNote] = useState("")
 
   useEffect(() => {
     void unwrap(window.aio.settings.get())
@@ -101,7 +102,7 @@ export function SettingsPage() {
           <p>Notifications and the Target monitor location. Stock is checked for ship-to-home near the store and ZIP below.</p>
         </div>
       </header>
-      {error ? <Banner tone="error">{error}</Banner> : null}
+      {error && !/public key/i.test(error) ? <Banner tone="error">{error}</Banner> : null}
       {message ? <Banner tone="info">{message}</Banner> : null}
       {payload ? <div className="card security">{payload.security.description}</div> : null}
       <form className="card form-grid" onSubmit={save}>
@@ -288,12 +289,14 @@ export function SettingsPage() {
           <input type="checkbox" checked={form.licenseRequired} onChange={(event) => setForm({ ...form, licenseRequired: event.target.checked })} />
           <span>Require a license before tasks start. Leave this off for personal use. The license server never receives card, password, or session data.</span>
         </label>
-        <Field className="span-2" label="License server" hint="Optional https URL, or http://127.0.0.1 when the server is this PC. No token in the URL.">
+        <Field className="span-2" label="License server" hint="Optional https URL, or http://127.0.0.1 when the server is this PC. No token in the URL. Personal use can leave this blank.">
           <TextInput value={form.licenseServerUrl} onChange={(event) => setForm({ ...form, licenseServerUrl: event.target.value })} placeholder="https://licenses.example.com" autoComplete="off" />
         </Field>
-        <Field className="span-2" label="License public key" hint="The seller's public key. Not a secret. The private key stays on the PC that mints keys.">
-          <TextInput value={form.licensePublicKey} onChange={(event) => setForm({ ...form, licensePublicKey: event.target.value })} autoComplete="off" />
-        </Field>
+        {form.licenseRequired ? (
+          <Field className="span-2" label="License public key" hint="Only used when Require a license is on. Personal use does not need one.">
+            <TextInput value={form.licensePublicKey} onChange={(event) => setForm({ ...form, licensePublicKey: event.target.value })} autoComplete="off" />
+          </Field>
+        ) : null}
         <Field className="span-2" label="Backup URL" hint="Optional https link you control. The file stored there is ciphertext. Do not put the token in the URL.">
           <TextInput value={form.backupUrl} onChange={(event) => setForm({ ...form, backupUrl: event.target.value })} placeholder="https://example.com/tcgaio-backup" autoComplete="off" />
         </Field>
@@ -398,7 +401,8 @@ export function SettingsPage() {
       <form className="card stack" onSubmit={(event) => event.preventDefault()}>
         <div>
           <h2>License</h2>
-          <p className="hint">Optional. This PC is {license?.machineId ?? "…"}. Activation sends the license key, this machine id, and the app version. It does not send cards, passwords, cookies, or sessions. Leave required off unless you are distributing the app.</p>
+          <p className="hint">Optional for personal use. This PC is {license?.machineId ?? "…"}. Leave required off and you do not need a public key. Activation, when you use it, sends the license key, this machine id, and the app version. It does not send cards, passwords, cookies, or sessions.</p>
+          {licenseNote ? <p className="hint">{licenseNote}</p> : null}
         </div>
         <Field label="License key">
           <TextInput type="password" autoComplete="off" value={licenseKey} onChange={(event) => setLicenseKey(event.target.value)} />
@@ -408,14 +412,21 @@ export function SettingsPage() {
           <button type="button" disabled={busy} onClick={() => void (async () => {
             setBusy(true)
             setError("")
+            setLicenseNote("")
             try {
+              if (!form.licenseRequired) {
+                setLicenseNote("Personal use does not need a license key. Leave Require a license off.")
+                return
+              }
               await unwrap(window.aio.settings.save(form))
               const next = await unwrap(window.aio.license.activate(licenseKey))
               setLicense(next)
               setLicenseKey("")
               setMessage("This PC is activated.")
             } catch (err) {
-              setError(errorText(err))
+              const text = errorText(err)
+              if (/public key/i.test(text)) setLicenseNote("Add a license public key only if Require a license is on. Personal use can skip this.")
+              else setError(text)
             } finally {
               setBusy(false)
             }
