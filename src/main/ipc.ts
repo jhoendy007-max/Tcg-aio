@@ -334,7 +334,8 @@ export function registerIpc(
     try { return await heartbeatAccount(db, fingerprint) } catch { return db.accountView() }
   })
   handle(channels.accountSignIn, (input: { email?: string; password?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/login", { email: input?.email ?? "", password: input?.password ?? "" }))
-  handle(channels.accountSignUp, (input: { email?: string; password?: string; key?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/claim", { email: input?.email ?? "", password: input?.password ?? "", key: input?.key ?? "" }))
+  handle(channels.accountSignUp, (input: { email?: string; password?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/signup", { email: input?.email ?? "", password: input?.password ?? "" }))
+  handle(channels.accountRedeem, (input: { key?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/redeem", { token: db.sessionToken(), key: input?.key ?? "" }))
   handle(channels.accountSignOut, () => {
     db.clearAccountSession()
     return db.accountView()
@@ -344,7 +345,7 @@ export function registerIpc(
     const fingerprint = machineFingerprint()
     db.refreshAccess(fingerprint)
     if (db.accountView().role !== "owner") throw new AppError("The admin desk is only for the owner account.")
-    const base = licenseServerUrl()
+    const base = licenseServerUrl(db.getSettings().licenseServerUrl)
     if (!base) throw new AppError("This build is not connected to a license server yet.")
     await shell.openExternal(`${base}/admin`)
     return { opened: true as const }

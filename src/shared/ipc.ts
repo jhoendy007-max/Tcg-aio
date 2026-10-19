@@ -99,6 +99,7 @@ export const channels = {
   accountStatus: "account:status",
   accountSignIn: "account:signIn",
   accountSignUp: "account:signUp",
+  accountRedeem: "account:redeem",
   accountSignOut: "account:signOut",
   accountTransfer: "account:transfer",
   accountOpenAdmin: "account:openAdmin",

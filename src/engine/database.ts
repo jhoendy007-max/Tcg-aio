@@ -194,7 +194,7 @@ interface DbFile {
   backup?: { tokenSecret?: string }
   license?: LicenseFile
   accountGateMigration?: string
-  accountSession?: { tokenSecret: string; envelope: string; fingerprint: string }
+  accountSession?: { tokenSecret: string; envelope: string; fingerprint: string; pending?: boolean; email?: string }
   stockLog?: RestockEvent[]
   monitorSamples?: MonitorSample[]
   templates?: TaskTemplate[]
@@ -1650,12 +1650,17 @@ export class Database {
   }
 
   accountView(now = Date.now()): AccountView {
-    const empty: AccountView = { signedIn: false, email: "", role: "", holder: "", plan: "", expiresAt: null, fingerprint: "" }
+    const empty: AccountView = { signedIn: false, pending: false, email: "", role: "", holder: "", plan: "", expiresAt: null, fingerprint: "" }
+    const session = this.data.accountSession
+    if (session?.pending) {
+      return { signedIn: true, pending: true, email: session.email ?? "", role: "user", holder: "", plan: "", expiresAt: null, fingerprint: "" }
+    }
     if (!this.accessOk) return empty
-    const grant = readGrant(this.data.accountSession?.envelope ?? "", licensePublicKey())
-    if (!grant || !accessAllowed(grant, this.data.accountSession?.fingerprint ?? "", now)) return empty
+    const grant = readGrant(session?.envelope ?? "", licensePublicKey())
+    if (!grant || !accessAllowed(grant, session?.fingerprint ?? "", now)) return empty
     return {
       signedIn: true,
+      pending: false,
       email: grant.email,
       role: grant.role,
       holder: grant.holder,
@@ -1663,6 +1668,19 @@ export class Database {
       expiresAt: grant.expiresAt,
       fingerprint: grant.fingerprint.slice(0, 12)
     }
+  }
+
+  savePendingSession(input: { token: string; email: string; fingerprint: string }): AccountView {
+    this.data.accountSession = {
+      tokenSecret: this.cipher.encrypt(input.token),
+      envelope: "",
+      fingerprint: input.fingerprint,
+      pending: true,
+      email: input.email
+    }
+    this.accessOk = false
+    this.flush()
+    return this.accountView()
   }
 
   saveAccountSession(input: { token: string; envelope: string; fingerprint: string }): AccountView {
@@ -1673,7 +1691,9 @@ export class Database {
     this.data.accountSession = {
       tokenSecret: this.cipher.encrypt(input.token),
       envelope: input.envelope,
-      fingerprint: input.fingerprint
+      fingerprint: input.fingerprint,
+      pending: false,
+      email: grant.email
     }
     this.accessOk = true
     this.flush()
@@ -3062,7 +3082,13 @@ function cloneTask(task: PublicTask): PublicTask {
 
 function normalizeAccountSession(value: DbFile["accountSession"]): DbFile["accountSession"] {
   if (!value || typeof value.tokenSecret !== "string" || typeof value.envelope !== "string" || !/^[0-9a-f]{64}$/.test(value.fingerprint)) return undefined
-  return { tokenSecret: value.tokenSecret, envelope: value.envelope, fingerprint: value.fingerprint }
+  return {
+    tokenSecret: value.tokenSecret,
+    envelope: value.envelope,
+    fingerprint: value.fingerprint,
+    pending: value.pending === true,
+    email: typeof value.email === "string" ? value.email : ""
+  }
 }
 
 function emptyLicense(): LicenseFile {

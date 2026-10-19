@@ -17,14 +17,14 @@ import { LogsPage } from "./pages/Logs"
 import { ModulesPage } from "./pages/Modules"
 import { ShipmentsPage } from "./pages/Shipments"
 import { StoreDefaults } from "./pages/StoreDefaults"
-import { AccountGate } from "./pages/AccountGate"
+import { AccountGate, WaitingAccount } from "./pages/AccountGate"
 import { Wizard } from "./pages/Wizard"
 import { deskText } from "../../shared/desk-ui"
 import { parseRoute, routeHash, type SectionId } from "../../shared/nav"
 import { SuccessScreen, type WinCard } from "./components/Success"
 import { updateStatusText } from "../../shared/update-status"
 import { APP_VERSION } from "../../shared/version"
-import { DEFAULT_SETTINGS, type Settings, type UpdateStatus } from "../../shared/types"
+import { DEFAULT_SETTINGS, type AccountView, type Settings, type UpdateStatus } from "../../shared/types"
 import { errorText, unwrap } from "./lib"
 import { applyTheme } from "./theme"
 import { playSuccessChime } from "./sound"
@@ -48,7 +48,7 @@ export function App() {
   const [updateError, setUpdateError] = useState("")
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [booting, setBooting] = useState(true)
-  const [signedIn, setSignedIn] = useState(false)
+  const [account, setAccount] = useState<AccountView | null>(null)
   const [wizard, setWizard] = useState(false)
   const [win, setWin] = useState<WinCard | null>(null)
   const seen = useRef(new Map<string, string>())
@@ -72,10 +72,10 @@ export function App() {
       document.title = payload.settings.appName || "TCGAIO"
       setWizard(!payload.settings.wizardDone && profiles.length === 0 && accounts.length === 0)
       try {
-        const account = await unwrap(window.aio.account.status())
-        if (!cancel) setSignedIn(account.signedIn)
+        const nextAccount = await unwrap(window.aio.account.status())
+        if (!cancel) setAccount(nextAccount)
       } catch {
-        if (!cancel) setSignedIn(false)
+        if (!cancel) setAccount(null)
       }
     }).catch(() => undefined).finally(() => {
       if (!cancel) setBooting(false)
@@ -92,7 +92,7 @@ export function App() {
       document.title = next.appName || "TCGAIO"
     }
     window.addEventListener("tcgaio-settings", onSettings)
-    const onSignOut = () => setSignedIn(false)
+    const onSignOut = () => setAccount(null)
     window.addEventListener("tcgaio-signout", onSignOut)
     return () => {
       window.removeEventListener("tcgaio-settings", onSettings)
@@ -143,6 +143,8 @@ export function App() {
   }
 
   const lang = settings.language === "es" ? "es" : "en"
+  const signedIn = Boolean(account?.signedIn && !account.pending)
+  const pending = Boolean(account?.pending)
   const page = route.section
   const tab = route.tab
 
@@ -189,7 +191,8 @@ export function App() {
           </div>
         ) : null}
         {booting ? <section className="page" aria-busy="true" aria-label="Loading"><div className="skeleton sk-title" /><div className="skeleton sk-card" /></section> : null}
-        {!booting && !signedIn ? <AccountGate lang={lang} onSignedIn={() => setSignedIn(true)} /> : null}
+        {!booting && !signedIn && !pending ? <AccountGate lang={lang} settings={settings} onSettings={(next) => { setSettings(next); applyTheme(next) }} onDone={setAccount} /> : null}
+        {!booting && pending && account ? <WaitingAccount lang={lang} account={account} onReady={setAccount} onSignedOut={() => setAccount(null)} /> : null}
         {!booting && signedIn && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = next.appName || "TCGAIO"; setWizard(false); go("home") }} /> : null}
         {!booting && signedIn && !wizard && page === "home" ? <DashboardPage lang={lang} onTasks={() => go("tasks")} /> : null}
         {!booting && signedIn && !wizard && page === "tasks" ? <TasksPage lockedKind={tab === "monitor" || tab === "checkout" ? tab : ""} /> : null}

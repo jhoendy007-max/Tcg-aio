@@ -516,8 +516,11 @@ export interface SettingsPayload {
   security: SecurityInfo
 }
 
+export const DEFAULT_LICENSE_SERVER_URL = "https://license.jokerzzztcg.com"
+
 export interface AccountView {
   signedIn: boolean
+  pending: boolean
   email: string
   role: "owner" | "user" | ""
   holder: string

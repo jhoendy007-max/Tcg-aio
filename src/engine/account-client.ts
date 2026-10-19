@@ -5,7 +5,7 @@ import { readGrant } from "../shared/license-proof"
 import type { AccountView } from "../shared/types"
 
 export async function syncAccount(db: Database, fingerprint: string, path: string, body: Record<string, unknown>): Promise<AccountView> {
-  const base = licenseServerUrl()
+  const base = licenseServerUrl(db.getSettings().licenseServerUrl)
   if (!base) throw new AppError("This build is not connected to a license server yet.")
   let response: Response
   try {
@@ -26,6 +26,10 @@ export async function syncAccount(db: Database, fingerprint: string, path: strin
     throw new AppError(message)
   }
   const token = typeof parsed.token === "string" ? parsed.token : ""
+  if (parsed.pending === true) {
+    if (!token) throw new AppError("The license server did not start a session.")
+    return db.savePendingSession({ token, email: typeof parsed.email === "string" ? parsed.email : "", fingerprint })
+  }
   const envelope = typeof parsed.envelope === "string" ? parsed.envelope : ""
   if (!token || !readGrant(envelope, licensePublicKey())) throw new AppError("The license server response could not be verified.")
   return db.saveAccountSession({ token, envelope, fingerprint })
@@ -41,14 +45,14 @@ export async function heartbeatAccount(db: Database, fingerprint: string): Promi
     return await syncAccount(db, fingerprint, "/v1/session/heartbeat", { token })
   } catch (err) {
     db.refreshAccess(fingerprint)
-    if (!db.licenseAllows()) db.clearAccountSession()
+    if (!db.accountView().pending && !db.licenseAllows()) db.clearAccountSession()
     throw err
   }
 }
 
 export async function reportCheckout(db: Database, fingerprint: string, store: string, sku: string): Promise<void> {
   const token = db.sessionToken()
-  const base = licenseServerUrl()
+  const base = licenseServerUrl(db.getSettings().licenseServerUrl)
   if (!token || !base || !store || !sku) return
   try {
     await fetch(`${base}/v1/session/checkout`, {

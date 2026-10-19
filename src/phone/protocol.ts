@@ -241,6 +241,8 @@ export interface PhoneSnapshot {
   desk?: PhoneDeskSettings
   /** True when this paired PC has a valid license. The phone does not use its own seat. */
   licenseOk?: boolean
+  /** True when the paired PC is signed in and still waiting for a license. */
+  accountPending?: boolean
 }
 
 /** Challenge handoff for the paired phone. The cookie is only on this message. */

@@ -97,7 +97,8 @@ export function createPhoneHost(
       clients: db.listClients().map(projectPhoneClient),
       ledger: db.listLedger().slice(0, 80).map(projectPhoneLedger),
       desk: projectPhoneSettings(settings),
-      licenseOk: db.licenseAllows()
+      licenseOk: db.licenseAllows(),
+      accountPending: db.accountView().pending
     }
   }
   const schedules = (): PhoneSchedule[] => db.listSchedules().map((schedule) => ({
@@ -161,7 +162,7 @@ export function createPhoneHost(
       db.deleteTask(id)
     },
     start(id: string, options?: { test?: boolean }) {
-      if (!db.licenseAllows()) throw new Error("This PC is not activated. Add a license key in Settings.")
+      if (!db.licenseAllows()) throw new Error(db.accountView().pending ? "This PC is waiting for activation." : "This PC is not activated. Add a license key in Settings.")
       const runner = getRunner()
       if (!runner) throw new Error("The desktop app is still starting.")
       runner.start(id, options)
@@ -174,7 +175,7 @@ export function createPhoneHost(
       getRunner()?.stop(id)
     },
     startAll() {
-      if (!db.licenseAllows()) throw new Error("This PC is not activated. Add a license key in Settings.")
+      if (!db.licenseAllows()) throw new Error(db.accountView().pending ? "This PC is waiting for activation." : "This PC is not activated. Add a license key in Settings.")
       const runner = getRunner()
       if (!runner) throw new Error("The desktop app is still starting.")
       return runner.startAll()

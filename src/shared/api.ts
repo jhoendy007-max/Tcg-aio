@@ -205,7 +205,8 @@ export interface AioApi {
   account: {
     status: () => Promise<Result<AccountView>>
     signIn: (input: { email: string; password: string }) => Promise<Result<AccountView>>
-    signUp: (input: { email: string; password: string; key: string }) => Promise<Result<AccountView>>
+    signUp: (input: { email: string; password: string }) => Promise<Result<AccountView>>
+    redeem: (input: { key: string }) => Promise<Result<AccountView>>
     signOut: () => Promise<Result<AccountView>>
     transfer: () => Promise<Result<AccountView>>
     openAdmin: () => Promise<Result<{ opened: true }>>

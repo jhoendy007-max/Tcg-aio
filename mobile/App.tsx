@@ -360,6 +360,7 @@ export default function App() {
                 <Text style={styles.p}>Autopilot. Restock alerts, keyword hits, and learned restock hours can start a saved template.</Text>
                 <Switch value={snap?.autopilot === true} onValueChange={(enabled) => void run(() => session.current!.setAutopilot(enabled))} trackColor={{ true: theme.accent, false: theme.line }} />
               </View>
+              {snap?.accountPending ? <Text style={styles.p}>This PC is waiting for activation. Tasks stay off until a license is linked.</Text> : null}
               {snap && isNewer(snap.updates?.phoneVersion ?? null, PHONE_VERSION) ? <Text style={styles.p}>Phone {snap.updates.phoneVersion} is on the PC's GitHub release. Install that APK over this {PHONE_VERSION} build. The download stays on the PC.</Text> : null}
               {snap?.keeper ? <Text style={styles.p}>Session Keeper {snap.keeper.enabled ? "on" : "off"} · {snap.keeper.saved} signed in · {snap.keeper.expired} need a sign-in · every {snap.keeper.intervalMin} min</Text> : null}
               {snap?.imap ? <Text style={styles.p}>{snap.imap.accounts === 0 ? mailText(snap.language === "es" ? "es" : "en", "statusOff") : `${mailText(snap.language === "es" ? "es" : "en", "statusOn")} ${snap.imap.enabled} · ${snap.imap.ready}${snap.imap.lastError ? ` · ${snap.imap.lastError}` : ""}`}</Text> : null}

@@ -180,6 +180,7 @@ const api: AioApi = {
     status: () => ipcRenderer.invoke(channels.accountStatus),
     signIn: (input) => ipcRenderer.invoke(channels.accountSignIn, input),
     signUp: (input) => ipcRenderer.invoke(channels.accountSignUp, input),
+    redeem: (input) => ipcRenderer.invoke(channels.accountRedeem, input),
     signOut: () => ipcRenderer.invoke(channels.accountSignOut),
     transfer: () => ipcRenderer.invoke(channels.accountTransfer),
     openAdmin: () => ipcRenderer.invoke(channels.accountOpenAdmin)

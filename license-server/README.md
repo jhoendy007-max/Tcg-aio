@@ -24,8 +24,10 @@ This stays a small program you run yourself. It does not need Cloudflare, Supaba
 | `TCGAIO_OWNER_SETUP_TOKEN` | Server, until the password is set | A long random string you choose. The first boot stores a hash of it. |
 | `TCGAIO_OWNER_PASSWORD` | Server, first boot or `set-password` only | Password for `jhoendy007@gmail.com`, at least 8 characters. Remove it from the environment after it is saved. |
 | `EXPO_ACCESS_TOKEN` | Server, optional | Expo access token. Without it, alerts are stored and push is skipped. |
+| `TCGAIO_ADMIN_UPLOAD_TOKEN` | Server and GitHub Actions secret, same name | Long random string. Tag builds upload the admin APK with it. If the GitHub secret is missing, the build skips the upload and still succeeds. |
+| `TCGAIO_ADMIN_APK_DIR` | Server, optional | Folder for the uploaded admin APK. Defaults to the folder that holds the SQLite file. |
 
-Tables are created with `CREATE TABLE IF NOT EXISTS` the first time the server starts. You do not run a separate migration.
+Tables are created with `CREATE TABLE IF NOT EXISTS`. On startup the server also adds any missing account columns (`created_at`, `account_status`, `payment_method`, `paid`). Restart the process after updating the code. That keeps the existing owner row, password, and license. You do not run a separate migration.
 
 Login, claim, and admin login are limited to about 8 tries per 10 minutes per client IP. The limit is in memory and resets when the process restarts. Caddy on this machine connects from `127.0.0.1` and sends `X-Forwarded-For`. The server uses the last address in that header, which is the visitor Caddy actually saw, so one person's failures do not lock everyone else. The same address is stored on failed-login rows. A connection that is not from loopback ignores `X-Forwarded-For` unless `TRUST_PROXY=1`.
 
@@ -37,7 +39,11 @@ Keep `TCGAIO_OWNER_SETUP_TOKEN` the same until the password is saved. If you cha
 
 ## Push
 
-Checkout alerts are off until you turn them on. Other alerts default to on: claimed, foreign PC, failed logins, expiring, revoked, suspended, and server errors.
+Checkout alerts are off until you turn them on. Other alerts default to on: new signup, claimed, foreign PC, failed logins, expiring, revoked, suspended, and server errors.
+
+A customer can create an account with email and password and no license key. The account stays pending, and the desktop app shows a waiting screen that checks itself. The PC is bound on the first sign-in after a license is linked. Gift keys are still created on their own, then redeemed in the account. The owner can also generate a key and link it to a pending account in one step.
+
+The admin Android app checks `GET /v1/admin/app` with the owner session and downloads `GET /v1/admin/app/download` when a newer versionCode is on the server. The APK is uploaded with `POST /v1/admin/app` and `Authorization: Bearer $TCGAIO_ADMIN_UPLOAD_TOKEN`. It is not attached to the public GitHub release.
 
 The admin Android app registers an Expo push token. The server sends it to `https://exp.host/--/api/v2/push/send` when `EXPO_ACCESS_TOKEN` is set.
 

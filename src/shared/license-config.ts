@@ -1,6 +1,9 @@
-/** Build-time license server. Empty until the owner sets TCGAIO_LICENSE_URL and rebuilds. */
-export function licenseServerUrl(): string {
-  return (process.env.TCGAIO_LICENSE_URL ?? "").trim().replace(/\/$/, "")
+import { DEFAULT_LICENSE_SERVER_URL } from "./types"
+
+/** Saved address, then the build-time address, then the public license server. */
+export function licenseServerUrl(saved?: string): string {
+  const chosen = (saved ?? "").trim() || (process.env.TCGAIO_LICENSE_URL ?? "").trim() || DEFAULT_LICENSE_SERVER_URL
+  return chosen.replace(/\/$/, "")
 }
 
 /** Build-time Ed25519 public key. Empty means no grant can verify. */

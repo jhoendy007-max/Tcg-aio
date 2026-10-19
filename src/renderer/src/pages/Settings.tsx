@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { healthText } from "../../../shared/checkout-health"
 import { consistencyText } from "../../../shared/consistency"
 import { dropOpsText } from "../../../shared/drop-ops"
-import { DEFAULT_SETTINGS, type AccountView, type Settings, type SettingsPayload, type UpdateStatus } from "../../../shared/types"
+import { DEFAULT_LICENSE_SERVER_URL, DEFAULT_SETTINGS, type AccountView, type Settings, type SettingsPayload, type UpdateStatus } from "../../../shared/types"
 import { updateStatusText } from "../../../shared/update-status"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { MailSettings } from "./MailSettings"
@@ -27,7 +27,7 @@ export function SettingsPage() {
     void unwrap(window.aio.settings.get())
       .then((next) => {
         setPayload(next)
-        setForm(next.settings)
+        setForm({ ...next.settings, licenseServerUrl: next.settings.licenseServerUrl || DEFAULT_LICENSE_SERVER_URL })
       })
       .catch((err) => setError(errorText(err)))
     void unwrap(window.aio.updates.get()).then((status) => { setHasToken(status.hasToken); setUpdate(status) }).catch(() => undefined)
@@ -110,6 +110,16 @@ export function SettingsPage() {
           {account.role === "owner" ? <p className="hint">Owner debug: this signed-in role comes from the license server, not from the email typed on this PC.</p> : null}
         </div>
       ) : null}
+      <div className="card stack">
+        <h2>License server</h2>
+        <Field label="Address">
+          <TextInput value={form.licenseServerUrl || DEFAULT_LICENSE_SERVER_URL} autoComplete="off" onChange={(event) => setForm({ ...form, licenseServerUrl: event.target.value })} />
+        </Field>
+        <p className="hint">The session stays on this PC. The address starts at {DEFAULT_LICENSE_SERVER_URL} and can be changed.</p>
+        <div className="actions">
+          <button type="button" onClick={() => void unwrap(window.aio.settings.save({ ...form, licenseServerUrl: form.licenseServerUrl.trim() || DEFAULT_LICENSE_SERVER_URL })).then((next) => { setPayload(next); setForm({ ...next.settings, licenseServerUrl: next.settings.licenseServerUrl || DEFAULT_LICENSE_SERVER_URL }); setMessage("License server saved.") }).catch((err) => setError(errorText(err)))}>Save server</button>
+        </div>
+      </div>
       {payload ? <div className="card security">{payload.security.description}</div> : null}
       <form className="card form-grid" onSubmit={save}>
         <div className="span-2">

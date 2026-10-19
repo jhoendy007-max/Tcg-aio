@@ -1,5 +1,7 @@
 import { createHash, createPrivateKey, createPublicKey, randomBytes, timingSafeEqual } from "node:crypto"
+import { createReadStream, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { createServer, type IncomingMessage } from "node:http"
+import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { argon2id } from "@noble/hashes/argon2"
 import {
@@ -12,7 +14,7 @@ import {
 } from "./proof"
 
 export const OWNER_EMAIL = "jhoendy007@gmail.com"
-export const ALERT_TYPES = ["claimed", "foreign_pc", "failed_logins", "expiring", "revoked", "suspended", "server_error", "checkout"] as const
+export const ALERT_TYPES = ["signup", "claimed", "foreign_pc", "failed_logins", "expiring", "revoked", "suspended", "server_error", "checkout"] as const
 export type AlertType = (typeof ALERT_TYPES)[number]
 
 const ARGON = { t: 2, m: 8192, p: 1, dkLen: 32 }
@@ -31,11 +33,15 @@ export interface LicenseApiOptions {
   push?: (message: { title: string; body: string; type: AlertType }) => void
   ownerSetupToken?: string
   ownerPassword?: string
+  adminUploadToken?: string
+  adminApkDir?: string
 }
 
 export interface LicenseApi {
   publicKey: string
   handle(method: string, path: string, headers: Record<string, string | undefined>, raw: string, ip?: string): { status: number; body: string }
+  storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string }): { status: number; body: string }
+  adminDownload(headers: Record<string, string | undefined>): { status: number; body: string; file?: string; size?: number }
   close(): void
 }
 
@@ -51,7 +57,11 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       role TEXT NOT NULL,
       verified INTEGER NOT NULL,
       license_id TEXT,
-      setup_hash TEXT
+      setup_hash TEXT,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      account_status TEXT NOT NULL DEFAULT 'active',
+      payment_method TEXT NOT NULL DEFAULT 'Not configured',
+      paid INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS licenses (
       id TEXT PRIMARY KEY,
@@ -81,11 +91,13 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
     CREATE TABLE IF NOT EXISTS login_failures (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, ip TEXT NOT NULL, at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
   `)
+  migrateUsers(db)
   for (const type of ALERT_TYPES) {
     db.prepare("INSERT OR IGNORE INTO notifications (type, enabled) VALUES (?, ?)").run(type, type === "checkout" ? 0 : 1)
   }
   const identity = loadIdentity(db, options.privateKey)
   ensureOwner(db, options)
+  const apkDir = options.adminApkDir?.trim() || dirname(options.dbPath)
   const rates = new Map<string, { count: number; resetAt: number }>()
 
   function handle(method: string, path: string, headers: Record<string, string | undefined>, raw: string, ip = "local"): { status: number; body: string } {
@@ -97,11 +109,13 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       const body = raw ? parseObject(raw) : {}
       if (requestHasSecret(body)) return json(400, { ok: false, error: "License data cannot include card, cookie, or session fields." })
       if (method === "POST" && route === "/v1/owner/setup") return setupOwner(db, body, now)
-      if ((method === "POST" && (route === "/v1/account/login" || route === "/v1/account/claim" || route === "/v1/admin/login")) && !takeRate(rates, `${route}:${ip}`, now())) {
+      if ((method === "POST" && (route === "/v1/account/login" || route === "/v1/account/claim" || route === "/v1/account/signup" || route === "/v1/admin/login")) && !takeRate(rates, `${route}:${ip}`, now())) {
         return json(429, { ok: false, error: "Too many attempts. Wait a few minutes and try again." })
       }
       if (method === "POST" && route === "/v1/admin/login") return adminLogin(db, body, now)
+      if (method === "POST" && route === "/v1/account/signup") return signup(db, body, now, () => notify(db, options.push, "signup", "New signup", `${normalizeEmail(text(body.email))} created an account and is waiting for a license.`))
       if (method === "POST" && route === "/v1/account/claim") return claim(db, identity.privateKey, body, now, () => notify(db, options.push, "claimed", "License claimed", `${text(body.email)} claimed a license.`))
+      if (method === "POST" && route === "/v1/account/redeem") return redeem(db, identity.privateKey, body, now, options.push)
       if (method === "POST" && route === "/v1/account/login") return login(db, identity.privateKey, body, ip, now, options.push)
       if (method === "POST" && route === "/v1/session/heartbeat") return heartbeat(db, identity.privateKey, body, now, options.push)
       if (method === "POST" && route === "/v1/session/transfer") return transfer(db, identity.privateKey, body, now)
@@ -109,7 +123,14 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       const admin = adminUser(db, headers, now())
       if (!admin) return json(401, { ok: false, error: "Sign in to the admin desk again." })
       if (method === "GET" && route === "/v1/admin/overview") return json(200, { ok: true, ...overview(db, url.searchParams.get("q") ?? "", now) })
+      if (method === "GET" && route === "/v1/admin/users") return json(200, { ok: true, ...listUsers(db, url.searchParams.get("q") ?? "", url.searchParams.get("status") ?? "") })
+      if (method === "GET" && route === "/v1/admin/app") {
+        const release = adminRelease(db)
+        return json(200, { ok: true, version: release.version, versionCode: release.versionCode, size: release.size, available: release.available })
+      }
       if (method === "POST" && route === "/v1/admin/licenses") return createLicense(db, body, now)
+      const userMatch = /^\/v1\/admin\/users\/([^/]+)\/(license|paid|payment|suspend|unsuspend|reset)$/.exec(route)
+      if (method === "POST" && userMatch) return userAction(db, userMatch[1], userMatch[2], body, now, options.push)
       const licenseMatch = /^\/v1\/admin\/licenses\/([^/]+)\/(access|reset|suspend|revoke)$/.exec(route)
       if (method === "POST" && licenseMatch) return licenseAction(db, licenseMatch[1], licenseMatch[2], options.push)
       if (method === "GET" && route === "/v1/admin/notifications") return json(200, { ok: true, notifications: notificationMap(db) })
@@ -123,9 +144,39 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
     }
   }
 
+  function storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string }): { status: number; body: string } {
+    const configured = (options.adminUploadToken ?? process.env.TCGAIO_ADMIN_UPLOAD_TOKEN ?? "").trim()
+    if (!configured) return json(404, { ok: false, error: "Admin APK upload is not configured." })
+    const presented = input.authorization.replace(/^Bearer\s+/i, "").trim()
+    if (!presented || !safeEqual(sha(presented), sha(configured))) return json(401, { ok: false, error: "The upload token was not accepted." })
+    const version = input.version.trim()
+    if (!/^\d+\.\d+\.\d+/.test(version)) return json(400, { ok: false, error: "The admin app version is missing." })
+    if (!Number.isInteger(input.versionCode) || input.versionCode < 1) return json(400, { ok: false, error: "The admin app version code is missing." })
+    if (input.bytes.length < 64 || input.bytes.length > 80_000_000 || input.bytes[0] !== 0x50 || input.bytes[1] !== 0x4b) {
+      return json(400, { ok: false, error: "Upload the admin APK file." })
+    }
+    mkdirSync(apkDir, { recursive: true })
+    const file = join(apkDir, "tcgaio-admin.apk")
+    writeFileSync(file, input.bytes)
+    setMeta(db, "adminApkVersion", version)
+    setMeta(db, "adminApkVersionCode", String(input.versionCode))
+    setMeta(db, "adminApkFile", file)
+    setMeta(db, "adminApkSize", String(input.bytes.length))
+    return json(200, { ok: true, version, versionCode: input.versionCode, size: input.bytes.length })
+  }
+
+  function adminDownload(headers: Record<string, string | undefined>): { status: number; body: string; file?: string; size?: number } {
+    if (!adminUser(db, headers, now())) return { status: 401, body: JSON.stringify({ ok: false, error: "Sign in to the admin desk again." }) }
+    const release = adminRelease(db)
+    if (!release.available || !release.file) return { status: 404, body: JSON.stringify({ ok: false, error: "No admin update has been uploaded." }) }
+    return { status: 200, body: "", file: release.file, size: release.size }
+  }
+
   return {
     publicKey: identity.publicKey,
     handle,
+    storeAdminApk,
+    adminDownload,
     close: () => db.close()
   }
 }
@@ -134,21 +185,47 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; h
   const api = openLicenseApi(options)
   const bindHost = options.host?.trim() || "127.0.0.1"
   const server = createServer((req, res) => {
+    const path = req.url ?? "/"
+    const route = path.split("?")[0].replace(/\/$/, "") || "/"
+    const upload = (req.method ?? "GET") === "POST" && route === "/v1/admin/app"
     const chunks: Buffer[] = []
     req.on("data", (chunk: Buffer) => {
       chunks.push(chunk)
-      if (chunks.reduce((sum, item) => sum + item.length, 0) > 20_000) req.destroy()
+      if (chunks.reduce((sum, item) => sum + item.length, 0) > (upload ? 80_000_000 : 20_000)) req.destroy()
     })
     req.on("end", () => {
-      const path = req.url ?? "/"
       if ((req.method ?? "GET") === "GET" && (path === "/admin" || path.startsWith("/admin?"))) {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" })
         res.end(options.adminHtml)
         return
       }
+      const headers = headersOf(req)
+      if ((req.method ?? "GET") === "GET" && route === "/v1/admin/app/download") {
+        const download = api.adminDownload(headers)
+        if (download.file) {
+          res.writeHead(200, {
+            "content-type": "application/vnd.android.package-archive",
+            "content-disposition": "attachment; filename=\"TCGAIO-Admin.apk\"",
+            "content-length": download.size ?? 0
+          })
+          createReadStream(download.file).pipe(res)
+          return
+        }
+        res.writeHead(download.status, { "content-type": "application/json" })
+        res.end(download.body)
+        return
+      }
+      if (upload) {
+        const version = text(headers["x-tcgaio-version"])
+        const versionCode = Number(headers["x-tcgaio-version-code"])
+        const result = api.storeAdminApk({ version, versionCode, bytes: Buffer.concat(chunks), authorization: headers.authorization ?? "" })
+        res.writeHead(result.status, { "content-type": "application/json" })
+        res.end(result.body)
+        return
+      }
       const forwarded = req.headers["x-forwarded-for"]
       const ip = clientAddress(req.socket.remoteAddress, Array.isArray(forwarded) ? forwarded[0] : forwarded, options.trustProxy === true)
-      const result = api.handle(req.method ?? "GET", path, headersOf(req), Buffer.concat(chunks).toString("utf8"), ip)
+      const result = api.handle(req.method ?? "GET", path, headers, Buffer.concat(chunks).toString("utf8"), ip)
       const contentType = result.body.startsWith("<") ? "text/html; charset=utf-8" : "application/json"
       res.writeHead(result.status, { "content-type": contentType })
       res.end(result.body)
@@ -219,6 +296,19 @@ function publicFromPrivate(privateKey: string): string {
   return createPublicKey(createPrivateKey({ key: Buffer.from(privateKey, "base64"), format: "der", type: "pkcs8" })).export({ type: "spki", format: "der" }).toString("base64")
 }
 
+function migrateUsers(db: DatabaseSync): void {
+  ensureColumn(db, "users", "created_at", "created_at INTEGER NOT NULL DEFAULT 0")
+  ensureColumn(db, "users", "account_status", "account_status TEXT NOT NULL DEFAULT 'active'")
+  ensureColumn(db, "users", "payment_method", "payment_method TEXT NOT NULL DEFAULT 'Not configured'")
+  ensureColumn(db, "users", "paid", "paid INTEGER NOT NULL DEFAULT 0")
+  db.prepare("UPDATE users SET account_status = 'pending' WHERE license_id IS NULL AND role != 'owner' AND account_status = 'active'").run()
+}
+
+function ensureColumn(db: DatabaseSync, table: string, name: string, definition: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  if (!cols.some((col) => col.name === name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`)
+}
+
 function ensureOwner(db: DatabaseSync, options: LicenseApiOptions): void {
   let owner = db.prepare("SELECT id, password_hash, setup_hash FROM users WHERE email = ?").get(OWNER_EMAIL) as { id: string; password_hash: string | null; setup_hash: string | null } | undefined
   if (!owner) {
@@ -254,6 +344,18 @@ function setupOwner(db: DatabaseSync, body: Record<string, unknown>, now: () => 
   }
 }
 
+function signup(db: DatabaseSync, body: Record<string, unknown>, now: () => number, onSignup: () => void): { status: number; body: string } {
+  const email = normalizeEmail(text(body.email))
+  const password = text(body.password)
+  if (!email.includes("@") || password.length < 8) return json(400, { ok: false, error: "Enter your email and a password of at least 8 characters." })
+  if (email === OWNER_EMAIL) return json(400, { ok: false, error: "This email is reserved." })
+  if (db.prepare("SELECT id FROM users WHERE email = ?").get(email)) return json(400, { ok: false, error: "That email already has an account. Sign in instead." })
+  const userId = randomId()
+  db.prepare("INSERT INTO users (id, email, password_hash, role, verified, license_id, setup_hash, created_at, account_status, payment_method, paid) VALUES (?, ?, ?, 'user', 1, NULL, NULL, ?, 'pending', 'Not configured', 0)").run(userId, email, hashPassword(password), now())
+  onSignup()
+  return issuePending(db, userId, now)
+}
+
 function claim(db: DatabaseSync, privateKey: string, body: Record<string, unknown>, now: () => number, onClaim: () => void): { status: number; body: string } {
   const email = normalizeEmail(text(body.email))
   const password = text(body.password)
@@ -272,7 +374,7 @@ function claim(db: DatabaseSync, privateKey: string, body: Record<string, unknow
   if (license.user_id) return json(400, { ok: false, error: "That license key was already claimed." })
   if (license.expires_at !== null && license.expires_at <= now()) return json(400, { ok: false, error: "This license key has expired." })
   const userId = randomId()
-  db.prepare("INSERT INTO users (id, email, password_hash, role, verified, license_id, setup_hash) VALUES (?, ?, ?, 'user', 1, ?, NULL)").run(userId, email, hashPassword(password), license.id)
+  db.prepare("INSERT INTO users (id, email, password_hash, role, verified, license_id, setup_hash, created_at, account_status, payment_method, paid) VALUES (?, ?, ?, 'user', 1, ?, NULL, ?, 'active', 'Not configured', 0)").run(userId, email, hashPassword(password), license.id, now())
   db.prepare("UPDATE licenses SET user_id = ?, fingerprint = ?, devices = ?, last_seen = ?, status = 'active' WHERE id = ?").run(userId, fingerprint, JSON.stringify([fingerprint]), now(), license.id)
   onClaim()
   return issueSession(db, privateKey, userId, fingerprint, now)
@@ -287,6 +389,11 @@ function login(db: DatabaseSync, privateKey: string, body: Record<string, unknow
     noteFailure(db, email, ip, now, push)
     return json(401, { ok: false, error: "That email and password did not match." })
   }
+  if (user.account_status === "suspended") return json(403, { ok: false, error: "This account is suspended." })
+  const license = licenseFor(db, user)
+  if (license?.status === "suspended") return json(403, { ok: false, error: "This license is suspended." })
+  if (license?.status === "revoked") return json(403, { ok: false, error: "This license was revoked." })
+  if (!readyLicense(license)) return issuePending(db, user.id, now)
   return bindAndIssue(db, privateKey, user, fingerprint, now, push)
 }
 
@@ -306,13 +413,45 @@ function heartbeat(db: DatabaseSync, privateKey: string, body: Record<string, un
   const session = sessionByToken(db, text(body.token), now())
   if (!session || session.kind !== "user") return json(401, { ok: false, error: "Sign in again." })
   const fingerprint = text(body.fingerprint)
-  if (session.fingerprint !== fingerprint) {
+  if (session.fingerprint && session.fingerprint !== fingerprint) {
     notify(db, push, "foreign_pc", "Different PC", "A signed-in session was used from a different PC.")
     return json(403, { ok: false, error: "This license is already active on another PC" })
   }
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id) as unknown as UserRow
+  if (user.account_status === "suspended") return json(403, { ok: false, error: "This account is suspended." })
+  const license = licenseFor(db, user)
+  if (!readyLicense(license)) {
+    if (license?.status === "suspended") return json(403, { ok: false, error: "This license is suspended." })
+    if (license?.status === "revoked") return json(403, { ok: false, error: "This license was revoked." })
+    return issuePending(db, user.id, now, text(body.token))
+  }
   sweepExpiry(db, now, push)
-  return bindAndIssue(db, privateKey, user, fingerprint, now, push, true)
+  return bindAndIssue(db, privateKey, user, fingerprint, now, push, Boolean(license?.fingerprint))
+}
+
+function redeem(db: DatabaseSync, privateKey: string, body: Record<string, unknown>, now: () => number, push?: LicenseApiOptions["push"]): { status: number; body: string } {
+  const session = sessionByToken(db, text(body.token), now())
+  if (!session || session.kind !== "user") return json(401, { ok: false, error: "Sign in again." })
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id) as UserRow | undefined
+  if (!user) return json(401, { ok: false, error: "Sign in again." })
+  if (user.role === "owner") return json(400, { ok: false, error: "The owner account already has a license." })
+  if (user.account_status === "suspended") return json(403, { ok: false, error: "This account is suspended." })
+  if (user.license_id) return json(400, { ok: false, error: "This account already has a license." })
+  const key = text(body.key)
+  const fingerprint = text(body.fingerprint)
+  if (key.length < 12) return json(400, { ok: false, error: "Enter the gift key." })
+  const license = db.prepare("SELECT * FROM licenses WHERE key_hash = ?").get(sha(key)) as LicenseRow | undefined
+  if (!license) return json(400, { ok: false, error: "That license key was not found." })
+  if (license.user_id) return json(400, { ok: false, error: "That license key was already claimed." })
+  if (license.status === "draft") return json(400, { ok: false, error: "Give access to this license before it can be used." })
+  if (license.status === "suspended") return json(400, { ok: false, error: "This license is suspended." })
+  if (license.status === "revoked") return json(400, { ok: false, error: "This license was revoked." })
+  if (license.expires_at !== null && license.expires_at <= now()) return json(400, { ok: false, error: "This license key has expired." })
+  db.prepare("UPDATE licenses SET user_id = ? WHERE id = ?").run(user.id, license.id)
+  db.prepare("UPDATE users SET license_id = ?, account_status = 'active' WHERE id = ?").run(license.id, user.id)
+  notify(db, push, "claimed", "License claimed", `${user.email} redeemed a gift key.`)
+  const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id) as unknown as UserRow
+  return bindAndIssue(db, privateKey, updated, fingerprint, now, push)
 }
 
 function transfer(db: DatabaseSync, privateKey: string, body: Record<string, unknown>, now: () => number): { status: number; body: string } {
@@ -341,6 +480,23 @@ function checkout(db: DatabaseSync, body: Record<string, unknown>, now: () => nu
   const enabled = db.prepare("SELECT enabled FROM notifications WHERE type = 'checkout'").get() as { enabled: number }
   if (enabled?.enabled) notify(db, push, "checkout", "Checkout succeeded", `${store} ${sku}`)
   return json(200, { ok: true })
+}
+
+function issuePending(db: DatabaseSync, userId: string, now: () => number, existingToken = ""): { status: number; body: string } {
+  const user = db.prepare("SELECT email FROM users WHERE id = ?").get(userId) as { email: string } | undefined
+  if (!user) return json(400, { ok: false, error: "That account was not found." })
+  const current = existingToken ? sessionByToken(db, existingToken, now()) : null
+  if (current && current.user_id === userId && current.kind === "user") {
+    return json(200, { ok: true, pending: true, token: existingToken, email: user.email, status: "pending" })
+  }
+  const token = randomBytes(32).toString("base64url")
+  db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user'").run(userId)
+  db.prepare("INSERT INTO sessions (token_hash, user_id, fingerprint, expires_at, kind) VALUES (?, ?, '', ?, 'user')").run(sha(token), userId, now() + SESSION_MS)
+  return json(200, { ok: true, pending: true, token, email: user.email, status: "pending" })
+}
+
+function readyLicense(license: LicenseRow | undefined): boolean {
+  return license?.status === "active"
 }
 
 function createLicense(db: DatabaseSync, body: Record<string, unknown>, now: () => number): { status: number; body: string } {
@@ -377,7 +533,106 @@ function licenseAction(db: DatabaseSync, id: string, action: string, push?: Lice
   return json(200, { ok: true, id, status: action === "access" ? "active" : action === "reset" ? license.status : action === "suspend" ? "suspended" : "revoked" })
 }
 
-function overview(db: DatabaseSync, query: string, now: () => number): { licenses: unknown[]; users: unknown[] } {
+function userAction(db: DatabaseSync, id: string, action: string, body: Record<string, unknown>, now: () => number, push?: LicenseApiOptions["push"]): { status: number; body: string } {
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined
+  if (!user) return json(404, { ok: false, error: "That account was not found." })
+  if (user.role === "owner" && action !== "reset") return json(403, { ok: false, error: "The owner account stays active." })
+  if (action === "license") return linkGeneratedLicense(db, user, body, now)
+  if (action === "paid") {
+    if (typeof body.paid !== "boolean") return json(400, { ok: false, error: "Say whether this account is paid." })
+    db.prepare("UPDATE users SET paid = ? WHERE id = ?").run(body.paid ? 1 : 0, id)
+    return json(200, { ok: true, id, paid: body.paid })
+  }
+  if (action === "payment") {
+    const paymentMethod = text(body.paymentMethod).slice(0, 80) || "Not configured"
+    db.prepare("UPDATE users SET payment_method = ? WHERE id = ?").run(paymentMethod, id)
+    return json(200, { ok: true, id, paymentMethod })
+  }
+  if (action === "suspend") {
+    db.prepare("UPDATE users SET account_status = 'suspended' WHERE id = ?").run(id)
+    if (user.license_id) db.prepare("UPDATE licenses SET status = 'suspended' WHERE id = ? AND status != 'revoked'").run(user.license_id)
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user'").run(id)
+    notify(db, push, "suspended", "Account suspended", user.email)
+    return json(200, { ok: true, id, status: "suspended" })
+  }
+  if (action === "unsuspend") {
+    const license = licenseFor(db, user)
+    const next = license && license.status !== "revoked" ? "active" : "pending"
+    db.prepare("UPDATE users SET account_status = ? WHERE id = ?").run(next, id)
+    if (license?.status === "suspended") db.prepare("UPDATE licenses SET status = 'active' WHERE id = ?").run(license.id)
+    return json(200, { ok: true, id, status: next })
+  }
+  if (!user.license_id) return json(400, { ok: false, error: "This account has no license to reset." })
+  return licenseAction(db, user.license_id, "reset", push)
+}
+
+function linkGeneratedLicense(db: DatabaseSync, user: UserRow, body: Record<string, unknown>, now: () => number): { status: number; body: string } {
+  if (user.license_id) return json(400, { ok: false, error: "This account already has a license." })
+  const note = text(body.note).slice(0, 80) || user.email
+  const plan = text(body.plan).slice(0, 40) || "standard"
+  const expiresAt = body.expiresAt === undefined || body.expiresAt === null || body.expiresAt === "" ? now() + YEAR_MS : Number(body.expiresAt)
+  if (!Number.isFinite(expiresAt) || expiresAt < now()) return json(400, { ok: false, error: "Expiry has to be a future time." })
+  const id = randomId()
+  const key = `TCGAIO-${randomBytes(16).toString("hex")}`
+  const suspended = user.account_status === "suspended"
+  db.prepare("INSERT INTO licenses (id, key_hash, note, plan, expires_at, status, fingerprint, devices, last_seen, user_id, last_transfer_at, device_limit, last_expiry_alert) VALUES (?, ?, ?, ?, ?, ?, NULL, '[]', NULL, ?, NULL, ?, NULL)").run(id, sha(key), note, plan, expiresAt, suspended ? "suspended" : "active", user.id, USER_DEVICE_LIMIT)
+  if (!suspended) db.prepare("UPDATE users SET license_id = ?, account_status = 'active' WHERE id = ?").run(id, user.id)
+  else db.prepare("UPDATE users SET license_id = ? WHERE id = ?").run(id, user.id)
+  return json(200, { ok: true, id, key, email: user.email, status: suspended ? "suspended" : "active", fingerprint: "" })
+}
+
+function listUsers(db: DatabaseSync, query: string, status: string): { users: unknown[]; pendingCount: number } {
+  const needle = query.trim().toLowerCase()
+  const wanted = status.trim().toLowerCase()
+  const rows = db.prepare(`SELECT users.id, users.email, users.role, users.created_at, users.account_status, users.payment_method, users.paid, users.license_id,
+      licenses.status AS license_status, licenses.fingerprint, licenses.last_seen, licenses.plan
+    FROM users LEFT JOIN licenses ON licenses.id = users.license_id
+    ORDER BY CASE users.account_status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 ELSE 2 END, users.created_at DESC`).all() as unknown as UserListRow[]
+  const pendingCount = rows.filter((row) => row.role !== "owner" && row.account_status === "pending").length
+  const users = rows.filter((row) => {
+    if (wanted && row.account_status !== wanted) return false
+    if (!needle) return true
+    return `${row.email} ${row.payment_method} ${row.account_status}`.toLowerCase().includes(needle)
+  }).map(publicUser)
+  return { users, pendingCount }
+}
+
+function publicUser(row: UserListRow) {
+  return {
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    createdAt: row.created_at,
+    status: row.account_status,
+    paymentMethod: row.payment_method || "Not configured",
+    paid: row.paid === 1,
+    licenseId: row.license_id ?? "",
+    licenseStatus: row.license_status ?? "",
+    plan: row.plan ?? "",
+    fingerprint: row.fingerprint ? row.fingerprint.slice(0, 12) : "",
+    lastSeen: row.last_seen
+  }
+}
+
+function adminRelease(db: DatabaseSync): { version: string; versionCode: number; size: number; available: boolean; file?: string } {
+  const version = meta(db, "adminApkVersion")
+  const versionCode = Number(meta(db, "adminApkVersionCode") || "0")
+  const file = meta(db, "adminApkFile")
+  const size = Number(meta(db, "adminApkSize") || "0")
+  const available = Boolean(version && file && existsSync(file))
+  return { version, versionCode: Number.isFinite(versionCode) ? versionCode : 0, size: available ? size : 0, available, file: available ? file : undefined }
+}
+
+function setMeta(db: DatabaseSync, key: string, value: string): void {
+  db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value)
+}
+
+function meta(db: DatabaseSync, key: string): string {
+  const row = db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as { value: string } | undefined
+  return row?.value ?? ""
+}
+
+function overview(db: DatabaseSync, query: string, now: () => number): { licenses: unknown[]; users: unknown[]; pendingCount: number } {
   sweepExpiry(db, now)
   const needle = query.trim().toLowerCase()
   const licenses = (db.prepare("SELECT * FROM licenses ORDER BY rowid DESC").all() as unknown as LicenseRow[]).filter((row) => {
@@ -398,8 +653,8 @@ function overview(db: DatabaseSync, query: string, now: () => number): { license
       deviceLimit: row.device_limit
     }
   })
-  const users = (db.prepare("SELECT id, email, role, verified, license_id FROM users").all() as Array<{ id: string; email: string; role: string; verified: number; license_id: string | null }>).filter((row) => !needle || row.email.includes(needle))
-  return { licenses, users }
+  const listed = listUsers(db, needle, "")
+  return { licenses, users: listed.users, pendingCount: listed.pendingCount }
 }
 
 function bindAndIssue(db: DatabaseSync, privateKey: string, user: UserRow, fingerprint: string, now: () => number, push?: LicenseApiOptions["push"], sameDevice = false): { status: number; body: string } {
@@ -628,6 +883,25 @@ interface UserRow {
   role: string
   verified: number
   license_id: string | null
+  account_status: string
+  created_at: number
+  payment_method: string
+  paid: number
+}
+
+interface UserListRow {
+  id: string
+  email: string
+  role: string
+  created_at: number
+  account_status: string
+  payment_method: string
+  paid: number
+  license_id: string | null
+  license_status: string | null
+  fingerprint: string | null
+  last_seen: number | null
+  plan: string | null
 }
 
 interface LicenseRow {

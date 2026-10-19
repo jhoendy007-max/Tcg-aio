@@ -204,3 +204,9 @@ jobs:
           name: TCGAIO-Admin-APK
           path: release/TCGAIO-Admin-*.apk
           if-no-files-found: error
+      - name: Upload the admin APK to the license server
+        if: github.ref_type == 'tag'
+        env:
+          TCGAIO_LICENSE_URL: ${{ secrets.TCGAIO_LICENSE_URL }}
+          TCGAIO_ADMIN_UPLOAD_TOKEN: ${{ secrets.TCGAIO_ADMIN_UPLOAD_TOKEN }}
+        run: bash admin-mobile/scripts/upload-admin-apk.sh

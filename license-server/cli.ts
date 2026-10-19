@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createLicenseIdentity } from "./proof"
 import { listenLicenseApi, setOwnerPassword } from "./server"
@@ -37,7 +37,9 @@ if (command === "keygen") {
     adminHtml,
     privateKey: process.env.TCGAIO_LICENSE_PRIVATE_KEY,
     ownerSetupToken: process.env.TCGAIO_OWNER_SETUP_TOKEN,
-    ownerPassword: process.env.TCGAIO_OWNER_PASSWORD
+    ownerPassword: process.env.TCGAIO_OWNER_PASSWORD,
+    adminUploadToken: process.env.TCGAIO_ADMIN_UPLOAD_TOKEN,
+    adminApkDir: process.env.TCGAIO_ADMIN_APK_DIR || resolve(dirname(dbPath))
   })
   console.log(`License server listening on ${started.url}`)
   console.log(`Admin desk: ${started.url}/admin`)
