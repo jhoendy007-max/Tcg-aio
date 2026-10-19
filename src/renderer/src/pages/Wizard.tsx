@@ -15,7 +15,6 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
   const [stores, setStores] = useState<StoreInfo[]>([])
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
-  const [licenseKey, setLicenseKey] = useState("")
   const [profileId, setProfileId] = useState("")
   const [accountId, setAccountId] = useState("")
   const [accountStore, setAccountStore] = useState<StoreInfo["id"]>("target")
@@ -52,20 +51,6 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
     try { await finish() } catch (err) { setError(errorText(err)) } finally { setBusy(false) }
   }
 
-  async function saveLicense(event: React.FormEvent) {
-    event.preventDefault()
-    setBusy(true)
-    setError("")
-    try {
-      if (licenseKey.trim()) await unwrap(window.aio.license.activate(licenseKey.trim()))
-      setStep(1)
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function saveProfile(event: React.FormEvent) {
     event.preventDefault()
     const ship = profile.shipping
@@ -76,7 +61,7 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
     try {
       const saved = await unwrap(window.aio.profiles.save({ ...profile, billing: profile.shipping, cardAction: "replace" }))
       setProfileId(saved.id)
-      setStep(2)
+      setStep(1)
     } catch (err) {
       setError(errorText(err))
     } finally {
@@ -102,7 +87,7 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
       }))
       setAccountId(saved.id)
       setAccountStore(saved.store)
-      setStep(3)
+      setStep(2)
     } catch (err) {
       setError(errorText(err))
     } finally {
@@ -138,7 +123,7 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
   }
 
   const ship = profile.shipping
-  const titles = { license: "stepLicense", profile: "stepProfile", account: "stepAccount", task: "stepTask" } as const
+  const titles = { profile: "stepProfile", account: "stepAccount", task: "stepTask" } as const
   return (
     <section className="page wizard">
       <header className="page-head">
@@ -152,18 +137,6 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
         {steps.map((label, index) => <li key={label} aria-current={index === step ? "step" : undefined} title={deskText(lang, titles[label])} />)}
       </ol>
       {error ? <Banner tone="error">{error}</Banner> : null}
-      {name === "license" ? (
-        <form className="card stack" onSubmit={saveLicense}>
-          <h2>{deskText(lang, "licenseTitle")}</h2>
-          <p className="hint">{deskText(lang, "licenseHint")}</p>
-          <Field label={deskText(lang, "licenseLabel")}>
-            <TextInput value={licenseKey} autoComplete="off" onChange={(event) => setLicenseKey(event.target.value)} />
-          </Field>
-          <div className="actions">
-            <button className="primary" type="submit" disabled={busy}>{deskText(lang, "wizardNext")}</button>
-          </div>
-        </form>
-      ) : null}
       {name === "profile" ? (
         <form className="card form-grid" onSubmit={saveProfile}>
           <div className="span-2"><h2>{deskText(lang, "profileTitle")}</h2><p className="hint">{deskText(lang, "profileHint")}</p></div>
@@ -181,7 +154,6 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
           <Field label={deskText(lang, "fieldYear")}><TextInput value={profile.expYear} onChange={(event) => setProfile({ ...profile, expYear: event.target.value })} placeholder="2030" required /></Field>
           <Field label={deskText(lang, "fieldCvv")}><TextInput value={profile.cvv} onChange={(event) => setProfile({ ...profile, cvv: event.target.value })} autoComplete="off" required /></Field>
           <div className="actions span-2">
-            <button type="button" onClick={() => setStep(0)}>{deskText(lang, "wizardBack")}</button>
             <button className="primary" type="submit" disabled={busy}>{deskText(lang, "wizardNext")}</button>
           </div>
         </form>
@@ -198,7 +170,7 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
           <Field label={deskText(lang, "fieldEmail")}><TextInput type="email" value={account.username} onChange={(event) => setAccount({ ...account, username: event.target.value })} required /></Field>
           <Field label={deskText(lang, "fieldPassword")}><TextInput type="password" autoComplete="new-password" value={account.password} onChange={(event) => setAccount({ ...account, password: event.target.value })} required /></Field>
           <div className="actions span-2">
-            <button type="button" onClick={() => setStep(1)}>{deskText(lang, "wizardBack")}</button>
+            <button type="button" onClick={() => setStep(0)}>{deskText(lang, "wizardBack")}</button>
             <button className="primary" type="submit" disabled={busy}>{deskText(lang, "wizardNext")}</button>
           </div>
         </form>
@@ -211,7 +183,7 @@ export function Wizard({ lang, onDone }: { lang: MailLang; onDone: (settings: Se
             <TextInput value={sku} onChange={(event) => setSku(event.target.value)} placeholder="https://..." />
           </Field>
           <div className="actions">
-            <button type="button" onClick={() => setStep(2)}>{deskText(lang, "wizardBack")}</button>
+            <button type="button" onClick={() => setStep(1)}>{deskText(lang, "wizardBack")}</button>
             <button className="primary" type="submit" disabled={busy}>{deskText(lang, "wizardNext")}</button>
           </div>
         </form>

@@ -516,6 +516,16 @@ export interface SettingsPayload {
   security: SecurityInfo
 }
 
+export interface AccountView {
+  signedIn: boolean
+  email: string
+  role: "owner" | "user" | ""
+  holder: string
+  plan: string
+  expiresAt: number | null
+  fingerprint: string
+}
+
 export interface LicenseView {
   machineId: string
   publicKey: string

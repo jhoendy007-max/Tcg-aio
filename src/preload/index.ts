@@ -176,14 +176,13 @@ const api: AioApi = {
     upload: (passphrase) => ipcRenderer.invoke(channels.backupUpload, passphrase),
     download: (passphrase) => ipcRenderer.invoke(channels.backupDownload, passphrase)
   },
-  license: {
-    get: () => ipcRenderer.invoke(channels.licenseGet),
-    generate: () => ipcRenderer.invoke(channels.licenseIdentity),
-    saveAdmin: (input) => ipcRenderer.invoke(channels.licenseAdmin, input),
-    mint: (input) => ipcRenderer.invoke(channels.licenseMint, input),
-    revoke: (id) => ipcRenderer.invoke(channels.licenseRevoke, id),
-    activate: (key) => ipcRenderer.invoke(channels.licenseActivate, key),
-    serve: (input) => ipcRenderer.invoke(channels.licenseServe, input)
+  account: {
+    status: () => ipcRenderer.invoke(channels.accountStatus),
+    signIn: (input) => ipcRenderer.invoke(channels.accountSignIn, input),
+    signUp: (input) => ipcRenderer.invoke(channels.accountSignUp, input),
+    signOut: () => ipcRenderer.invoke(channels.accountSignOut),
+    transfer: () => ipcRenderer.invoke(channels.accountTransfer),
+    openAdmin: () => ipcRenderer.invoke(channels.accountOpenAdmin)
   },
   vault: {
     list: () => ipcRenderer.invoke(channels.vaultList),

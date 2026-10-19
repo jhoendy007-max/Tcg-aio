@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "TCGAIO Admin",
+    "slug": "tcgaio-admin",
+    "version": "0.2.25",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.tcgaio.admin",
+      "versionCode": 225,
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
+    },
+    "plugins": [
+      "expo-local-authentication",
+      [
+        "expo-notifications",
+        {
+          "color": "#e0b15a"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+import type { Database } from "./database"
+import { AppError } from "../shared/errors"
+import { licensePublicKey, licenseServerUrl } from "../shared/license-config"
+import { readGrant } from "../shared/license-proof"
+import type { AccountView } from "../shared/types"
+
+export async function syncAccount(db: Database, fingerprint: string, path: string, body: Record<string, unknown>): Promise<AccountView> {
+  const base = licenseServerUrl()
+  if (!base) throw new AppError("This build is not connected to a license server yet.")
+  let response: Response
+  try {
+    response = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, fingerprint })
+    })
+  } catch {
+    db.refreshAccess(fingerprint)
+    throw new AppError("The license server could not be reached.")
+  }
+  const parsed = await response.json().catch(() => ({})) as Record<string, unknown>
+  if (!response.ok || parsed.ok !== true) {
+    const message = typeof parsed.error === "string" ? parsed.error : "Sign-in did not succeed."
+    if (response.status === 401 || response.status === 403) db.clearAccountSession()
+    else db.refreshAccess(fingerprint)
+    throw new AppError(message)
+  }
+  const token = typeof parsed.token === "string" ? parsed.token : ""
+  const envelope = typeof parsed.envelope === "string" ? parsed.envelope : ""
+  if (!token || !readGrant(envelope, licensePublicKey())) throw new AppError("The license server response could not be verified.")
+  return db.saveAccountSession({ token, envelope, fingerprint })
+}
+
+export async function heartbeatAccount(db: Database, fingerprint: string): Promise<AccountView> {
+  const token = db.sessionToken()
+  if (!token) {
+    db.refreshAccess(fingerprint)
+    return db.accountView()
+  }
+  try {
+    return await syncAccount(db, fingerprint, "/v1/session/heartbeat", { token })
+  } catch (err) {
+    db.refreshAccess(fingerprint)
+    if (!db.licenseAllows()) db.clearAccountSession()
+    throw err
+  }
+}
+
+export async function reportCheckout(db: Database, fingerprint: string, store: string, sku: string): Promise<void> {
+  const token = db.sessionToken()
+  const base = licenseServerUrl()
+  if (!token || !base || !store || !sku) return
+  try {
+    await fetch(`${base}/v1/session/checkout`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token, fingerprint, store, sku })
+    })
+  } catch {
+    // A missed checkout notice does not stop the desktop app.
+  }
+}

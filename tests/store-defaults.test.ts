@@ -103,7 +103,7 @@ describe("desk navigation and first-run copy", () => {
     expect(parseRoute("#logs")).toEqual({ section: "settings", tab: "logs" })
     expect(parseRoute("#settings/stores").tab).toBe("stores")
     expect(parseRoute("#nope").section).toBe("home")
-    expect(wizardSteps()).toEqual(["license", "profile", "account", "task"])
+    expect(wizardSteps()).toEqual(["profile", "account", "task"])
     expect(wizardIssues("profile", { email: "nope", phone: "12", card: "1", line1: "" }, "en").length).toBeGreaterThan(0)
     expect(wizardIssues("profile", { email: "nope", phone: "12", card: "1", line1: "" }, "es").join(" ")).toContain("correo")
     expect(wizardIssues("task", { sku: "A-1" }, "es")).toEqual([])

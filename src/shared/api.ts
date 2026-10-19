@@ -42,7 +42,7 @@ import type {
   ResaleQuery,
   ResaleQuote,
   ImapView,
-  LicenseView,
+  AccountView,
   ImapInput,
   MailboxInput,
   MailboxView,
@@ -202,14 +202,13 @@ export interface AioApi {
     upload: (passphrase: string) => Promise<Result<{ uploaded: true }>>
     download: (passphrase: string) => Promise<Result<{ restored: true }>>
   }
-  license: {
-    get: () => Promise<Result<LicenseView>>
-    generate: () => Promise<Result<LicenseView>>
-    saveAdmin: (input: { action: "keep" | "replace" | "clear"; token: string }) => Promise<Result<LicenseView>>
-    mint: (input: { holder: string; seats: number; expiresAt: number | null }) => Promise<Result<LicenseView & { key: string }>>
-    revoke: (id: string) => Promise<Result<LicenseView>>
-    activate: (key: string) => Promise<Result<LicenseView>>
-    serve: (input: { action: "start" | "stop"; port?: number }) => Promise<Result<{ url: string }>>
+  account: {
+    status: () => Promise<Result<AccountView>>
+    signIn: (input: { email: string; password: string }) => Promise<Result<AccountView>>
+    signUp: (input: { email: string; password: string; key: string }) => Promise<Result<AccountView>>
+    signOut: () => Promise<Result<AccountView>>
+    transfer: () => Promise<Result<AccountView>>
+    openAdmin: () => Promise<Result<{ opened: true }>>
   }
   vault: {
     list: () => Promise<Result<PublicVault[]>>

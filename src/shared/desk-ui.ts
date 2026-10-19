@@ -20,13 +20,16 @@ const TEXT = {
     wizardSkip: "Skip for now",
     wizardNext: "Continue",
     wizardBack: "Back",
-    stepLicense: "License",
     stepProfile: "Shipping profile",
     stepAccount: "Store account",
     stepTask: "First task",
-    licenseTitle: "Add your license",
-    licenseHint: "Paste the key you were given. You can skip this and add it later in Settings.",
-    licenseLabel: "License key",
+    signInTitle: "Sign in",
+    createTitle: "Create account",
+    signInHint: "Use the email and password for this PC.",
+    createHint: "Enter the license key you were given, plus an email and password. That claims the license for this PC.",
+    haveKey: "I have a license key",
+    haveAccount: "I already have an account",
+    fieldLicense: "License key",
     profileTitle: "Where should orders ship?",
     profileHint: "The card stays encrypted on this PC. The phone only sees the last four digits.",
     accountTitle: "Which store account should we use?",
@@ -125,13 +128,16 @@ const TEXT = {
     wizardSkip: "Omitir por ahora",
     wizardNext: "Continuar",
     wizardBack: "Atrás",
-    stepLicense: "Licencia",
     stepProfile: "Perfil de envío",
     stepAccount: "Cuenta de tienda",
     stepTask: "Primera tarea",
-    licenseTitle: "Añade tu licencia",
-    licenseHint: "Pega la clave que te dieron. Puedes omitir esto y añadirla luego en Ajustes.",
-    licenseLabel: "Clave de licencia",
+    signInTitle: "Entrar",
+    createTitle: "Crear cuenta",
+    signInHint: "Usa el correo y la contraseña de este PC.",
+    createHint: "Escribe la clave que te dieron, un correo y una contraseña. Eso reclama la licencia para este PC.",
+    haveKey: "Tengo una clave",
+    haveAccount: "Ya tengo cuenta",
+    fieldLicense: "Clave de licencia",
     profileTitle: "¿Adónde enviamos los pedidos?",
     profileHint: "La tarjeta queda cifrada en este PC. El teléfono solo ve los últimos cuatro dígitos.",
     accountTitle: "¿Qué cuenta de la tienda usamos?",
@@ -219,11 +225,11 @@ export function deskText(lang: MailLang, key: DeskTextKey): string {
   return TEXT[lang][key]
 }
 
-export function wizardSteps(): Array<"license" | "profile" | "account" | "task"> {
-  return ["license", "profile", "account", "task"]
+export function wizardSteps(): Array<"profile" | "account" | "task"> {
+  return ["profile", "account", "task"]
 }
 
-export function wizardIssues(step: "license" | "profile" | "account" | "task", input: {
+export function wizardIssues(step: "profile" | "account" | "task", input: {
   email?: string
   phone?: string
   card?: string

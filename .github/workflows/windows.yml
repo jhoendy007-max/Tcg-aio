@@ -29,6 +29,11 @@ jobs:
         run: |
           npm ci
           npm run typecheck
+      - name: Admin app typecheck
+        working-directory: admin-mobile
+        run: |
+          npm ci
+          npm run typecheck
       - name: Pack Session Sync
         run: node scripts/pack-extension.mjs
       - uses: actions/upload-artifact@v4
@@ -63,7 +68,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run dist:win
+      - name: Build the Windows installer
+        env:
+          TCGAIO_LICENSE_URL: ${{ secrets.TCGAIO_LICENSE_URL }}
+          TCGAIO_LICENSE_PUBLIC_KEY: ${{ secrets.TCGAIO_LICENSE_PUBLIC_KEY }}
+        run: npm run dist:win
       - uses: actions/upload-artifact@v4
         with:
           name: TCGAIO-Windows-Setup
@@ -143,3 +152,42 @@ jobs:
         run: |
           cp release/TCGAIO-Phone-0.2.1.apk release/TCGAIO-Phone-0.2.0.apk
           gh release upload v0.2.0-beta release/TCGAIO-Phone-0.2.0.apk --clobber
+
+  # The admin APK is a CI artifact only. This repo is public, so it is never attached to a GitHub release.
+  admin-android:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin-mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Accept Android SDK licenses
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          SM=$(find "$SDK/cmdline-tools" -type f -name sdkmanager | head -1)
+          test -n "$SM"
+          yes | "$SM" --sdk_root="$SDK" --licenses >/dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+      - run: npm ci
+        working-directory: admin-mobile
+      - name: Build the admin release APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TCGAIO_GENERATE_KEYSTORE: "1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash admin-mobile/scripts/assemble-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TCGAIO-Admin-APK
+          path: release/TCGAIO-Admin-*.apk
+          if-no-files-found: error

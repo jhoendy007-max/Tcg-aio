@@ -239,6 +239,8 @@ export interface PhoneSnapshot {
   clients?: PhoneClientRow[]
   ledger?: PhoneLedgerRow[]
   desk?: PhoneDeskSettings
+  /** True when this paired PC has a valid license. The phone does not use its own seat. */
+  licenseOk?: boolean
 }
 
 /** Challenge handoff for the paired phone. The cookie is only on this message. */

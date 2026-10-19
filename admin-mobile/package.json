@@ -1,0 +1,27 @@
+{
+  "name": "tcgaio-admin",
+  "version": "0.2.25",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "android:release": "bash scripts/assemble-release.sh",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "expo": "~58.0.13",
+    "expo-constants": "~58.0.0",
+    "expo-local-authentication": "~58.0.0",
+    "expo-notifications": "~58.1.5",
+    "expo-secure-store": "~58.0.2",
+    "expo-status-bar": "~58.0.3",
+    "react": "19.3.0",
+    "react-native": "0.88.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "babel-preset-expo": "~58.0.17",
+    "typescript": "~6.0.3"
+  }
+}

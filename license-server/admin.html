@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TCGAIO admin</title>
+  <style>
+    :root { color-scheme: dark; font-family: "Segoe UI", sans-serif; background: #0b0d12; color: #f2f5f8; }
+    body { margin: 0; padding: 24px; max-width: 980px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    p, small { color: #a8b3c7; }
+    button, input { font: inherit; color: inherit; border-radius: 8px; border: 1px solid #3c4658; background: #12151c; padding: 8px 12px; }
+    button.primary { background: #e0b15a; color: #1c1508; border-color: transparent; font-weight: 700; }
+    button.big { font-size: 18px; padding: 14px 18px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+    .card { border: 1px solid #232a36; border-radius: 10px; padding: 12px; margin: 10px 0; background: #12151c; }
+    .error { background: #3a1d1d; color: #ffd0d0; padding: 10px 12px; border-radius: 8px; }
+    .key { word-break: break-all; font-family: ui-monospace, monospace; }
+    label { display: flex; flex-direction: column; gap: 4px; min-width: 180px; }
+  </style>
+</head>
+<body>
+  <h1>TCGAIO admin</h1>
+  <p>Create a license, give access, and hand the key to the customer. No admin key is stored in this page.</p>
+  <div id="error"></div>
+  <section id="login">
+    <form id="login-form" class="card row">
+      <label>Email<input id="email" type="email" autocomplete="username" required /></label>
+      <label>Password<input id="password" type="password" autocomplete="current-password" required /></label>
+      <button class="primary" type="submit">Sign in</button>
+    </form>
+  </section>
+  <section id="desk" hidden>
+    <div class="row">
+      <button class="primary big" id="create" type="button">Create license</button>
+      <input id="search" placeholder="Search licenses or email" />
+    </div>
+    <form id="create-form" class="card" hidden>
+      <div class="row">
+        <label>Note<input id="note" placeholder="Customer name" /></label>
+        <label>Plan<input id="plan" value="standard" /></label>
+        <label>Expires in days<input id="days" type="number" min="1" value="365" /></label>
+        <button class="primary" type="submit">Create</button>
+      </div>
+      <p id="new-key" class="key"></p>
+      <button id="give" type="button" hidden>Give access</button>
+    </form>
+    <div id="list"></div>
+  </section>
+  <script>
+    const error = document.getElementById("error")
+    let token = sessionStorage.getItem("tcgaio-admin") || ""
+    let createdId = ""
+    const showError = (message) => { error.className = message ? "error" : ""; error.textContent = message || "" }
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        method: options.method || "GET",
+        headers: { "content-type": "application/json", ...(token ? { authorization: "Bearer " + token } : {}) },
+        body: options.body ? JSON.stringify(options.body) : undefined
+      })
+      const payload = await response.json()
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || "Request failed")
+      return payload
+    }
+    async function load() {
+      const query = document.getElementById("search").value.trim()
+      const data = await api("/v1/admin/overview?q=" + encodeURIComponent(query))
+      const list = document.getElementById("list")
+      list.textContent = ""
+      for (const row of data.licenses) {
+        const card = document.createElement("article")
+        card.className = "card"
+        const title = document.createElement("strong")
+        title.textContent = (row.note || "License") + " · " + row.status + (row.email ? " · " + row.email : "")
+        const meta = document.createElement("p")
+        meta.textContent = row.plan + " · PC " + (row.fingerprint || "not bound") + " · last seen " + (row.lastSeen ? new Date(row.lastSeen).toLocaleString() : "never")
+        const actions = document.createElement("div")
+        actions.className = "row"
+        const add = (label, action) => {
+          const button = document.createElement("button")
+          button.type = "button"
+          button.textContent = label
+          button.onclick = async () => {
+            showError("")
+            try { await api("/v1/admin/licenses/" + row.id + "/" + action, { method: "POST", body: {} }); await load() } catch (err) { showError(err.message) }
+          }
+          actions.append(button)
+        }
+        if (row.status === "draft" || row.status === "suspended") add("Give access", "access")
+        add("Reset binding", "reset")
+        if (row.role !== "owner") add("Suspend", "suspend")
+        if (row.role !== "owner") add("Revoke", "revoke")
+        card.append(title, meta, actions)
+        list.append(card)
+      }
+    }
+    document.getElementById("login-form").onsubmit = async (event) => {
+      event.preventDefault()
+      showError("")
+      try {
+        const payload = await api("/v1/admin/login", { method: "POST", body: { email: email.value, password: password.value } })
+        token = payload.token
+        sessionStorage.setItem("tcgaio-admin", token)
+        document.getElementById("login").hidden = true
+        document.getElementById("desk").hidden = false
+        await load()
+      } catch (err) { showError(err.message) }
+    }
+    document.getElementById("create").onclick = () => { document.getElementById("create-form").hidden = false }
+    document.getElementById("search").oninput = () => load().catch((err) => showError(err.message))
+    document.getElementById("create-form").onsubmit = async (event) => {
+      event.preventDefault()
+      showError("")
+      try {
+        const days = Number(document.getElementById("days").value || 365)
+        const payload = await api("/v1/admin/licenses", { method: "POST", body: { note: note.value, plan: plan.value, expiresAt: Date.now() + days * 86400000 } })
+        createdId = payload.id
+        document.getElementById("new-key").textContent = "License key (copy it now): " + payload.key
+        document.getElementById("give").hidden = false
+        await load()
+      } catch (err) { showError(err.message) }
+    }
+    document.getElementById("give").onclick = async () => {
+      showError("")
+      try { await api("/v1/admin/licenses/" + createdId + "/access", { method: "POST", body: {} }); document.getElementById("give").hidden = true; await load() } catch (err) { showError(err.message) }
+    }
+    if (token) {
+      document.getElementById("login").hidden = true
+      document.getElementById("desk").hidden = false
+      load().catch(() => { token = ""; sessionStorage.removeItem("tcgaio-admin"); document.getElementById("login").hidden = false; document.getElementById("desk").hidden = true })
+    }
+  </script>
+</body>
+</html>

@@ -12,5 +12,6 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/**/*", "src/shared/**/*"],
+  "exclude": ["src/shared/license-proof.ts", "src/shared/license-config.ts"]
 }

@@ -7,6 +7,8 @@ import { cookieHeader } from "./challenge"
 import { parseKeywordQuery } from "./keywords"
 import { assertStore, cleanAddress, cleanCard, cleanEmail, cleanImageUrl, cleanPhone, cleanSettings } from "./validate"
 import { AppError } from "../shared/errors"
+import { licensePublicKey } from "../shared/license-config"
+import { accessAllowed, readGrant } from "../shared/license-proof"
 import { parseProxyList } from "../shared/proxy"
 import { applyBlockRates } from "./health"
 import { isBlockStatus } from "./polite"
@@ -31,6 +33,7 @@ import { DEFAULT_SETTINGS, STORE_IDS, isActiveStatus } from "../shared/types"
 import { redact } from "../shared/redact"
 import type {
   AccountInput,
+  AccountView,
   Address,
   AnalyticsReport,
   BulkEdit,
@@ -190,6 +193,8 @@ interface DbFile {
   updates?: UpdateFile
   backup?: { tokenSecret?: string }
   license?: LicenseFile
+  accountGateMigration?: string
+  accountSession?: { tokenSecret: string; envelope: string; fingerprint: string }
   stockLog?: RestockEvent[]
   monitorSamples?: MonitorSample[]
   templates?: TaskTemplate[]
@@ -263,6 +268,8 @@ export class Database {
       updates: normalizeUpdates(parsed.updates),
       backup: normalizeBackup(parsed.backup),
       license: normalizeLicense(parsed.license),
+      accountGateMigration: parsed.accountGateMigration === "accounts-1" ? "accounts-1" : undefined,
+      accountSession: normalizeAccountSession(parsed.accountSession),
       stockLog: Array.isArray(parsed.stockLog) ? parsed.stockLog.slice(0, 400) : [],
       monitorSamples: Array.isArray(parsed.monitorSamples) ? parsed.monitorSamples.slice(0, 500) : [],
       templates: Array.isArray(parsed.templates) ? parsed.templates : [],
@@ -292,6 +299,7 @@ export class Database {
       }
     }
     this.interrupted = interrupted
+    if (this.applyAccountGateMigration()) changed = true
     if (changed) this.flush()
   }
 
@@ -1631,12 +1639,76 @@ export class Database {
   }
 
   licenseAllows(): boolean {
+    if (process.env.VITEST === "true" && process.env.TCGAIO_LICENSE_STRICT !== "1") return this.legacyLicenseAllows()
+    return this.accessOk
+  }
+
+  refreshAccess(liveFingerprint: string, now = Date.now()): boolean {
+    const grant = readGrant(this.data.accountSession?.envelope ?? "", licensePublicKey())
+    this.accessOk = Boolean(grant && accessAllowed(grant, liveFingerprint, now))
+    return this.accessOk
+  }
+
+  accountView(now = Date.now()): AccountView {
+    const empty: AccountView = { signedIn: false, email: "", role: "", holder: "", plan: "", expiresAt: null, fingerprint: "" }
+    if (!this.accessOk) return empty
+    const grant = readGrant(this.data.accountSession?.envelope ?? "", licensePublicKey())
+    if (!grant || !accessAllowed(grant, this.data.accountSession?.fingerprint ?? "", now)) return empty
+    return {
+      signedIn: true,
+      email: grant.email,
+      role: grant.role,
+      holder: grant.holder,
+      plan: grant.plan,
+      expiresAt: grant.expiresAt,
+      fingerprint: grant.fingerprint.slice(0, 12)
+    }
+  }
+
+  saveAccountSession(input: { token: string; envelope: string; fingerprint: string }): AccountView {
+    const grant = readGrant(input.envelope, licensePublicKey())
+    if (!grant || grant.fingerprint !== input.fingerprint || !accessAllowed(grant, input.fingerprint)) {
+      throw new AppError("The license server response could not be verified.")
+    }
+    this.data.accountSession = {
+      tokenSecret: this.cipher.encrypt(input.token),
+      envelope: input.envelope,
+      fingerprint: input.fingerprint
+    }
+    this.accessOk = true
+    this.flush()
+    return this.accountView()
+  }
+
+  clearAccountSession(): void {
+    this.data.accountSession = undefined
+    this.accessOk = false
+    this.flush()
+  }
+
+  sessionToken(): string {
+    const secret = this.data.accountSession?.tokenSecret
+    if (!secret) return ""
+    try { return this.cipher.decrypt(secret) } catch { return "" }
+  }
+
+  private accessOk = false
+
+  private legacyLicenseAllows(): boolean {
     if (!this.getSettings().licenseRequired) return true
     const activation = this.data.license?.activation
     if (!activation || activation.machineId !== this.data.pcId) return false
     if (activation.expiresAt !== null && activation.expiresAt <= Date.now()) return false
     const row = this.data.license?.issued.find((item) => item.id === activation.licenseId)
     if (row?.revoked) return false
+    return true
+  }
+
+  private applyAccountGateMigration(): boolean {
+    if (this.data.accountGateMigration === "accounts-1") return false
+    if (this.data.license?.activation) this.data.license.activation = undefined
+    this.data.accountSession = undefined
+    this.data.accountGateMigration = "accounts-1"
     return true
   }
 
@@ -2986,6 +3058,11 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 function cloneTask(task: PublicTask): PublicTask {
   const role = normalizeRole(task)
   return { ...task, ...role, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: role.kind === "monitor" || task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, overrides: task.overrides ? { ...task.overrides } : undefined, logs: task.logs.map((line) => ({ ...line })) }
+}
+
+function normalizeAccountSession(value: DbFile["accountSession"]): DbFile["accountSession"] {
+  if (!value || typeof value.tokenSecret !== "string" || typeof value.envelope !== "string" || !/^[0-9a-f]{64}$/.test(value.fingerprint)) return undefined
+  return { tokenSecret: value.tokenSecret, envelope: value.envelope, fingerprint: value.fingerprint }
 }
 
 function emptyLicense(): LicenseFile {

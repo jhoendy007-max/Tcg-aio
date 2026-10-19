@@ -17,6 +17,7 @@ import { LogsPage } from "./pages/Logs"
 import { ModulesPage } from "./pages/Modules"
 import { ShipmentsPage } from "./pages/Shipments"
 import { StoreDefaults } from "./pages/StoreDefaults"
+import { AccountGate } from "./pages/AccountGate"
 import { Wizard } from "./pages/Wizard"
 import { deskText } from "../../shared/desk-ui"
 import { parseRoute, routeHash, type SectionId } from "../../shared/nav"
@@ -47,6 +48,7 @@ export function App() {
   const [updateError, setUpdateError] = useState("")
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [booting, setBooting] = useState(true)
+  const [signedIn, setSignedIn] = useState(false)
   const [wizard, setWizard] = useState(false)
   const [win, setWin] = useState<WinCard | null>(null)
   const seen = useRef(new Map<string, string>())
@@ -63,12 +65,18 @@ export function App() {
       unwrap(window.aio.settings.get()),
       unwrap(window.aio.profiles.list()),
       unwrap(window.aio.accounts.list())
-    ]).then(([payload, profiles, accounts]) => {
+    ]).then(async ([payload, profiles, accounts]) => {
       if (cancel) return
       setSettings(payload.settings)
       applyTheme(payload.settings)
       document.title = payload.settings.appName || "TCGAIO"
       setWizard(!payload.settings.wizardDone && profiles.length === 0 && accounts.length === 0)
+      try {
+        const account = await unwrap(window.aio.account.status())
+        if (!cancel) setSignedIn(account.signedIn)
+      } catch {
+        if (!cancel) setSignedIn(false)
+      }
     }).catch(() => undefined).finally(() => {
       if (!cancel) setBooting(false)
     })
@@ -84,7 +92,12 @@ export function App() {
       document.title = next.appName || "TCGAIO"
     }
     window.addEventListener("tcgaio-settings", onSettings)
-    return () => window.removeEventListener("tcgaio-settings", onSettings)
+    const onSignOut = () => setSignedIn(false)
+    window.addEventListener("tcgaio-signout", onSignOut)
+    return () => {
+      window.removeEventListener("tcgaio-settings", onSettings)
+      window.removeEventListener("tcgaio-signout", onSignOut)
+    }
   }, [])
 
   useEffect(() => {
@@ -176,12 +189,13 @@ export function App() {
           </div>
         ) : null}
         {booting ? <section className="page" aria-busy="true" aria-label="Loading"><div className="skeleton sk-title" /><div className="skeleton sk-card" /></section> : null}
-        {!booting && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = next.appName || "TCGAIO"; setWizard(false); go("home") }} /> : null}
-        {!booting && !wizard && page === "home" ? <DashboardPage lang={lang} onTasks={() => go("tasks")} /> : null}
-        {!booting && !wizard && page === "tasks" ? <TasksPage lockedKind={tab === "monitor" || tab === "checkout" ? tab : ""} /> : null}
-        {!booting && !wizard && page === "clients" ? <ClientsPage /> : null}
-        {!booting && !wizard && page === "people" ? <PeopleTabs tab={tab === "accounts" || tab === "proxies" ? tab : "profiles"} lang={lang} /> : null}
-        {!booting && !wizard && page === "settings" ? <SettingsTabs tab={tab || "general"} lang={lang} onSettings={setSettings} /> : null}
+        {!booting && !signedIn ? <AccountGate lang={lang} onSignedIn={() => setSignedIn(true)} /> : null}
+        {!booting && signedIn && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = next.appName || "TCGAIO"; setWizard(false); go("home") }} /> : null}
+        {!booting && signedIn && !wizard && page === "home" ? <DashboardPage lang={lang} onTasks={() => go("tasks")} /> : null}
+        {!booting && signedIn && !wizard && page === "tasks" ? <TasksPage lockedKind={tab === "monitor" || tab === "checkout" ? tab : ""} /> : null}
+        {!booting && signedIn && !wizard && page === "clients" ? <ClientsPage /> : null}
+        {!booting && signedIn && !wizard && page === "people" ? <PeopleTabs tab={tab === "accounts" || tab === "proxies" ? tab : "profiles"} lang={lang} /> : null}
+        {!booting && signedIn && !wizard && page === "settings" ? <SettingsTabs tab={tab || "general"} lang={lang} onSettings={setSettings} /> : null}
       </main>
       {win ? <SuccessScreen win={win} sound={settings.successSound} onSound={(on) => void setSound(on)} onClose={() => setWin(null)} /> : null}
     </div>

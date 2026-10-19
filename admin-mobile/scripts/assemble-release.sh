@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Build a standalone release APK with the JS bundle embedded.
+set -euo pipefail
+
+MOBILE="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$MOBILE/.." && pwd)"
+cd "$MOBILE"
+
+bash "$MOBILE/scripts/prepare-release-signing.sh"
+export CI="${CI:-1}"
+npx expo prebuild --platform android --no-install --clean --non-interactive
+python3 "$MOBILE/scripts/configure-android-release.py"
+
+cd "$MOBILE/android"
+chmod +x ./gradlew
+./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+
+APK="$MOBILE/android/app/build/outputs/apk/release/app-release.apk"
+if [[ ! -f "$APK" ]]; then
+  echo "assembleRelease did not write app-release.apk" >&2
+  exit 1
+fi
+
+python3 - "$APK" <<'PY'
+import sys, zipfile
+apk = sys.argv[1]
+with zipfile.ZipFile(apk) as archive:
+    names = archive.namelist()
+missing = []
+if not any(name == "assets/index.android.bundle" or name.endswith("/assets/index.android.bundle") for name in names):
+    missing.append("assets/index.android.bundle")
+if not any(name.startswith("lib/arm64-v8a/") for name in names):
+    missing.append("lib/arm64-v8a")
+if not any(name.startswith("lib/armeabi-v7a/") for name in names):
+    missing.append("lib/armeabi-v7a")
+if missing:
+    sys.exit("Release APK is missing: " + ", ".join(missing))
+print("Release APK contains the JS bundle and both ARM ABIs.")
+PY
+
+SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+APKSIGNER=""
+if [[ -n "$SDK" ]]; then
+  APKSIGNER="$(find "$SDK/build-tools" -type f -name apksigner | sort | tail -1 || true)"
+fi
+if [[ -n "$APKSIGNER" ]]; then
+  CERT="$("$APKSIGNER" verify --print-certs "$APK")"
+  printf '%s\n' "$CERT" | head -n 20
+  if printf '%s\n' "$CERT" | grep -qi "CN=Android Debug"; then
+    echo "Release APK is still signed with the Android debug certificate." >&2
+    exit 1
+  fi
+fi
+
+# package.json lives in mobile/, and gradle left us in mobile/android.
+cd "$MOBILE"
+VER="$(node -p "require('./package.json').version")"
+mkdir -p "$REPO/release"
+cp "$APK" "$REPO/release/TCGAIO-Admin-${VER}.apk"
+echo "Wrote $REPO/release/TCGAIO-Admin-${VER}.apk"

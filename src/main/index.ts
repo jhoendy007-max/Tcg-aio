@@ -34,6 +34,9 @@ import { reportZone, shouldRelaunch } from "../engine/watchdog"
 import { dayKey } from "../engine/limits"
 import { cookieForVault, vaultScan } from "../engine/vault"
 import { registerIpc } from "./ipc"
+import { heartbeatAccount, reportCheckout } from "../engine/account-client"
+import { machineFingerprint } from "./machine-fingerprint"
+import { HEARTBEAT_MS } from "../shared/license-proof"
 import type { Settings } from "../shared/types"
 
 const gotLock = app.requestSingleInstanceLock()
@@ -49,6 +52,7 @@ const warming = new Set<string>()
 let sessionTimer: ReturnType<typeof setInterval> | null = null
 let dropTimer: ReturnType<typeof setInterval> | null = null
 let handsTimer: ReturnType<typeof setInterval> | null = null
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let hands: HandsFree | null = null
 let dropBusy = false
 
@@ -131,6 +135,7 @@ if (gotLock) void app.whenReady().then(async () => {
   }
   const db = new Database(join(app.getPath("userData"), "tcgaio.json"), createCipher())
   db.load()
+  db.refreshAccess(machineFingerprint())
   const registry = createRegistry()
   db.setModuleAddressCaps(moduleAddressCaps(registry.values()))
   const gate = new ChallengeGate()
@@ -177,6 +182,7 @@ if (gotLock) void app.whenReady().then(async () => {
       delivered = true
     }
     await postGroupDiscord(settings, notice)
+    if (notice.kind === "success") void reportCheckout(db, machineFingerprint(), notice.storeName, notice.sku)
     return delivered
   }
   runner = new TaskService(
@@ -264,6 +270,9 @@ if (gotLock) void app.whenReady().then(async () => {
     void tickDrops(db, publish, desktop)
   }, 15_000)
   if (db.hasUpdateToken()) void updates.check()
+  heartbeatTimer = setInterval(() => {
+    void heartbeatAccount(db, machineFingerprint()).catch(() => undefined)
+  }, HEARTBEAT_MS)
   createWindow()
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -280,6 +289,7 @@ app.on("before-quit", () => {
   if (sessionTimer) clearInterval(sessionTimer)
   if (dropTimer) clearInterval(dropTimer)
   if (handsTimer) clearInterval(handsTimer)
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
   clearCrashFlag()
   void sessions?.close()
   alerts?.stop()

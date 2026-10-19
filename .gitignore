@@ -6,3 +6,10 @@ dist
 .DS_Store
 *.tsbuildinfo
 .vite
+*.sqlite
+license.sqlite
+*.keystore
+keystore.properties
+.keystore-origin
+admin-mobile/android
+mobile/android

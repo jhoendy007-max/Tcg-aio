@@ -12,8 +12,9 @@ import { chromiumHttp } from "./chromium-http"
 import { lookupResale } from "../engine/resale"
 import { inventoryCsv, inventoryReport } from "../engine/inventory"
 import { getBackup, putBackup } from "../engine/backup"
-import { activateRemote, listenLicense, type LicenseStore } from "../engine/license"
-import { APP_VERSION } from "../shared/version"
+import { heartbeatAccount, reportCheckout, syncAccount } from "../engine/account-client"
+import { licenseServerUrl } from "../shared/license-config"
+import { machineFingerprint } from "./machine-fingerprint"
 import type { Database } from "../engine/database"
 import { testProxies } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
@@ -328,41 +329,29 @@ export function registerIpc(
     onSettings?.(db.getSettings())
     return { restored: true as const }
   })
-  handle(channels.licenseGet, () => db.licenseView())
-  handle(channels.licenseIdentity, () => {
-    db.generateLicenseIdentity()
-    onSettings?.(db.getSettings())
-    return db.licenseView()
+  handle(channels.accountStatus, async () => {
+    const fingerprint = machineFingerprint()
+    try { return await heartbeatAccount(db, fingerprint) } catch { return db.accountView() }
   })
-  handle(channels.licenseAdmin, (input: { action: "keep" | "replace" | "clear"; token: string }) => {
-    db.setLicenseAdmin(input?.action ?? "keep", input?.token ?? "")
-    return db.licenseView()
+  handle(channels.accountSignIn, (input: { email?: string; password?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/login", { email: input?.email ?? "", password: input?.password ?? "" }))
+  handle(channels.accountSignUp, (input: { email?: string; password?: string; key?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/claim", { email: input?.email ?? "", password: input?.password ?? "", key: input?.key ?? "" }))
+  handle(channels.accountSignOut, () => {
+    db.clearAccountSession()
+    return db.accountView()
   })
-  handle(channels.licenseMint, (input: { holder: string; seats: number; expiresAt: number | null }) => {
-    const minted = db.mintLicense({ holder: input?.holder ?? "", seats: Number(input?.seats), expiresAt: input?.expiresAt ?? null })
-    return { ...db.licenseView(), key: minted.key }
+  handle(channels.accountTransfer, () => syncAccount(db, machineFingerprint(), "/v1/session/transfer", { token: db.sessionToken() }))
+  handle(channels.accountOpenAdmin, async () => {
+    const fingerprint = machineFingerprint()
+    db.refreshAccess(fingerprint)
+    if (db.accountView().role !== "owner") throw new AppError("The admin desk is only for the owner account.")
+    const base = licenseServerUrl()
+    if (!base) throw new AppError("This build is not connected to a license server yet.")
+    await shell.openExternal(`${base}/admin`)
+    return { opened: true as const }
   })
-  handle(channels.licenseRevoke, (id: string) => {
-    db.revokeLicense(id)
-    return db.licenseView()
-  })
-  handle(channels.licenseActivate, async (key: string) => {
-    const settings = db.getSettings()
-    if (settings.licenseServerUrl) {
-      const status = await activateRemote(defaultHttp, settings.licenseServerUrl, key, db.pcId(), APP_VERSION)
-      db.saveRemoteActivation(key, status)
-    } else {
-      db.activateLicense(key)
-    }
-    return db.licenseView()
-  })
-  handle(channels.licenseServe, async (input: { action: "start" | "stop"; port?: number }) => {
-    if (input?.action === "stop") {
-      await stopLicense()
-      return { url: "" }
-    }
-    const url = await startLicense(db, Math.round(Number(input?.port ?? 8756)))
-    return { url }
+  handle(channels.accountCheckout, async (input: { store?: string; sku?: string }) => {
+    await reportCheckout(db, machineFingerprint(), input?.store ?? "", input?.sku ?? "")
+    return { sent: true as const }
   })
   handle(channels.imapGet, () => db.imapView())
   handle(channels.imapSave, (input: ImapInput) => db.saveImap(input))
@@ -411,38 +400,6 @@ export function registerIpc(
     db.setVaultTwoWay(deviceId, accountId, twoWay)
     return db.listVault()
   })
-}
-
-let licenseServer: { url: string; close(): Promise<void> } | null = null
-
-function licenseStore(db: Database): LicenseStore {
-  return {
-    publicKey: () => db.licensePublicKey(),
-    adminOk: (token) => Boolean(token) && token === db.licenseAdminToken(),
-    findToken: (key) => db.findLicenseToken(key),
-    remember: (record, key) => db.rememberLicense(record, key),
-    list: () => db.licenseView().issued,
-    mint: (input) => {
-      const minted = db.mintLicense(input)
-      const record = db.licenseView().issued.find((row) => row.id === minted.id)
-      if (!record) throw new Error("License was not stored.")
-      return { token: minted.key, record }
-    },
-    revoke: (id) => db.revokeLicense(id)
-  }
-}
-
-async function startLicense(db: Database, port: number): Promise<string> {
-  await stopLicense()
-  licenseServer = await listenLicense(port, licenseStore(db))
-  return licenseServer.url
-}
-
-async function stopLicense(): Promise<void> {
-  if (!licenseServer) return
-  const current = licenseServer
-  licenseServer = null
-  await current.close()
 }
 
 function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {
