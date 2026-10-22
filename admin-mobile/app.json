@@ -25,7 +25,8 @@
         {
           "color": "#e0b15a"
         }
-      ]
+      ],
+      "./plugins/withApkInstall.js"
     ],
     "extra": {
       "eas": {

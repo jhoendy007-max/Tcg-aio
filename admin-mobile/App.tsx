@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react"
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
 import Constants from "expo-constants"
 import { StatusBar } from "expo-status-bar"
-import * as FileSystem from "expo-file-system/legacy"
-import * as IntentLauncher from "expo-intent-launcher"
 import * as LocalAuthentication from "expo-local-authentication"
 import * as Notifications from "expo-notifications"
 import * as SecureStore from "expo-secure-store"
@@ -44,7 +42,6 @@ type LicenseRow = {
 class DeskAuthError extends Error {}
 
 const bakedUrl = (process.env.EXPO_PUBLIC_TCGAIO_LICENSE_URL ?? "").replace(/\/$/, "") || DEFAULT_SERVER
-const versionCode = Number(Constants.expoConfig?.android?.versionCode ?? 0)
 const appVersion = Constants.expoConfig?.version ?? ""
 const emptyCounts: Counts = { pending: 0, active: 0, suspended: 0, gifts: 0 }
 
@@ -92,8 +89,6 @@ export default function App() {
   const [toggles, setToggles] = useState<Record<string, boolean>>({})
   const [error, setError] = useState("")
   const [pushHint, setPushHint] = useState("")
-  const [updateHint, setUpdateHint] = useState("")
-  const [updateCode, setUpdateCode] = useState(0)
   const [busy, setBusy] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [passwordOpen, setPasswordOpen] = useState(false)
@@ -156,8 +151,6 @@ export default function App() {
     setPassword("")
     setCreatedKey("")
     setCreatedId("")
-    setUpdateHint("")
-    setUpdateCode(0)
     setPhase("login")
     setError(message)
   }
@@ -372,46 +365,6 @@ export default function App() {
     }
   }
 
-  async function checkUpdate() {
-    setError("")
-    try {
-      const info = await call(base, "/v1/admin/app", token)
-      const remote = Number(info.versionCode ?? 0)
-      if (info.available === true && remote > versionCode) {
-        setUpdateCode(remote)
-        setUpdateHint(`Admin ${String(info.version)} is ready to install.`)
-      } else {
-        setUpdateCode(0)
-        setUpdateHint(info.available === true ? "This admin app is current." : "No admin update is on the server yet.")
-      }
-    } catch (err) {
-      report(err)
-    }
-  }
-
-  async function installUpdate() {
-    setBusy(true)
-    setError("")
-    try {
-      const dest = `${FileSystem.cacheDirectory ?? ""}tcgaio-admin-update.apk`
-      await FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => undefined)
-      const result = await FileSystem.createDownloadResumable(`${base}/v1/admin/app/download`, dest, { headers: { authorization: `Bearer ${token}` } }).downloadAsync()
-      if (!result?.uri) throw new Error("The update download did not finish.")
-      const content = await FileSystem.getContentUriAsync(result.uri)
-      await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
-        data: content,
-        flags: 1,
-        type: "application/vnd.android.package-archive"
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Could not install the update."
-      if (message.includes("401") || message.includes("Sign in to the admin desk again.")) report(new DeskAuthError("Sign in to the admin desk again."))
-      else report(err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const gifts = rows.filter((row) => !row.email)
   const showUsers = tab === "pending" || tab === "active" || tab === "suspended"
 
@@ -457,7 +410,6 @@ export default function App() {
         {phase === "desk" ? (
           <View style={styles.desk}>
             <View style={styles.toolbar}>
-              <Pressable style={styles.ghost} onPress={() => void checkUpdate()}><Text style={styles.ghostText}>Check for updates</Text></Pressable>
               <Pressable style={styles.ghost} onPress={() => { setPasswordOpen((open) => !open); setError("") }}><Text style={styles.ghostText}>Change password</Text></Pressable>
             </View>
             {passwordOpen ? (
@@ -471,8 +423,7 @@ export default function App() {
                 <Pressable style={styles.primary} disabled={busy} onPress={() => void changePassword()}><Text style={styles.primaryText}>{busy ? "Saving…" : "Save password"}</Text></Pressable>
               </View>
             ) : null}
-            {updateHint ? <Text style={styles.hint}>{updateHint}</Text> : null}
-            {updateCode > versionCode ? <Pressable style={styles.primary} disabled={busy} onPress={() => void installUpdate()}><Text style={styles.primaryText}>{busy ? "Installing…" : "Install update"}</Text></Pressable> : null}
+            <AdminUpdatePrompt base={base} token={token} onAuthError={(message) => void endSession(message)} />
             {createdKey ? (
               <View style={styles.keyCard}>
                 <Text style={styles.label}>License key, copy it now</Text>
@@ -580,7 +531,6 @@ export default function App() {
           </View>
         ) : null}
       </ScrollView>
-      {phase === "desk" && token ? <AdminUpdatePrompt base={base} token={token} versionCode={versionCode} /> : null}
     </View>
   )
 }

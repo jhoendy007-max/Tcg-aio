@@ -50,7 +50,7 @@ export interface LicenseApi {
   publicKey: string
   handle(method: string, path: string, headers: Record<string, string | undefined>, raw: string, ip?: string): { status: number; body: string }
   storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string; notes?: string }): { status: number; body: string }
-  adminDownload(headers: Record<string, string | undefined>): { status: number; body: string; file?: string; size?: number }
+  adminDownload(headers: Record<string, string | undefined>, ticket?: string): { status: number; body: string; file?: string; size?: number }
   attachRelay(server: { on(event: "upgrade", listener: (req: IncomingMessage, socket: unknown, head: Buffer) => void): void }): void
   close(): void
 }
@@ -101,6 +101,10 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
     CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS login_failures (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, ip TEXT NOT NULL, at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS admin_download_tickets (
+      token_hash TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL
+    );
   `)
   migrateUsers(db)
   for (const type of ALERT_TYPES) {
@@ -165,6 +169,10 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
         const release = adminRelease(db)
         return json(200, { ok: true, version: release.version, versionCode: release.versionCode, size: release.size, available: release.available, notes: release.notes })
       }
+      if (method === "POST" && route === "/v1/admin/app/ticket") {
+        const ticket = mintAdminDownloadTicket(db, now())
+        return json(200, { ok: true, ticket: ticket.token, expiresAt: ticket.expiresAt })
+      }
       if (method === "POST" && route === "/v1/admin/licenses") return createLicense(db, body, now)
       const userMatch = /^\/v1\/admin\/users\/([^/]+)\/(license|paid|payment|suspend|unsuspend|reset)$/.exec(route)
       if (method === "POST" && userMatch) return userAction(db, userMatch[1], userMatch[2], body, now, options.push)
@@ -206,8 +214,9 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
     return json(200, { ok: true, version, versionCode: input.versionCode, size: input.bytes.length })
   }
 
-  function adminDownload(headers: Record<string, string | undefined>): { status: number; body: string; file?: string; size?: number } {
-    if (!adminUser(db, headers, now())) return { status: 401, body: JSON.stringify({ ok: false, error: "Sign in to the admin desk again." }) }
+  function adminDownload(headers: Record<string, string | undefined>, ticket = ""): { status: number; body: string; file?: string; size?: number } {
+    const allowed = ticket ? takeAdminDownloadTicket(db, ticket, now()) : Boolean(adminUser(db, headers, now()))
+    if (!allowed) return { status: 401, body: JSON.stringify({ ok: false, error: "Sign in to the admin desk again." }) }
     const release = adminRelease(db)
     if (!release.available || !release.file) return { status: 404, body: JSON.stringify({ ok: false, error: "No admin update has been uploaded." }) }
     return { status: 200, body: "", file: release.file, size: release.size }
@@ -246,7 +255,8 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; h
       }
       const headers = headersOf(req)
       if ((req.method ?? "GET") === "GET" && route === "/v1/admin/app/download") {
-        const download = api.adminDownload(headers)
+        const ticket = new URL(path, "http://127.0.0.1").searchParams.get("ticket") ?? ""
+        const download = api.adminDownload(headers, ticket)
         if (download.file) {
           res.writeHead(200, {
             "content-type": "application/vnd.android.package-archive",
@@ -695,6 +705,21 @@ function publicUser(row: UserListRow) {
     fingerprint: row.fingerprint ? row.fingerprint.slice(0, 12) : "",
     lastSeen: row.last_seen
   }
+}
+
+function mintAdminDownloadTicket(db: DatabaseSync, at: number): { token: string; expiresAt: number } {
+  db.prepare("DELETE FROM admin_download_tickets WHERE expires_at <= ?").run(at)
+  const token = randomBytes(32).toString("base64url")
+  const expiresAt = at + 2 * 60 * 1000
+  db.prepare("INSERT INTO admin_download_tickets (token_hash, expires_at) VALUES (?, ?)").run(sha(token), expiresAt)
+  return { token, expiresAt }
+}
+
+function takeAdminDownloadTicket(db: DatabaseSync, token: string, at: number): boolean {
+  const hash = sha(token.trim())
+  const row = db.prepare("SELECT expires_at FROM admin_download_tickets WHERE token_hash = ?").get(hash) as { expires_at: number } | undefined
+  db.prepare("DELETE FROM admin_download_tickets WHERE token_hash = ?").run(hash)
+  return Boolean(row && row.expires_at > at)
 }
 
 function adminRelease(db: DatabaseSync): { version: string; versionCode: number; size: number; available: boolean; notes: string; file?: string } {
