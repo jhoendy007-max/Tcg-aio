@@ -205,7 +205,7 @@ export function SettingsPage() {
         <Field label="Fast delay (ms)" hint="Used inside a drop window. Each store still waits at least its own gap.">
           <TextInput type="number" min={250} max={60000} value={form.monitorFastDelayMs} onChange={(event) => setForm({ ...form, monitorFastDelayMs: Number(event.target.value) })} required />
         </Field>
-        <Field label="Block retries" hint="HTTP 429 waits and retries on the same connection. HTTP 403, 412, or 435 reloads the account browser on the same sticky proxy. A task with no account can move to another proxy. A challenge page waits for you in the account browser. 1–8.">
+        <Field label="Block retries" hint="HTTP 429 waits and retries on the same connection. Checkout: HTTP 403, 412, or 435 reloads the account browser on the same sticky proxy. Monitors never use a browser: they move to the next proxy, or wait longer with a single proxy. A challenge page waits for you in the account browser. 1–8.">
           <TextInput type="number" min={1} max={8} value={form.blockRetries} onChange={(event) => setForm({ ...form, blockRetries: Number(event.target.value) })} required />
         </Field>
         <Field className="span-2" label="Drop windows" hint="Atlantic Time, one range per line, like 09:00-09:20. Scheduled drops are windows too.">

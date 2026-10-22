@@ -1,4 +1,4 @@
-import type { SessionRefreshResult } from "../engine/block-recovery"
+import { isAnonymousMonitor, monitorBlockWait, type SessionRefreshResult } from "../engine/block-recovery"
 import type { WatchSnapshot } from "../engine/monitor"
 import type { CheckResult, TestStage } from "../engine/test-mode"
 import type { HttpClient } from "../engine/http"
@@ -88,7 +88,9 @@ export function checkoutPreflight(ctx: StoreRunContext, price?: number): { outco
 }
 
 export function retryWait(ctx: StoreRunContext): number {
-  return ctx.module?.retryDelayMs ?? ctx.settings.monitorDelayMs
+  const delay = ctx.module?.retryDelayMs ?? ctx.settings.monitorDelayMs
+  if (isAnonymousMonitor(ctx)) return monitorBlockWait(ctx, Math.max(delay, ctx.settings.monitorDelayMs))
+  return delay
 }
 
 export type StoreRunResult =

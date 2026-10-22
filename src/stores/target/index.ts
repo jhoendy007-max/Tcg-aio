@@ -262,6 +262,9 @@ async function readStockPlaces(ctx: StoreRunContext, key: string, tcin: string):
   return last ?? { kind: "retry", reason: "No monitor location is configured." }
 }
 
+/** Target's site sends an anonymous visitor id (32 upper-case hex characters) with every redsky call. One per app run. */
+const ANON_VISITOR_ID = Array.from({ length: 32 }, () => "0123456789ABCDEF"[Math.floor(Math.random() * 16)]).join("")
+
 async function readStock(
   ctx: StoreRunContext,
   key: string,
@@ -275,10 +278,13 @@ async function readStock(
   summary.searchParams.set("pricing_store_id", location.storeId)
   summary.searchParams.set("zip", location.zip)
   summary.searchParams.set("state", location.state)
+  summary.searchParams.set("has_pricing_store_id", "true")
+  summary.searchParams.set("is_bot", "false")
+  summary.searchParams.set("visitor_id", ANON_VISITOR_ID)
   summary.searchParams.set("channel", "WEB")
   summary.searchParams.set("page", `/p/A-${tcin}`)
   const primary = await sharedCall(ctx, monitorKey("target", tcin, `${location.zip}:${location.storeId}`, ctx.proxy), () => call(ctx, { method: "GET", url: summary.toString(), headers: monitorHeaders(tcin) }))
-  const primaryStep = interpretMonitor(primary, Boolean(ctx.proxy))
+  const primaryStep = interpretMonitor(primary, Boolean(ctx.proxy), ctx.monitorOnly === true)
   if (primaryStep.kind === "paused") return primaryStep
   if (primaryStep.kind === "ok" && primaryStep.value.status !== "UNKNOWN" && primaryStep.value.status !== "NOT_FOUND") {
     return primaryStep
@@ -290,16 +296,24 @@ async function readStock(
   legacy.searchParams.set("pricing_store_id", location.storeId)
   legacy.searchParams.set("zip", location.zip)
   legacy.searchParams.set("state", location.state)
+  legacy.searchParams.set("has_pricing_store_id", "true")
+  legacy.searchParams.set("is_bot", "false")
+  legacy.searchParams.set("visitor_id", ANON_VISITOR_ID)
   legacy.searchParams.set("channel", "WEB")
+  legacy.searchParams.set("page", `/p/A-${tcin}`)
   const secondary = await call(ctx, { method: "GET", url: legacy.toString(), headers: monitorHeaders(tcin) })
-  const secondaryStep = interpretMonitor(secondary, Boolean(ctx.proxy))
+  const secondaryStep = interpretMonitor(secondary, Boolean(ctx.proxy), ctx.monitorOnly === true)
   if (secondaryStep.kind === "ok" || secondaryStep.kind === "paused") return secondaryStep
   if (primaryStep.kind === "ok") return primaryStep
   return secondaryStep
 }
 
-function interpretMonitor(response: HttpResponse, hasProxy: boolean): Step<StockReading> {
-  if (isChallenge(response.status, response.body)) return { kind: "paused", reason: TARGET_PAUSE }
+function interpretMonitor(response: HttpResponse, hasProxy: boolean, monitorOnly = false): Step<StockReading> {
+  if (isChallenge(response.status, response.body)) {
+    // A monitor has no account browser, so a block is never a checkout challenge. Wait and check again.
+    if (monitorOnly) return { kind: "retry", reason: monitorStatusReason(response.status, hasProxy) ?? `Monitor request returned HTTP ${response.status}. Retrying.` }
+    return { kind: "paused", reason: TARGET_PAUSE }
+  }
   const blocked = monitorStatusReason(response.status, hasProxy)
   if (blocked) return { kind: "retry", reason: blocked }
   const reading = parseStock(response.body)

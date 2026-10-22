@@ -1,7 +1,7 @@
 import type { HttpClient } from "./http"
 import { proxyLabel } from "../shared/proxy"
 import { storeName } from "../shared/stores"
-import { STORE_IDS, type ProxyEndpoint, type StoreBlockRate, type StoreHealth, type StoreId } from "../shared/types"
+import { STORE_IDS, type ProxyEndpoint, type ProxyStoreTestResult, type StoreBlockRate, type StoreHealth, type StoreId } from "../shared/types"
 
 export type { StoreHealth }
 
@@ -111,4 +111,41 @@ function classify(status: number, body: string): StoreHealth["verdict"] {
   if (challenge) return "challenge"
   if (status >= 200 && status < 400) return "up"
   return "down"
+}
+
+/**
+ * One real read-only stock request per store through each proxy. Shows whether the store lets
+ * that proxy through (OK) or blocks it (Blocked). No cart or checkout request is sent.
+ */
+export async function testProxiesAgainstStores(
+  http: HttpClient,
+  proxies: ProxyEndpoint[],
+  stores: readonly StoreId[] = STORE_IDS
+): Promise<ProxyStoreTestResult[]> {
+  const jobs: Array<{ proxy: ProxyEndpoint; store: StoreId }> = []
+  for (const proxy of proxies) for (const store of stores) jobs.push({ proxy, store })
+  const results: ProxyStoreTestResult[] = new Array(jobs.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(4, jobs.length) }, async () => {
+    while (next < jobs.length) {
+      const index = next
+      next += 1
+      const { proxy, store } = jobs[index]
+      const base = { proxyId: proxy.id, label: proxyLabel(proxy), store, storeName: storeName(store) }
+      try {
+        const response = await http.request({ method: "GET", url: PROBES[store], headers: probeHeaders(store), proxy, timeoutMs: 20000 })
+        const verdict = classify(response.status, response.body)
+        results[index] = {
+          ...base,
+          status: response.status,
+          result: verdict === "up" ? "ok" : verdict === "challenge" ? "blocked" : "error",
+          detail: verdict === "up" ? `OK (HTTP ${response.status})` : verdict === "challenge" ? `Blocked (HTTP ${response.status})` : `HTTP ${response.status}`
+        }
+      } catch (err) {
+        results[index] = { ...base, status: null, result: "error", detail: err instanceof Error ? err.message : "The request failed." }
+      }
+    }
+  })
+  await Promise.all(workers)
+  return results
 }
