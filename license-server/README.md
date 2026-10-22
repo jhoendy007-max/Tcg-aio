@@ -22,7 +22,7 @@ This stays a small program you run yourself. It does not need Cloudflare, Supaba
 | `HOST` | Server | Address to bind. Defaults to `127.0.0.1`, which is what Caddy on the same machine should use. Set `HOST=0.0.0.0` only if you want the port open on every network interface. |
 | `TRUST_PROXY` | Server | Set to `1` when the reverse proxy is not on this machine. See the rate-limit note below. |
 | `TCGAIO_OWNER_SETUP_TOKEN` | Server, until the password is set | A long random string you choose. The first boot stores a hash of it. |
-| `TCGAIO_OWNER_PASSWORD` | Server, first boot or `set-password` only | Password for `jhoendy007@gmail.com`, at least 8 characters. Remove it from the environment after it is saved. |
+| `TCGAIO_OWNER_PASSWORD` | Server, first boot or `set-password` only | First password for `jhoendy007@gmail.com`, at least 8 characters. Remove it from the environment after it is saved. A later change uses `change-owner-password` or Change password on the admin desk. |
 | `EXPO_ACCESS_TOKEN` | Server, optional | Expo access token. Without it, alerts are stored and push is skipped. |
 | `TCGAIO_ADMIN_UPLOAD_TOKEN` | Server and GitHub Actions secret, same name | Long random string. Tag builds upload the admin APK with it. If the GitHub secret is missing, the build skips the upload and still succeeds. |
 | `TCGAIO_ADMIN_APK_DIR` | Server, optional | Folder for the uploaded admin APK. Defaults to the folder that holds the SQLite file. |
@@ -36,6 +36,24 @@ Login, claim, and admin login are limited to about 8 tries per 10 minutes per cl
 `jhoendy007@gmail.com` is the only owner. The server creates that user and an owner license on first boot. Nobody else can register that email. The owner license works on up to 8 PCs and cannot be suspended or revoked. The role is inside the signed grant. Typing the email on a PC does not make someone the owner.
 
 Keep `TCGAIO_OWNER_SETUP_TOKEN` the same until the password is saved. If you change it before that, password setup will fail.
+
+`set-password` only saves the first password, and it still needs that setup token. After the password exists, replace a forgotten one on the server with `change-owner-password`. That command reads the new password from stdin, does not use the setup token, and signs out every existing owner session (the admin desk and the desktop app).
+
+```bash
+npx tsx license-server/cli.ts change-owner-password
+```
+
+Type the new password and press Enter. The characters stay hidden. From a pipe or a heredoc, the first line is the password:
+
+```bash
+npx tsx license-server/cli.ts change-owner-password <<'EOF'
+the-new-password
+EOF
+```
+
+`TCGAIO_LICENSE_DB` must point at the live SQLite file. The password needs at least 8 characters. Surrounding spaces are ignored, the same way sign-in ignores them. Do not put the password on the command line.
+
+While you are signed in at `/admin` or in the admin app, Change password asks for the current password and the new one. A wrong current password stays on the desk. A successful change signs out the old sessions, then you sign in with the new password.
 
 ## Push
 
@@ -55,7 +73,10 @@ The admin Android app registers an Expo push token. The server sends it to `http
 npx tsx license-server/cli.ts keygen
 npx tsx license-server/cli.ts serve
 npx tsx license-server/cli.ts set-password
+npx tsx license-server/cli.ts change-owner-password
 ```
+
+`set-password` reads `TCGAIO_OWNER_SETUP_TOKEN` and `TCGAIO_OWNER_PASSWORD` and refuses once a password is already saved. `change-owner-password` reads the replacement from stdin and signs out old sessions.
 
 Behind Caddy, keep the default `HOST=127.0.0.1` and proxy to `127.0.0.1:8787`. Caddy's own connection is loopback, so the real visitor IP is taken from `X-Forwarded-For` without setting `TRUST_PROXY`.
 

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createLicenseIdentity } from "./proof"
-import { listenLicenseApi, setOwnerPassword } from "./server"
+import { changeOwnerPassword, listenLicenseApi, setOwnerPassword } from "./server"
 import { DatabaseSync } from "node:sqlite"
 
 const command = process.argv[2] ?? "serve"
@@ -21,6 +21,22 @@ if (command === "keygen") {
   try {
     setOwnerPassword(db, token, password)
     console.log("Owner password saved for jhoendy007@gmail.com. Remove TCGAIO_OWNER_PASSWORD from the environment.")
+  } finally {
+    db.close()
+  }
+} else if (command === "change-owner-password") {
+  if (process.argv.length > 3) {
+    console.error("change-owner-password reads the new password from stdin. Do not pass it as an argument.")
+    process.exit(1)
+  }
+  const password = await readStdinPassword()
+  const db = new DatabaseSync(dbPath)
+  try {
+    changeOwnerPassword(db, password)
+    console.log("Owner password changed for jhoendy007@gmail.com. Old sessions are signed out.")
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : "Could not change the owner password.")
+    process.exitCode = 1
   } finally {
     db.close()
   }
@@ -45,6 +61,52 @@ if (command === "keygen") {
   console.log(`Admin desk: ${started.url}/admin`)
   console.log(`Public key: ${started.publicKey}`)
 } else {
-  console.error("Use keygen, set-password, or serve.")
+  console.error("Use keygen, set-password, change-owner-password, or serve.")
   process.exit(1)
+}
+
+function readStdinPassword(): Promise<string> {
+  if (process.stdin.isTTY) return readHiddenLine("New owner password: ")
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    process.stdin.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)))
+    process.stdin.on("end", () => {
+      const text = Buffer.concat(chunks).toString("utf8")
+      resolve(text.split(/\r?\n/, 1)[0] ?? "")
+    })
+    process.stdin.on("error", reject)
+  })
+}
+
+function readHiddenLine(prompt: string): Promise<string> {
+  process.stderr.write(prompt)
+  process.stdin.setRawMode(true)
+  process.stdin.resume()
+  return new Promise((resolve) => {
+    let value = ""
+    const onData = (chunk: Buffer) => {
+      const text = chunk.toString("utf8")
+      for (const char of text) {
+        if (char === "\u0003") {
+          process.stdin.setRawMode(false)
+          process.stdin.off("data", onData)
+          process.stderr.write("\n")
+          process.exit(1)
+        }
+        if (char === "\r" || char === "\n") {
+          process.stdin.setRawMode(false)
+          process.stdin.off("data", onData)
+          process.stderr.write("\n")
+          resolve(value)
+          return
+        }
+        if (char === "\u007f" || char === "\b") {
+          value = value.slice(0, -1)
+          continue
+        }
+        value += char
+      }
+    }
+    process.stdin.on("data", onData)
+  })
 }

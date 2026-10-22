@@ -94,6 +94,9 @@ export default function App() {
   const [updateCode, setUpdateCode] = useState(0)
   const [busy, setBusy] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [nextPassword, setNextPassword] = useState("")
   const seenPending = useRef<number | null>(null)
   const sessionGen = useRef(0)
 
@@ -271,6 +274,22 @@ export default function App() {
     await endSession("")
   }
 
+  async function changePassword() {
+    setBusy(true)
+    setError("")
+    try {
+      await call(base, "/v1/admin/password", token, "POST", { currentPassword, password: nextPassword })
+      setCurrentPassword("")
+      setNextPassword("")
+      setPasswordOpen(false)
+      await endSession("Password changed. Sign in with the new password.")
+    } catch (err) {
+      report(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function registerPush(server: string, auth: string) {
     const projectId = String(Constants.expoConfig?.extra?.eas?.projectId ?? "")
     if (!projectId || projectId.startsWith("REPLACE")) {
@@ -437,7 +456,19 @@ export default function App() {
           <View style={styles.desk}>
             <View style={styles.toolbar}>
               <Pressable style={styles.ghost} onPress={() => void checkUpdate()}><Text style={styles.ghostText}>Check for updates</Text></Pressable>
+              <Pressable style={styles.ghost} onPress={() => { setPasswordOpen((open) => !open); setError("") }}><Text style={styles.ghostText}>Change password</Text></Pressable>
             </View>
+            {passwordOpen ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Change password</Text>
+                <Text style={styles.hint}>Enter the current password. Saving signs out this desk and the desktop app.</Text>
+                <Text style={styles.label}>Current password</Text>
+                <TextInput style={styles.input} secureTextEntry value={currentPassword} onChangeText={setCurrentPassword} autoCapitalize="none" />
+                <Text style={styles.label}>New password</Text>
+                <TextInput style={styles.input} secureTextEntry value={nextPassword} onChangeText={setNextPassword} autoCapitalize="none" />
+                <Pressable style={styles.primary} disabled={busy} onPress={() => void changePassword()}><Text style={styles.primaryText}>{busy ? "Saving…" : "Save password"}</Text></Pressable>
+              </View>
+            ) : null}
             {updateHint ? <Text style={styles.hint}>{updateHint}</Text> : null}
             {updateCode > versionCode ? <Pressable style={styles.primary} disabled={busy} onPress={() => void installUpdate()}><Text style={styles.primaryText}>{busy ? "Installing…" : "Install update"}</Text></Pressable> : null}
             {createdKey ? (
@@ -562,7 +593,7 @@ const styles = StyleSheet.create({
   signOut: { borderWidth: 1, borderColor: "#3c4658", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   signOutText: { color: "#f2f5f8", fontSize: 13, fontWeight: "700" },
   desk: { gap: 10 },
-  toolbar: { flexDirection: "row", justifyContent: "flex-start" },
+  toolbar: { flexDirection: "row", justifyContent: "flex-start", gap: 8, flexWrap: "wrap" },
   pills: { gap: 8, paddingVertical: 2 },
   pill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#171b22", borderColor: "#2a3140", borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   pillOn: { backgroundColor: "#e0b15a", borderColor: "#e0b15a" },

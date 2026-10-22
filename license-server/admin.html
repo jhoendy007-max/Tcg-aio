@@ -33,7 +33,10 @@
 <body>
   <header>
     <h1><span>TCGAIO</span>Admin</h1>
-    <button id="sign-out" type="button" hidden>Sign out</button>
+    <div class="row">
+      <button id="change-password" type="button" hidden>Change password</button>
+      <button id="sign-out" type="button" hidden>Sign out</button>
+    </div>
   </header>
   <p>Pending accounts come first. A gift key can still be created on its own and redeemed in the customer's account.</p>
   <div id="error"></div>
@@ -45,6 +48,11 @@
     </form>
   </section>
   <section id="desk" hidden>
+    <form id="password-form" class="card row" hidden>
+      <label>Current password<input id="current-password" type="password" autocomplete="current-password" required /></label>
+      <label>New password<input id="next-password" type="password" autocomplete="new-password" required minlength="8" /></label>
+      <button class="primary" type="submit">Save password</button>
+    </form>
     <div class="row">
       <button class="tab on" id="tab-pending" type="button">Pending <span id="count-pending" class="badge" hidden>0</span></button>
       <button class="tab" id="tab-active" type="button">Active <span id="count-active" class="badge" hidden>0</span></button>
@@ -84,12 +92,17 @@
       document.getElementById("login").hidden = false
       document.getElementById("desk").hidden = true
       document.getElementById("sign-out").hidden = true
+      document.getElementById("change-password").hidden = true
+      document.getElementById("password-form").hidden = true
+      document.getElementById("current-password").value = ""
+      document.getElementById("next-password").value = ""
       showError(message || "")
     }
     function showDesk() {
       document.getElementById("login").hidden = true
       document.getElementById("desk").hidden = false
       document.getElementById("sign-out").hidden = false
+      document.getElementById("change-password").hidden = false
     }
     async function api(path, options = {}) {
       const response = await fetch(path, {
@@ -273,6 +286,15 @@
     document.getElementById("create").onclick = () => { document.getElementById("create-form").hidden = false }
     document.getElementById("search").oninput = () => load().catch(guard)
     document.getElementById("sign-out").onclick = () => showLogin("")
+    document.getElementById("change-password").onclick = () => { document.getElementById("password-form").hidden = false }
+    document.getElementById("password-form").onsubmit = async (event) => {
+      event.preventDefault()
+      showError("")
+      try {
+        await api("/v1/admin/password", { method: "POST", body: { currentPassword: document.getElementById("current-password").value, password: document.getElementById("next-password").value } })
+        showLogin("Password changed. Sign in with the new password.")
+      } catch (err) { guard(err) }
+    }
     document.getElementById("create-form").onsubmit = async (event) => {
       event.preventDefault()
       showError("")

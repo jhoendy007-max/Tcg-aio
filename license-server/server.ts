@@ -109,7 +109,7 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       const body = raw ? parseObject(raw) : {}
       if (requestHasSecret(body)) return json(400, { ok: false, error: "License data cannot include card, cookie, or session fields." })
       if (method === "POST" && route === "/v1/owner/setup") return setupOwner(db, body, now)
-      if ((method === "POST" && (route === "/v1/account/login" || route === "/v1/account/claim" || route === "/v1/account/signup" || route === "/v1/admin/login")) && !takeRate(rates, `${route}:${ip}`, now())) {
+      if ((method === "POST" && (route === "/v1/account/login" || route === "/v1/account/claim" || route === "/v1/account/signup" || route === "/v1/admin/login" || route === "/v1/admin/password")) && !takeRate(rates, `${route}:${ip}`, now())) {
         return json(429, { ok: false, error: "Too many attempts. Wait a few minutes and try again." })
       }
       if (method === "POST" && route === "/v1/admin/login") return adminLogin(db, body, now)
@@ -122,6 +122,7 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       if (method === "POST" && route === "/v1/session/checkout") return checkout(db, body, now, options.push)
       const admin = adminUser(db, headers, now())
       if (!admin) return json(401, { ok: false, error: "Sign in to the admin desk again." })
+      if (method === "POST" && route === "/v1/admin/password") return changeAdminPassword(db, admin, body)
       if (method === "GET" && route === "/v1/admin/overview") return json(200, { ok: true, ...overview(db, url.searchParams.get("q") ?? "", now) })
       if (method === "GET" && route === "/v1/admin/users") return json(200, { ok: true, ...listUsers(db, url.searchParams.get("q") ?? "", url.searchParams.get("status") ?? "") })
       if (method === "GET" && route === "/v1/admin/app") {
@@ -335,6 +336,32 @@ export function setOwnerPassword(db: DatabaseSync, token: string, password: stri
   if (!owner.setup_hash || !safeEqual(owner.setup_hash, sha(token))) throw new Error("The setup token does not match.")
   if (password.length < 8) throw new Error("Use a password of at least 8 characters.")
   db.prepare("UPDATE users SET password_hash = ?, verified = 1, setup_hash = NULL WHERE email = ?").run(hashPassword(password), OWNER_EMAIL)
+}
+
+/** Replaces the saved owner password and signs out every existing owner session. No setup token. */
+export function changeOwnerPassword(db: DatabaseSync, password: string): void {
+  const owner = db.prepare("SELECT id, password_hash FROM users WHERE email = ?").get(OWNER_EMAIL) as { id: string; password_hash: string | null } | undefined
+  if (!owner) throw new Error("The owner account is not on this server yet. Start the server once first.")
+  if (!owner.password_hash) throw new Error("The owner password is not set yet. Use set-password with the setup token.")
+  const next = password.trim()
+  if (next.length < 8) throw new Error("Use a password of at least 8 characters.")
+  db.prepare("UPDATE users SET password_hash = ?, verified = 1 WHERE id = ?").run(hashPassword(next), owner.id)
+  db.prepare("DELETE FROM sessions WHERE user_id = ?").run(owner.id)
+}
+
+function changeAdminPassword(db: DatabaseSync, user: UserRow, body: Record<string, unknown>): { status: number; body: string } {
+  const current = text(body.currentPassword)
+  const next = text(body.password)
+  if (!user.password_hash || !verifyPassword(current, user.password_hash)) {
+    return json(400, { ok: false, error: "That current password was not accepted." })
+  }
+  if (next === current) return json(400, { ok: false, error: "Choose a different password." })
+  try {
+    changeOwnerPassword(db, next)
+  } catch (err) {
+    return json(400, { ok: false, error: err instanceof Error ? err.message : "Could not change the password." })
+  }
+  return json(200, { ok: true })
 }
 
 function setupOwner(db: DatabaseSync, body: Record<string, unknown>, now: () => number): { status: number; body: string } {
