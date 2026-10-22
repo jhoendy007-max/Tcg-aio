@@ -286,6 +286,8 @@ async function readStock(
   const primary = await sharedCall(ctx, monitorKey("target", tcin, `${location.zip}:${location.storeId}`, ctx.proxy), () => call(ctx, { method: "GET", url: summary.toString(), headers: monitorHeaders(tcin) }))
   const primaryStep = interpretMonitor(primary, Boolean(ctx.proxy), ctx.monitorOnly === true)
   if (primaryStep.kind === "paused") return primaryStep
+  // A blocked proxy is blocked for the fallback endpoint too. Do not spend a second request on it.
+  if (primaryStep.kind === "retry" && [403, 412, 429, 435].includes(primary.status)) return primaryStep
   if (primaryStep.kind === "ok" && primaryStep.value.status !== "UNKNOWN" && primaryStep.value.status !== "NOT_FOUND") {
     return primaryStep
   }
