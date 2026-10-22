@@ -27,6 +27,11 @@ function containsText(data, needle) {
   return data.includes(Buffer.from(needle)) || data.includes(Buffer.from(needle, "utf16le"))
 }
 
+async function missingPublicKeyRoute(response) {
+  const text = await response.text().catch(() => "")
+  return text.includes("Sign in to the admin desk again.")
+}
+
 function strictRemote() {
   if (process.env.TCGAIO_LICENSE_REQUIRE_REMOTE === "1") return true
   return process.env.GITHUB_ACTIONS === "true" && process.env.GITHUB_REF_TYPE === "tag"
@@ -45,8 +50,8 @@ async function compareLive(url, key) {
     console.log(`License server public key was not compared (${host} could not be reached). The key is a valid Ed25519 SPKI key.`)
     return
   }
-  if (response.status === 404) {
-    console.log(`License server has no /v1/public-key yet (${host}). The key is a valid Ed25519 SPKI key.`)
+  if (response.status === 404 || (response.status === 401 && await missingPublicKeyRoute(response))) {
+    console.log(`License server has no /v1/public-key yet (${host}, HTTP ${response.status}). The key is a valid Ed25519 SPKI key.`)
     return
   }
   if (!response.ok) fail(`The license server public key check returned HTTP ${response.status}.`)

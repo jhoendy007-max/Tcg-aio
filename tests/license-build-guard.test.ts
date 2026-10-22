@@ -110,6 +110,18 @@ describe("release license guard", () => {
     const text = await live("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: url, TCGAIO_LICENSE_PUBLIC_KEY: key, TCGAIO_LICENSE_KEY_PROBE: "https://license.example.test/text" }, routes)
     expect(text.status).toBe(1)
     expect(text.stderr).toMatch(/did not return JSON/)
+    const oldServer = await live("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: url, TCGAIO_LICENSE_PUBLIC_KEY: key }, {
+      "https://license.example.test/v1/public-key": () => new Response(JSON.stringify({ ok: false, error: "Sign in to the admin desk again." }), { status: 401, headers: { "content-type": "application/json" } })
+    })
+    expect(oldServer.status).toBe(0)
+    expect(oldServer.stdout).toMatch(/no \/v1\/public-key yet \(license\.example\.test, HTTP 401\)/)
+    expect(oldServer.stdout).not.toContain(key)
+    const denied = await live("preflight", { TCGAIO_REQUIRE_LICENSE: "1", TCGAIO_LICENSE_URL: url, TCGAIO_LICENSE_PUBLIC_KEY: key }, {
+      "https://license.example.test/v1/public-key": () => new Response(JSON.stringify({ ok: false, error: "nope" }), { status: 401 })
+    })
+    expect(denied.status).toBe(1)
+    expect(denied.stderr).toMatch(/HTTP 401/)
+    expect(denied.stderr).not.toContain(key)
   })
 
   it("fails a release tag when the license server cannot be reached", async () => {
