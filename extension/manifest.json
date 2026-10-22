@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TCGAIO Session Sync",
-  "version": "0.2.28",
+  "version": "0.2.29",
   "description": "Sends your own store sign-in from this browser to TCGAIO on your PC. It does not read other sites.",
   "permissions": ["cookies", "storage", "alarms", "scripting"],
   "host_permissions": [
