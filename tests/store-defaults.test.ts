@@ -98,8 +98,10 @@ describe("desk navigation and first-run copy", () => {
   it("groups old pages into five sections and keeps both languages", () => {
     expect(parseRoute("#monitors").section).toBe("tasks")
     expect(parseRoute("#monitors").tab).toBe("monitor")
-    expect(parseRoute("#profiles")).toEqual({ section: "people", tab: "profiles" })
-    expect(parseRoute("#accounts").tab).toBe("accounts")
+    expect(parseRoute("#profiles")).toEqual({ section: "profiles", tab: "" })
+    expect(parseRoute("#people/accounts")).toEqual({ section: "accounts", tab: "" })
+    expect(parseRoute("#clients").section).toBe("aco")
+    expect(parseRoute("#accounts").section).toBe("accounts")
     expect(parseRoute("#logs")).toEqual({ section: "settings", tab: "logs" })
     expect(parseRoute("#settings/stores").tab).toBe("stores")
     expect(parseRoute("#nope").section).toBe("home")

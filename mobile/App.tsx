@@ -353,7 +353,7 @@ export default function App() {
               )) : null}
               </> : null}
               {tab === "accounts" ? <><Text style={styles.h1}>Accounts</Text><DeskPanel snap={snap} session={session.current} run={run} focus="people" /></> : null}
-              {tab === "clients" ? <><Text style={styles.h1}>Clients</Text><DeskPanel snap={snap} session={session.current} run={run} focus="clients" /></> : null}
+              {tab === "clients" ? <><Text style={styles.h1}>ACO</Text><DeskPanel snap={snap} session={session.current} run={run} focus="clients" /></> : null}
               {tab === "settings" ? <><Text style={styles.h1}>Settings</Text><PhoneSettingsForm snap={snap} session={session.current} run={run} /><PhoneUpdateCard /><LogsPanel snap={snap} />
                 <View style={styles.row}>
                   <Pressable style={styles.secondary} onPress={() => setScreen("mail")}><Text style={styles.secondaryText}>{mailText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
@@ -403,7 +403,7 @@ export default function App() {
           {([
             ["tasks", "Tasks"],
             ["accounts", "Accounts"],
-            ["clients", "Clients"],
+            ["clients", "ACO"],
             ["settings", "Settings"]
           ] as const).map(([id, label]) => (
             <Pressable key={id} style={styles.tab} onPress={() => { setTab(id); if (screen !== "dash" && screen !== "edit") setScreen("dash") }}>

@@ -10,7 +10,10 @@ const routes = [
   "Dashboard",
   "Tasks",
   "Profiles",
-  "Clients",
+  "Proxies",
+  "Accounts",
+  "ACO",
+  "ACO locked",
   "Settings",
   "Settings · General",
   "Settings · Activity",
@@ -85,8 +88,10 @@ function fixture(expanded: boolean): string {
       <nav>
         <a href="#home" aria-current="page">Dashboard</a>
         <a href="#tasks">Tasks</a>
-        <a href="#people">Profiles</a>
-        <a href="#clients">Clients</a>
+        <a href="#profiles">Profiles</a>
+        <a href="#proxies">Proxies</a>
+        <a href="#accounts">Accounts</a>
+        <a href="#aco">ACO</a>
         <a href="#settings">Settings</a>
       </nav>
       <footer><button type="button" class="icon-btn">«</button></footer>
