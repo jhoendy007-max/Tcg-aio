@@ -111,3 +111,24 @@ function paceKeys(store: StoreId, share: PaceShare): string[] {
   if (!keys.length) keys.push(paceClock(store, "direct", "direct"))
   return keys
 }
+
+/**
+ * Slowest pace one IP should see from an anonymous monitor. Target's redsky API starts answering
+ * HTTP 435 after a handful of fast requests from one IP, even a clean ISP proxy. A pool spreads the
+ * same pace over more IPs, so the floor per check shrinks with the number of proxies.
+ */
+export const PER_PROXY_MIN_MS: Partial<Record<StoreId, number>> = { target: 10_000 }
+
+export function perProxyFloorMs(store: StoreId, proxyCount: number): number {
+  const floor = PER_PROXY_MIN_MS[store] ?? 0
+  if (!floor) return 0
+  return Math.round(floor / Math.max(1, proxyCount))
+}
+
+export function perProxyPaceLine(store: StoreId, proxyCount: number, delayMs: number): string | null {
+  const floor = perProxyFloorMs(store, proxyCount)
+  if (!floor || delayMs >= floor) return null
+  const per = Math.round((PER_PROXY_MIN_MS[store] ?? 0) / 1000)
+  const ips = proxyCount <= 1 ? "one IP" : `${proxyCount} IPs`
+  return `Checking every ${(floor / 1000).toFixed(1)}s instead of ${(delayMs / 1000).toFixed(1)}s. With ${ips}, faster checks get blocked. Each proxy should see at most one check every ${per}s. Add proxies to check faster.`
+}

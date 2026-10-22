@@ -118,8 +118,9 @@ async function sendAnonymousMonitor(
     return response
   }
   streaks.set(ctx, monitorBlockStreak(ctx) + 1)
-  if (proxy) ctx.log("warn", storeBlockedLine(ctx.task.store, response.status))
-  else ctx.log("warn", `${storeName(ctx.task.store)} blocked this connection (HTTP ${response.status}). Add a residential proxy group to this task.`)
+  ctx.log("warn", proxy
+    ? storeBlockedLine(ctx.task.store, response.status)
+    : `${storeName(ctx.task.store)} blocked this connection (HTTP ${response.status}). This monitor has no proxy. Add residential proxies to its group.`)
   if (list.length > 1) {
     const next = advanceProxy(ctx, list, proxy)
     if (next) {

@@ -14,7 +14,7 @@ import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../
 import { overridesWithStoreRole } from "../shared/store-defaults"
 import { checkoutsToStart, triggerDecision } from "../shared/task-role"
 import { accountPartition } from "../shared/consistency"
-import { backoffDelay, jitterDelay, PoliteLimiter } from "./polite"
+import { backoffDelay, jitterDelay, perProxyFloorMs, perProxyPaceLine, PoliteLimiter } from "./polite"
 import { accountsToWarm, storeHome } from "./session-care"
 import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
 import { guardTestMode, isFinalSubmit, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
@@ -259,6 +259,12 @@ export class TaskService {
           monitorProxies = proxies
         }
         if (monitorTask && monitorProxies?.length === 1) update({ log: line("warn", SINGLE_PROXY_WARNING) })
+        if (monitorTask && monitorProxies?.length) {
+          const loadedPace = this.db.getSettings()
+          const fastest = Math.min(loadedPace.monitorDelayMs, loadedPace.monitorFastDelayMs || loadedPace.monitorDelayMs)
+          const paceLine = perProxyPaceLine(task.store, monitorProxies.length, fastest)
+          if (paceLine) update({ log: line("warn", paceLine) })
+        }
       }
       const loaded = this.db.getSettings()
       const role = task.kind === "monitor" ? "monitor" : "checkout"
@@ -343,8 +349,10 @@ export class TaskService {
           if (status === "in_stock") detectedAt = Date.now()
           if (status === "adding_to_cart" && detectedAt) update({ detectToCartMs: Date.now() - detectedAt })
           update({ status })
-          if (status === "monitoring") {
-            ctx.proxy = monitorProxy
+          // A monitor never checks out, so it stays on the monitor proxies in every phase.
+          // Moving to the checkout pool here sent an in-stock monitor out with no proxy at all.
+          if (status === "monitoring" || monitorTask) {
+            ctx.proxy = ctx.proxy && monitorProxies?.some((item) => item.id === ctx.proxy?.id) ? ctx.proxy : monitorProxy
             ctx.proxies = monitorProxies
             if (monitorTask && !openedStock) {
               openedStock = true
@@ -366,7 +374,8 @@ export class TaskService {
           const base = ms === settings.monitorDelayMs
             ? adaptiveDelay(fresh.store, Date.now(), settings, this.db.listSchedules(), Math.random())
             : jitterDelay(ms, settings.monitorJitterPct, Math.random())
-          return sleep(base + backoffDelay(score?.streak ?? 0, pace.blockBackoffMs), controller.signal)
+          const floor = monitorTask ? perProxyFloorMs(task.store, ctx.proxies?.length || (ctx.proxy ? 1 : 0)) : 0
+          return sleep(Math.max(base, floor) + backoffDelay(score?.streak ?? 0, pace.blockBackoffMs), controller.signal)
         },
         onSession: async (session: FullAccount["session"]) => {
           if (!session || !account.id) return

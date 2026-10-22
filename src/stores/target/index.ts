@@ -117,7 +117,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "paused") return { outcome: "paused", reason: stock.reason }
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
-      ctx.log("warn", stock.reason)
+      if (stock.reason !== MONITOR_WAIT) ctx.log("warn", stock.reason)
       await ctx.sleep(retryWait(ctx))
       continue
     }
@@ -310,14 +310,17 @@ async function readStock(
   return secondaryStep
 }
 
+/** The block itself is already logged once in plain words by the monitor's request path. */
+const MONITOR_WAIT = "Waiting before the next stock check."
+
 function interpretMonitor(response: HttpResponse, hasProxy: boolean, monitorOnly = false): Step<StockReading> {
   if (isChallenge(response.status, response.body)) {
     // A monitor has no account browser, so a block is never a checkout challenge. Wait and check again.
-    if (monitorOnly) return { kind: "retry", reason: monitorStatusReason(response.status, hasProxy) ?? `Monitor request returned HTTP ${response.status}. Retrying.` }
+    if (monitorOnly) return { kind: "retry", reason: MONITOR_WAIT }
     return { kind: "paused", reason: TARGET_PAUSE }
   }
   const blocked = monitorStatusReason(response.status, hasProxy)
-  if (blocked) return { kind: "retry", reason: blocked }
+  if (blocked) return { kind: "retry", reason: monitorOnly && [403, 412, 429, 435].includes(response.status) ? MONITOR_WAIT : blocked }
   const reading = parseStock(response.body)
   if (reading) reading.imageUrl = productImage(response.body) || undefined
   const problem = stockProblem(response.body)
