@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react"
 import { AccountsPage } from "./pages/Accounts"
-import { ClientsPage } from "./pages/Clients"
 import { ProfilesPage } from "./pages/Profiles"
 import { ProxiesPage } from "./pages/Proxies"
 import { PhonePage } from "./pages/Phone"
@@ -18,8 +17,10 @@ import { ModulesPage } from "./pages/Modules"
 import { ShipmentsPage } from "./pages/Shipments"
 import { StoreDefaults } from "./pages/StoreDefaults"
 import { AccountGate, WaitingAccount } from "./pages/AccountGate"
+import { AcoPage } from "./pages/Aco"
 import { Wizard } from "./pages/Wizard"
 import { deskText } from "../../shared/desk-ui"
+import { grantFeatures } from "../../shared/entitlements"
 import { parseRoute, routeHash, type SectionId } from "../../shared/nav"
 import { SuccessScreen, type WinCard } from "./components/Success"
 import { UpdatePrompt } from "./components/UpdatePrompt"
@@ -30,12 +31,14 @@ import { errorText, unwrap } from "./lib"
 import { applyTheme } from "./theme"
 import { playSuccessChime } from "./sound"
 
-const NAV: Array<{ id: SectionId; icon: string }> = [
-  { id: "home", icon: "home" },
-  { id: "tasks", icon: "tasks" },
-  { id: "people", icon: "profiles" },
-  { id: "clients", icon: "clients" },
-  { id: "settings", icon: "settings" }
+const NAV: Array<{ id: SectionId; icon: string; label: "navHome" | "navTasks" | "navProfiles" | "navProxies" | "navAccounts" | "navAco" | "navSettings" }> = [
+  { id: "home", icon: "home", label: "navHome" },
+  { id: "tasks", icon: "tasks", label: "navTasks" },
+  { id: "profiles", icon: "profiles", label: "navProfiles" },
+  { id: "proxies", icon: "proxies", label: "navProxies" },
+  { id: "accounts", icon: "accounts", label: "navAccounts" },
+  { id: "aco", icon: "clients", label: "navAco" },
+  { id: "settings", icon: "settings", label: "navSettings" }
 ]
 
 function readRail(): boolean {
@@ -161,7 +164,7 @@ export function App() {
         </div>
         <nav aria-label="Sections">
           {NAV.map((item) => {
-            const label = deskText(lang, item.id === "home" ? "navHome" : item.id === "tasks" ? "navTasks" : item.id === "people" ? "navPeople" : item.id === "clients" ? "navClients" : "navSettings")
+            const label = deskText(lang, item.label)
             return (
               <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined} aria-label={label} title={label}>
                 <NavIcon name={item.icon} />
@@ -197,8 +200,10 @@ export function App() {
         {!booting && signedIn && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = next.appName || "TCGAIO"; setWizard(false); go("home") }} /> : null}
         {!booting && signedIn && !wizard && page === "home" ? <DashboardPage lang={lang} onTasks={() => go("tasks")} /> : null}
         {!booting && signedIn && !wizard && page === "tasks" ? <TasksPage lockedKind={tab === "monitor" || tab === "checkout" ? tab : ""} /> : null}
-        {!booting && signedIn && !wizard && page === "clients" ? <ClientsPage /> : null}
-        {!booting && signedIn && !wizard && page === "people" ? <PeopleTabs tab={tab === "accounts" || tab === "proxies" ? tab : "profiles"} lang={lang} /> : null}
+        {!booting && signedIn && !wizard && page === "profiles" ? <section className="page"><ProfilesPage /></section> : null}
+        {!booting && signedIn && !wizard && page === "proxies" ? <section className="page"><ProxiesPage /></section> : null}
+        {!booting && signedIn && !wizard && page === "accounts" ? <section className="page"><AccountsPage /></section> : null}
+        {!booting && signedIn && !wizard && page === "aco" ? <AcoPage unlocked={grantFeatures({ role: account?.role, email: account?.email }).includes("aco")} advanced={tab === "advanced"} /> : null}
         {!booting && signedIn && !wizard && page === "settings" ? <SettingsTabs tab={tab || "general"} lang={lang} onSettings={setSettings} /> : null}
       </main>
       {win ? <SuccessScreen win={win} sound={settings.successSound} onSound={(on) => void setSound(on)} onClose={() => setWin(null)} /> : null}
@@ -228,19 +233,6 @@ const NAV_PATH: Record<string, string> = {
   stores: "M3 6.2 8 3l5 3.2V13H3zM6.5 13V8.5h3V13"
 }
 
-function PeopleTabs({ tab, lang }: { tab: "profiles" | "accounts" | "proxies"; lang: "en" | "es" }) {
-  return (
-    <section className="page">
-      <div className="segments" role="tablist">
-        <a href="#people/profiles" aria-current={tab === "profiles" ? "page" : undefined}>{deskText(lang, "tabProfiles")}</a>
-        <a href="#people/accounts" aria-current={tab === "accounts" ? "page" : undefined}>{deskText(lang, "tabAccounts")}</a>
-        <a href="#people/proxies" aria-current={tab === "proxies" ? "page" : undefined}>{deskText(lang, "tabProxies")}</a>
-      </div>
-      {tab === "accounts" ? <AccountsPage /> : tab === "proxies" ? <ProxiesPage /> : <ProfilesPage />}
-    </section>
-  )
-}
-
 function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es"; onSettings: (next: Settings) => void }) {
   const items = [
     ["general", deskText(lang, "setGeneral")],
@@ -255,11 +247,18 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
     ["keeper", deskText(lang, "setKeeper")],
     ["vault", deskText(lang, "setVault")]
   ] as const
+  const advanced = items.filter(([id]) => id !== "general")
   return (
     <section className="page">
-      <div className="segments scroll-x" role="tablist">
-        {items.map(([id, label]) => <a key={id} href={id === "general" ? "#settings" : `#settings/${id}`} aria-current={tab === id ? "page" : undefined}>{label}</a>)}
+      <div className="segments" role="tablist">
+        <a href="#settings" aria-current={tab === "general" ? "page" : undefined}>{deskText(lang, "setGeneral")}</a>
       </div>
+      <details className="advanced" open={tab !== "general"}>
+        <summary>Advanced</summary>
+        <div className="segments scroll-x" role="tablist">
+          {advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`} aria-current={tab === id ? "page" : undefined}>{label}</a>)}
+        </div>
+      </details>
       {tab === "logs" ? <LogsPage /> : null}
       {tab === "stores" ? <StoresTab onSettings={onSettings} /> : null}
       {tab === "phone" ? <PhonePage /> : null}
