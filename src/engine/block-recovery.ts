@@ -1,5 +1,6 @@
 import type { HttpClient, HttpRequest, HttpResponse } from "./http"
 import { proxyLabel } from "../shared/proxy"
+import { storeName } from "../shared/stores"
 import type { ProxyEndpoint, SessionCookies, Settings } from "../shared/types"
 import type { StoreRunContext } from "../stores/module"
 import { classifyTraffic } from "./traffic"
@@ -37,6 +38,8 @@ interface StickyState {
 }
 
 const sticky = new Map<string, StickyState>()
+const streaks = new WeakMap<StoreRunContext, number>()
+const MONITOR_BACKOFF_CAP_MS = 2 * 60 * 1000
 const binders = new WeakMap<StoreRunContext, (cookies: SessionCookies) => void>()
 
 export function resetBlockRecoveryState(): void {
@@ -67,11 +70,72 @@ export function isBlockStatus(status: number, response?: Pick<HttpResponse, "bod
   return status === 429
 }
 
+/** An anonymous stock monitor: no store account and no checkout. It never touches a session or a browser. */
+export function isAnonymousMonitor(ctx: Pick<StoreRunContext, "monitorOnly" | "account">): boolean {
+  return ctx.monitorOnly === true && !ctx.account?.id
+}
+
+/** Blocked responses in a row for this run. Resets on the first response that is not a block. */
+export function monitorBlockStreak(ctx: StoreRunContext): number {
+  return streaks.get(ctx) ?? 0
+}
+
+/**
+ * Wait before the next stock check after a block. With several proxies the monitor already moved
+ * to another one, so the normal monitor delay is enough. With one proxy (or none) the wait doubles
+ * per block in a row, never below the monitor delay and never above two minutes.
+ */
+export function monitorBlockWait(ctx: StoreRunContext, delayMs: number, random = Math.random()): number {
+  const streak = monitorBlockStreak(ctx)
+  const base = Number.isFinite(delayMs) && delayMs > 0 ? delayMs : 1000
+  if (streak < 1 || proxyList(ctx).length > 1) return base
+  const exp = Math.min(base * 2 ** Math.min(streak - 1, 10), MONITOR_BACKOFF_CAP_MS)
+  const unit = Math.min(1, Math.max(0, random))
+  const jittered = Math.round(exp * (0.85 + unit * 0.15))
+  return Math.min(MONITOR_BACKOFF_CAP_MS, Math.max(base, jittered))
+}
+
+export function storeBlockedLine(store: StoreRunContext["task"]["store"], status: number): string {
+  return `${storeName(store)} blocked this proxy (HTTP ${status}). Add more residential proxies to the group or try another one.`
+}
+
+export const SINGLE_PROXY_WARNING = "This group has 1 proxy. Stores block a single proxy quickly."
+
+async function sendAnonymousMonitor(
+  ctx: StoreRunContext,
+  request: HttpRequest,
+  options: { inner: HttpClient; blocked: (response: HttpResponse) => boolean }
+): Promise<HttpResponse> {
+  const list = proxyList(ctx)
+  rememberStart(stickKey(ctx), list, ctx.proxy)
+  const proxy = selectProxy(stickKey(ctx), list, Date.now()) ?? ctx.proxy
+  if (proxy) ctx.proxy = proxy
+  const response = await options.inner.request({ ...request, proxy, signal: ctx.signal })
+  const kind = classifyTraffic(response)
+  const blocked = options.blocked(response) && (kind === "rate_limit" || kind === "hard_block" || kind === "challenge")
+  if (!blocked) {
+    streaks.set(ctx, 0)
+    return response
+  }
+  streaks.set(ctx, monitorBlockStreak(ctx) + 1)
+  if (proxy) ctx.log("warn", storeBlockedLine(ctx.task.store, response.status))
+  else ctx.log("warn", `${storeName(ctx.task.store)} blocked this connection (HTTP ${response.status}). Add a residential proxy group to this task.`)
+  if (list.length > 1) {
+    const next = advanceProxy(ctx, list, proxy)
+    if (next) {
+      ctx.proxy = next
+      if (proxyKey(next) !== proxyKey(proxy)) ctx.log("info", `Rotating to proxy ${proxyLabel(next)} for the next stock check.`)
+    }
+  }
+  return response
+}
+
 export async function sendWithRecovery(
   ctx: StoreRunContext,
   request: HttpRequest,
   options: { homeUrl: string; inner: HttpClient; blocked: (response: HttpResponse) => boolean }
 ): Promise<HttpResponse> {
+  if (isAnonymousMonitor(ctx)) return sendAnonymousMonitor(ctx, request, options)
   const budget = blockRetryBudget(ctx.settings)
   const list = proxyList(ctx)
   rememberStart(stickKey(ctx), list, ctx.proxy)

@@ -1,6 +1,6 @@
 import { applySolvedCookies, challengePageUrl, classifyChallenge, cookieHeader } from "./challenge"
 import type { ChallengeGate } from "./challenge-gate"
-import { isBlockStatus as blockStatus, sendWithRecovery, type SessionRefresher } from "./block-recovery"
+import { isBlockStatus as blockStatus, sendWithRecovery, SINGLE_PROXY_WARNING, type SessionRefresher } from "./block-recovery"
 import { classifyTraffic, pollQueue } from "./traffic"
 import { plainNetworkError } from "./chromium-session"
 import { adaptiveDelay, detectChanges, MonitorHub, stockCheckLine, type WatchSnapshot } from "./monitor"
@@ -258,6 +258,7 @@ export class TaskService {
           monitorProxy = proxy
           monitorProxies = proxies
         }
+        if (monitorTask && monitorProxies?.length === 1) update({ log: line("warn", SINGLE_PROXY_WARNING) })
       }
       const loaded = this.db.getSettings()
       const role = task.kind === "monitor" ? "monitor" : "checkout"

@@ -178,6 +178,16 @@ export interface ProxyTestResult {
   error?: string
 }
 
+export interface ProxyStoreTestResult {
+  proxyId: string
+  label: string
+  store: StoreId
+  storeName: string
+  status: number | null
+  result: "ok" | "blocked" | "error"
+  detail: string
+}
+
 export type LogLevel = "info" | "warn" | "error" | "success"
 
 export interface LogLine {

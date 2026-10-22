@@ -3,7 +3,7 @@ import QRCode from "qrcode"
 import { relayRestockUrl, type AlertService } from "../engine/alerts"
 import type { ChallengeController } from "./challenge-window"
 import { postDiscord } from "../engine/discord"
-import { checkStoreHealth } from "../engine/health"
+import { checkStoreHealth, testProxiesAgainstStores } from "../engine/health"
 import type { SessionBrowser } from "./session-window"
 import type { UpdateController } from "./auto-update"
 import { parseBulkTasks } from "../engine/bulk"
@@ -98,6 +98,7 @@ export function registerIpc(
     return { id }
   })
   handle(channels.proxiesTest, (id: string) => testProxies(db.getProxyGroup(id).proxies))
+  handle(channels.proxiesStoreTest, (id: string) => testProxiesAgainstStores(chromiumHttp, db.getProxyGroup(id).proxies))
   handle(channels.proxiesHealth, () => db.proxyScores())
   handle(channels.accountsList, () => db.listAccounts())
   handle(channels.accountsSave, (input) => db.saveAccount(input))
