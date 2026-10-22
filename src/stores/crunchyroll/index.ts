@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorBlockReason, monitorKeepsWatching, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
@@ -168,7 +168,7 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string): Promise<Step<StockReading>> {
   const response = await sharedValue(ctx, monitorKey("crunchyroll", sku, "product", ctx.proxy), () => store(ctx, { method: "GET", url: productApiUrl(sku), headers: apiHeaders(jar, productPageUrl(sku)) }))
   if (response.kind !== "ok") return response
-  const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
+  const blocked = monitorBlockReason(ctx, response.value.status)
   if (blocked) return { kind: "retry", reason: blocked }
   const reading = readStock(response.value.body, sku)
   if (reading) {
@@ -375,6 +375,8 @@ async function pay(ctx: StoreRunContext, jar: CookieJar, sku: string, basketId: 
 
 async function store(ctx: StoreRunContext, request: HttpRequest): Promise<Step<HttpResponse>> {
   const response = await send(ctx, request)
+  const watching = monitorKeepsWatching(ctx, response.status)
+  if (watching) return { kind: "retry", reason: watching }
   if (isChallenge(response.status, response.body, header(response, "cf-mitigated"))) {
     return { kind: "paused", reason: CRUNCHYROLL_PAUSE }
   }

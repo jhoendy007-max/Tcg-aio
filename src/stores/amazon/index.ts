@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorBlockReason, monitorKeepsWatching, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
@@ -161,7 +161,7 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Pr
   if (ctx.module?.endpoint === "page") {
     const page = await sharedValue(ctx, monitorKey("amazon", asin, "page", ctx.proxy), () => amazon(ctx, jar, { method: "GET", url: productUrl(asin), headers: pageHeaders(jar, "https://www.amazon.com/") }))
     if (page.kind !== "ok") return page
-    const pageBlocked = monitorStatusReason(page.value.status, Boolean(ctx.proxy))
+    const pageBlocked = monitorBlockReason(ctx, page.value.status)
     if (pageBlocked) return { kind: "retry", reason: pageBlocked }
     const reading = readStock(page.value.status === 200 ? page.value.body : "", "", asin, soldBy)
     reading.imageUrl = productImage(page.value.body) || undefined
@@ -174,7 +174,7 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Pr
     headers: pageHeaders(jar, productUrl(asin), true)
   }))
   if (offers.kind !== "ok") return offers
-  const offersBlocked = monitorStatusReason(offers.value.status, Boolean(ctx.proxy))
+  const offersBlocked = monitorBlockReason(ctx, offers.value.status)
   if (offersBlocked) return { kind: "retry", reason: offersBlocked }
   const offerHtml = offers.value.status === 200 ? offers.value.body : ""
   const offersUseful = /aod-offer|aod-pinned|aod-offer-soldBy/i.test(offerHtml)
@@ -182,7 +182,7 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, asin: string): Pr
   if (!offersUseful) {
     const page = await sharedValue(ctx, monitorKey("amazon", asin, "page", ctx.proxy), () => amazon(ctx, jar, { method: "GET", url: productUrl(asin), headers: pageHeaders(jar, "https://www.amazon.com/") }))
     if (page.kind !== "ok") return page
-    const productBlocked = monitorStatusReason(page.value.status, Boolean(ctx.proxy))
+    const productBlocked = monitorBlockReason(ctx, page.value.status)
     if (productBlocked) return { kind: "retry", reason: productBlocked }
     productHtml = page.value.body
   }
@@ -276,7 +276,7 @@ async function amazon(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest
       jar.absorb(response)
     }
   }
-  const stopped = classify(response)
+  const stopped = classify(ctx, response)
   if (stopped) return stopped
   if (!follow || response.status < 300 || response.status >= 400) return { kind: "ok", value: response }
   const location = header(response, "location")
@@ -289,12 +289,12 @@ async function amazon(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest
     const posted = await submitOwnCode(ctx, jar, again.body)
     if (posted) {
       jar.absorb(posted)
-      const postedStop = classify(posted)
+      const postedStop = classify(ctx, posted)
       if (postedStop) return postedStop
       return { kind: "ok", value: posted }
     }
   }
-  const againStopped = classify(again)
+  const againStopped = classify(ctx, again)
   if (againStopped) return againStopped
   return { kind: "ok", value: again }
 }
@@ -323,8 +323,10 @@ async function submitOwnCode(ctx: StoreRunContext, jar: CookieJar, body: string)
   })
 }
 
-function classify(response: HttpResponse): StepStop | undefined {
+function classify(ctx: StoreRunContext, response: HttpResponse): StepStop | undefined {
   const location = header(response, "location")
+  const watching = monitorKeepsWatching(ctx, response.status)
+  if (watching) return { kind: "retry", reason: watching }
   if (isChallenge(response.status, response.body, location)) return { kind: "paused", reason: AMAZON_PAUSE }
   if (isTwoFactor(response.body, location)) return { kind: "paused", reason: TWO_FA_PAUSE }
   if (isSignIn(response.body, location)) return { kind: "unauthorized", reason: "Unauthorized" }

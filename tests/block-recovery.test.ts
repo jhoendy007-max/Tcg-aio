@@ -179,6 +179,90 @@ describe("block recovery", () => {
     expect(seen).toEqual(["10.0.0.1"])
   })
 
+  it("rotates an anonymous monitor without reloading a session", async () => {
+    const logs: string[] = []
+    const seen: string[] = []
+    const http = {
+      async request(input: HttpRequest) {
+        seen.push(input.proxy?.host ?? "direct")
+        return json(435, "")
+      }
+    }
+    const run = ctx({
+      monitorOnly: true,
+      account: { id: "", store: "target" } as StoreRunContext["account"],
+      http,
+      log: (_level, message) => { logs.push(message) },
+      refreshSession: async () => {
+        throw new Error("anonymous monitors must not open a browser")
+      }
+    })
+    const response = await sendWithRecovery(run, { method: "GET", url: "https://redsky.target.com/stock" }, {
+      homeUrl: "https://www.target.com/",
+      inner: http,
+      blocked: (result) => isBlockStatus(result.status, result)
+    })
+    expect(response.status).toBe(435)
+    expect(seen).toEqual(["10.0.0.1"])
+    expect(selectProxy("target:", proxies, Date.now())?.host).toBe("10.0.0.2")
+    expect(logs.join("\n")).not.toMatch(/reloading the store session|saved session|embedded browser/i)
+  })
+
+  it("rotates an anonymous monitor off a challenge page without opening a browser", async () => {
+    const seen: string[] = []
+    const http = {
+      async request(input: HttpRequest) {
+        seen.push(input.proxy?.host ?? "direct")
+        return json(403, "<html><body>Please verify you are a human</body></html>")
+      }
+    }
+    const run = ctx({
+      monitorOnly: true,
+      account: { id: "", store: "target" } as StoreRunContext["account"],
+      http,
+      refreshSession: async () => {
+        throw new Error("anonymous monitors must not open a browser")
+      }
+    })
+    const response = await sendWithRecovery(run, { method: "GET", url: "https://www.target.com/p/-/A-1" }, {
+      homeUrl: "https://www.target.com/",
+      inner: http,
+      blocked: (result) => isBlockStatus(result.status, result)
+    })
+    expect(response.status).toBe(403)
+    expect(seen).toEqual(["10.0.0.1"])
+    expect(selectProxy("target:", proxies, Date.now())?.host).toBe("10.0.0.2")
+  })
+
+  it("backs off a single-proxy monitor instead of opening a browser", async () => {
+    const seen: string[] = []
+    const http = {
+      async request(input: HttpRequest) {
+        seen.push(input.proxy?.host ?? "direct")
+        return json(403, "blocked")
+      }
+    }
+    const only = [proxies[0]]
+    const run = ctx({
+      monitorOnly: true,
+      proxies: only,
+      proxy: only[0],
+      account: { id: "", store: "target" } as StoreRunContext["account"],
+      http,
+      refreshSession: async () => {
+        throw new Error("anonymous monitors must not open a browser")
+      }
+    })
+    const response = await sendWithRecovery(run, { method: "GET", url: "https://redsky.target.com/stock" }, {
+      homeUrl: "https://www.target.com/",
+      inner: http,
+      blocked: (result) => isBlockStatus(result.status, result)
+    })
+    expect(response.status).toBe(403)
+    expect(seen).toEqual(["10.0.0.1"])
+    expect(selectProxy("target:", only, Date.now())?.host).toBe("10.0.0.1")
+  })
+
   it("lets a task with no account move to the next proxy", async () => {
     const seen: HttpRequest[] = []
     let hits = 0

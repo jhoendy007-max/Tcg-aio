@@ -1,5 +1,5 @@
 import type { SessionRefreshResult } from "../engine/block-recovery"
-import type { WatchSnapshot } from "../engine/monitor"
+import { monitorBlockDelay, monitorStrike, type WatchSnapshot } from "../engine/monitor"
 import type { CheckResult, TestStage } from "../engine/test-mode"
 import type { HttpClient } from "../engine/http"
 import type { ModulePace } from "../shared/module-settings"
@@ -88,7 +88,12 @@ export function checkoutPreflight(ctx: StoreRunContext, price?: number): { outco
 }
 
 export function retryWait(ctx: StoreRunContext): number {
-  return ctx.module?.retryDelayMs ?? ctx.settings.monitorDelayMs
+  const base = ctx.module?.retryDelayMs ?? ctx.settings.monitorDelayMs
+  if (!ctx.monitorOnly) return base
+  const attempt = monitorStrike(ctx.task.id)
+  if (attempt <= 0) return base
+  const cap = Math.min(60_000, Math.max(ctx.settings.monitorDelayMs, 2_000))
+  return monitorBlockDelay(attempt, cap)
 }
 
 export type StoreRunResult =

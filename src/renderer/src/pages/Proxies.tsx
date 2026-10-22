@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { consistencyText, healthScore } from "../../../shared/consistency"
 import { formatProxy } from "../../../shared/proxy"
-import type { ProxyGroup, ProxyNetwork, ProxyScore, ProxyTestResult } from "../../../shared/types"
+import type { ProxyGroup, ProxyNetwork, ProxyScore, ProxyStoreTestResult, ProxyTestResult } from "../../../shared/types"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
@@ -15,7 +15,9 @@ export function ProxiesPage() {
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<Record<string, ProxyTestResult[]>>({})
+  const [storeResults, setStoreResults] = useState<Record<string, ProxyStoreTestResult[]>>({})
   const [testing, setTesting] = useState<string | null>(null)
+  const [storeTesting, setStoreTesting] = useState<string | null>(null)
   const [lang, setLang] = useState<"en" | "es">("en")
 
   async function reload() {
@@ -61,6 +63,19 @@ export function ProxiesPage() {
       setError(errorText(err))
     } finally {
       setTesting(null)
+    }
+  }
+
+  async function testStores(id: string) {
+    setStoreTesting(id)
+    setError("")
+    try {
+      const next = await unwrap(window.aio.proxies.testStores(id))
+      setStoreResults((current) => ({ ...current, [id]: next }))
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setStoreTesting(null)
     }
   }
 
@@ -113,7 +128,8 @@ export function ProxiesPage() {
               </div>
               <div className="actions">
                 <button type="button" onClick={() => { setEditing(group.id); setName(group.name); setNetwork(group.network); setText((group.proxies ?? []).map(formatProxy).join("\n")) }}>Edit</button>
-                <button type="button" onClick={() => void test(group.id)} disabled={testing === group.id}>{testing === group.id ? "Testing…" : "Test"}</button>
+                <button type="button" onClick={() => void test(group.id)} disabled={testing === group.id || storeTesting === group.id}>{testing === group.id ? "Testing…" : "Test"}</button>
+                <button type="button" onClick={() => void testStores(group.id)} disabled={testing === group.id || storeTesting === group.id}>{storeTesting === group.id ? "Testing stores…" : "Test proxy against store"}</button>
                 <button type="button" className="danger" onClick={() => void remove(group.id)}>Delete</button>
               </div>
             </div>
@@ -125,6 +141,16 @@ export function ProxiesPage() {
                     <span>{result.ok ? `Alive ${result.ip ?? ""}` : result.error}</span>
                   </li>
                 ))}
+              </ul>
+            ) : null}
+            {storeResults[group.id] ? (
+              <ul className="proxy-results">
+                {storeResults[group.id].flatMap((result) => result.probes.map((probe) => (
+                  <li key={`${result.id}-${probe.store}`} className={probe.verdict === "ok" ? "ok" : "bad"}>
+                    <span>{result.label} · {probe.storeName}</span>
+                    <span>{probe.verdict === "ok" ? "OK" : probe.verdict === "blocked" ? "Blocked" : probe.detail}</span>
+                  </li>
+                )))}
               </ul>
             ) : null}
             <ul className="proxy-results">

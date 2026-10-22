@@ -1,4 +1,4 @@
-import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorBlockReason, monitorKeepsWatching, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { note } from "../../engine/test-mode"
 import { chromeUserAgent } from "../../engine/chrome-ua"
@@ -120,11 +120,13 @@ async function readOffer(
     store(ctx, spec, jar, { method: "GET", url: page, headers: pageHeaders(jar, spec.home) })
   )
   if (response.kind !== "ok") return response
+  const watching = monitorKeepsWatching(ctx, response.value.status)
+  if (watching) return { kind: "retry", reason: watching }
   if (isPageChallenge(response.value.status, response.value.body)) return { kind: "paused", reason: challenge }
   if (response.value.status === 401 || isLoginWall(response.value.body)) {
     return { kind: "paused", reason: checkoutCopy(checkoutLang(ctx.settings.language)).notSignedIn(spec.name) }
   }
-  const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
+  const blocked = monitorBlockReason(ctx, response.value.status)
   if (blocked) return { kind: "retry", reason: blocked }
   const reading = readPageOffer(spec, response.value.body, sku)
   if (response.value.status === 404) {

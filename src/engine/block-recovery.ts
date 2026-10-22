@@ -1,4 +1,5 @@
 import type { HttpClient, HttpRequest, HttpResponse } from "./http"
+import { clearMonitorStrike, noteMonitorStrike, resetMonitorStrikes } from "./monitor"
 import { proxyLabel } from "../shared/proxy"
 import type { ProxyEndpoint, SessionCookies, Settings } from "../shared/types"
 import type { StoreRunContext } from "../stores/module"
@@ -41,6 +42,7 @@ const binders = new WeakMap<StoreRunContext, (cookies: SessionCookies) => void>(
 
 export function resetBlockRecoveryState(): void {
   sticky.clear()
+  resetMonitorStrikes()
 }
 
 export function attachSession(ctx: StoreRunContext, apply: (cookies: SessionCookies) => void): void {
@@ -72,6 +74,7 @@ export async function sendWithRecovery(
   request: HttpRequest,
   options: { homeUrl: string; inner: HttpClient; blocked: (response: HttpResponse) => boolean }
 ): Promise<HttpResponse> {
+  if (ctx.monitorOnly) return sendMonitor(ctx, request, options)
   const budget = blockRetryBudget(ctx.settings)
   const list = proxyList(ctx)
   rememberStart(stickKey(ctx), list, ctx.proxy)
@@ -105,6 +108,37 @@ export async function sendWithRecovery(
     await reloadSession(ctx, request, options.homeUrl, next ?? proxy)
   }
   if (!response) throw new Error("Block recovery did not send a request.")
+  return response
+}
+
+/**
+ * One stock check. A block rotates to the next proxy, or waits in the monitor loop.
+ * It does not open a browser or reload a saved session.
+ */
+async function sendMonitor(
+  ctx: StoreRunContext,
+  request: HttpRequest,
+  options: { inner: HttpClient; blocked: (response: HttpResponse) => boolean }
+): Promise<HttpResponse> {
+  const list = proxyList(ctx)
+  rememberStart(stickKey(ctx), list, ctx.proxy)
+  const proxy = selectProxy(stickKey(ctx), list, Date.now()) ?? ctx.proxy
+  if (proxy) ctx.proxy = proxy
+  const response = await options.inner.request({ ...request, proxy, signal: ctx.signal })
+  const kind = classifyTraffic(response)
+  const blocked = options.blocked(response) && (kind === "rate_limit" || kind === "hard_block" || kind === "challenge")
+  if (!blocked) {
+    clearMonitorStrike(ctx.task.id)
+    return response
+  }
+  const others = list.filter((item) => !proxy || proxyKey(item) !== proxyKey(proxy))
+  if (others.length > 0) {
+    clearMonitorStrike(ctx.task.id)
+    const next = advanceProxy(ctx, list, proxy)
+    if (next) ctx.proxy = next
+  } else {
+    noteMonitorStrike(ctx.task.id)
+  }
   return response
 }
 

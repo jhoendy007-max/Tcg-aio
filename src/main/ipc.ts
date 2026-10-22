@@ -16,7 +16,7 @@ import { heartbeatAccount, reportCheckout, syncAccount } from "../engine/account
 import { licenseServerUrl } from "../shared/license-config"
 import { machineFingerprint } from "./machine-fingerprint"
 import type { Database } from "../engine/database"
-import { testProxies } from "../engine/proxy-test"
+import { testProxies, testProxiesAgainstStores } from "../engine/proxy-test"
 import type { TaskService } from "../engine/task-runner"
 import type { PhoneServer } from "../phone/server"
 import { encodePairingPayload } from "../phone/protocol"
@@ -98,6 +98,7 @@ export function registerIpc(
     return { id }
   })
   handle(channels.proxiesTest, (id: string) => testProxies(db.getProxyGroup(id).proxies))
+  handle(channels.proxiesTestStores, (id: string) => testProxiesAgainstStores(db.getProxyGroup(id).proxies, chromiumHttp))
   handle(channels.proxiesHealth, () => db.proxyScores())
   handle(channels.accountsList, () => db.listAccounts())
   handle(channels.accountsSave, (input) => db.saveAccount(input))

@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, monitorPlaces, monitorStatusReason, noteWatch, sharedCall } from "../../engine/monitor"
+import { holdMonitorOnly, monitorBlockReason, monitorKeepsWatching, monitorKey, monitorPlaces, noteWatch, sharedCall } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
@@ -20,8 +20,9 @@ import {
   type StockReading
 } from "./parse"
 import { parseTcin } from "../../shared/tcin"
+import { anonymousVisitorId, TARGET_REDSKY_KEY, targetFulfillmentUrl, targetMonitorHeaders, targetMonitorUrl } from "./redsky"
 
-const DEFAULT_KEY = "9f36aeafbe60771e321a7cc95a78140772ab3e96"
+const DEFAULT_KEY = TARGET_REDSKY_KEY
 const ALLOWED_HOSTS = new Set(["carts.target.com", "redsky.target.com", "gsp.target.com", "www.target.com"])
 const FIELD_GROUPS = "ADDRESSES,CART,CART_ITEMS,SUMMARY,PAYMENT_INSTRUCTIONS,PROMOTION_CODES"
 
@@ -268,39 +269,32 @@ async function readStock(
   tcin: string,
   location: { storeId: string; zip: string; state: string }
 ): Promise<Step<StockReading>> {
-  const summary = new URL("https://redsky.target.com/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1")
-  summary.searchParams.set("key", key)
-  summary.searchParams.set("tcins", tcin)
-  summary.searchParams.set("store_id", location.storeId)
-  summary.searchParams.set("pricing_store_id", location.storeId)
-  summary.searchParams.set("zip", location.zip)
-  summary.searchParams.set("state", location.state)
-  summary.searchParams.set("channel", "WEB")
-  summary.searchParams.set("page", `/p/A-${tcin}`)
-  const primary = await sharedCall(ctx, monitorKey("target", tcin, `${location.zip}:${location.storeId}`, ctx.proxy), () => call(ctx, { method: "GET", url: summary.toString(), headers: monitorHeaders(tcin) }))
-  const primaryStep = interpretMonitor(primary, Boolean(ctx.proxy))
+  const visitorId = ctx.monitorOnly
+    ? anonymousVisitorId(ctx.task.id)
+    : ctx.account.session?.visitorId || anonymousVisitorId(ctx.task.id)
+  const query = { key, tcin, storeId: location.storeId, zip: location.zip, state: location.state, visitorId }
+  const headers = targetMonitorHeaders(tcin, visitorId, ctx.monitorOnly === true)
+  const primary = await sharedCall(ctx, monitorKey("target", tcin, `${location.zip}:${location.storeId}`, ctx.proxy), () => call(ctx, { method: "GET", url: targetMonitorUrl(query), headers }))
+  const primaryStep = interpretMonitor(primary, ctx)
   if (primaryStep.kind === "paused") return primaryStep
+  if (primaryStep.kind === "retry" && (primary.status === 403 || primary.status === 412 || primary.status === 429 || primary.status === 435)) {
+    return primaryStep
+  }
   if (primaryStep.kind === "ok" && primaryStep.value.status !== "UNKNOWN" && primaryStep.value.status !== "NOT_FOUND") {
     return primaryStep
   }
-  const legacy = new URL("https://redsky.target.com/redsky_aggregations/v1/web/pdp_fulfillment_v1")
-  legacy.searchParams.set("key", key)
-  legacy.searchParams.set("tcin", tcin)
-  legacy.searchParams.set("store_id", location.storeId)
-  legacy.searchParams.set("pricing_store_id", location.storeId)
-  legacy.searchParams.set("zip", location.zip)
-  legacy.searchParams.set("state", location.state)
-  legacy.searchParams.set("channel", "WEB")
-  const secondary = await call(ctx, { method: "GET", url: legacy.toString(), headers: monitorHeaders(tcin) })
-  const secondaryStep = interpretMonitor(secondary, Boolean(ctx.proxy))
+  const secondary = await call(ctx, { method: "GET", url: targetFulfillmentUrl(query), headers })
+  const secondaryStep = interpretMonitor(secondary, ctx)
   if (secondaryStep.kind === "ok" || secondaryStep.kind === "paused") return secondaryStep
   if (primaryStep.kind === "ok") return primaryStep
   return secondaryStep
 }
 
-function interpretMonitor(response: HttpResponse, hasProxy: boolean): Step<StockReading> {
+function interpretMonitor(response: HttpResponse, ctx: StoreRunContext): Step<StockReading> {
+  const watching = monitorKeepsWatching(ctx, response.status)
+  if (watching) return { kind: "retry", reason: watching }
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: TARGET_PAUSE }
-  const blocked = monitorStatusReason(response.status, hasProxy)
+  const blocked = monitorBlockReason(ctx, response.status)
   if (blocked) return { kind: "retry", reason: blocked }
   const reading = parseStock(response.body)
   if (reading) reading.imageUrl = productImage(response.body) || undefined
@@ -615,16 +609,6 @@ async function call(ctx: StoreRunContext, request: HttpRequest, carriesCard = fa
   if (!ALLOWED_HOSTS.has(host)) throw new Error(`Refusing to contact ${host}.`)
   if (carriesCard && host !== "carts.target.com") throw new Error("Card data can only be sent to the retailer.")
   return ctx.http.request({ ...request, proxy: ctx.proxy, signal: ctx.signal })
-}
-
-function monitorHeaders(tcin: string): Record<string, string> {
-  return {
-    accept: "application/json",
-    "accept-language": "en-US,en;q=0.9",
-    origin: "https://www.target.com",
-    referer: `https://www.target.com/p/-/A-${tcin}`,
-    "user-agent": chromeUserAgent()
-  }
 }
 
 function apiHeaders(jar: CookieJar, referer: string, json = true): Record<string, string> {

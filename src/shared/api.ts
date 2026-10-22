@@ -6,6 +6,7 @@ import type {
   ProxyGroup,
   ProxyGroupInput,
   ProxyScore,
+  ProxyStoreTestResult,
   ProxyTestResult,
   PublicAccount,
   PublicProfile,
@@ -74,6 +75,7 @@ export interface AioApi {
     save: (input: ProxyGroupInput) => Promise<Result<ProxyGroup>>
     delete: (id: string) => Promise<Result<{ id: string }>>
     test: (id: string) => Promise<Result<ProxyTestResult[]>>
+    testStores: (id: string) => Promise<Result<ProxyStoreTestResult[]>>
     health: () => Promise<Result<ProxyScore[]>>
   }
   accounts: {

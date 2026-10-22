@@ -6,6 +6,7 @@ import { createAesCipher } from "../src/engine/cipher"
 import { Database } from "../src/engine/database"
 import { TaskService } from "../src/engine/task-runner"
 import type { StoreModule } from "../src/stores/module"
+import { createTargetModule } from "../src/stores/target"
 import type { Notice } from "../src/shared/types"
 
 const address = {
@@ -263,6 +264,7 @@ describe("task runner", () => {
     await service.wait(monitor.id)
     const saved = db.getTask(monitor.id)
     const messages = saved.logs.map((entry) => entry.message)
+    expect(messages).toContain("This group has 1 proxy; stores block a single proxy quickly")
     expect(messages).toContain("Opening the stock check through proxy 69.85.83.159:48921.")
     expect(messages).toContain("Checking stock at redsky.target.com through proxy 69.85.83.159:48921.")
     expect(saved.status).toBe("failed")
@@ -270,5 +272,50 @@ describe("task runner", () => {
     expect(messages).not.toContain("net::ERR_BLOCKED_BY_CLIENT")
     const webhook = saved.logs.find((entry) => entry.message === "Discord webhook is not set.")
     expect(webhook?.level).toBe("info")
+  })
+
+  it("keeps watching when Target blocks the only proxy until the user stops", async () => {
+    const { db } = setup()
+    const group = db.saveProxyGroup({ name: "one", network: "residential", text: "13.141.190.3:28067" })
+    const monitor = db.saveTask({
+      store: "target",
+      sku: "94827540",
+      quantity: 1,
+      profileId: "",
+      accountId: "",
+      proxyGroupId: null,
+      monitorProxyGroupId: group.id,
+      confirmPurchase: false,
+      kind: "monitor",
+      monitorOnly: true
+    })
+    const service = new TaskService(db, new Map([["target", createTargetModule()]]), () => undefined, async () => false, {
+      async request(input) {
+        const url = new URL(input.url)
+        expect(url.searchParams.get("visitor_id")).toMatch(/^[0-9A-F]{32}$/)
+        expect(url.searchParams.get("pricing_store_id")).toBeTruthy()
+        expect(input.headers?.["x-requested-with"]).toBeUndefined()
+        return { status: 435, headers: {}, body: "" }
+      }
+    })
+    service.start(monitor.id)
+    const deadline = Date.now() + 8_000
+    let sawBlock = false
+    while (Date.now() < deadline) {
+      const messages = db.getTask(monitor.id).logs.map((entry) => entry.message)
+      if (messages.some((message) => message === "Target blocked this proxy (HTTP 435). Add more residential proxies to the group or try another one.")) {
+        sawBlock = true
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40))
+    }
+    service.stop(monitor.id)
+    await service.wait(monitor.id)
+    const saved = db.getTask(monitor.id)
+    const text = saved.logs.map((entry) => entry.message).join("\n")
+    expect(sawBlock).toBe(true)
+    expect(text).toContain("This group has 1 proxy; stores block a single proxy quickly")
+    expect(text).not.toMatch(/reloading the store session|saved session|embedded browser/i)
+    expect(saved.status).toBe("stopped")
   })
 })

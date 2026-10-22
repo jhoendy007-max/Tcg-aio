@@ -15,6 +15,7 @@ export const channels = {
   proxiesSave: "proxies:save",
   proxiesDelete: "proxies:delete",
   proxiesTest: "proxies:test",
+  proxiesTestStores: "proxies:test-stores",
   proxiesHealth: "proxies:health",
   accountsList: "accounts:list",
   accountsSave: "accounts:save",

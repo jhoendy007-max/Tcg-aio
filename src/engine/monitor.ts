@@ -1,5 +1,6 @@
 import type { HttpResponse } from "./http"
 import { STORE_GAP_MS } from "./polite"
+import { storeName } from "../shared/stores"
 import type { Settings, StoreId } from "../shared/types"
 
 export interface WatchSnapshot {
@@ -125,13 +126,67 @@ export function monitorKey(store: string, sku: string, location: string, proxy?:
   return `${store}:${sku}:${location}:${where}`
 }
 
+const monitorStrikes = new Map<string, number>()
+
+export function noteMonitorStrike(taskId: string): number {
+  const next = (monitorStrikes.get(taskId) ?? 0) + 1
+  monitorStrikes.set(taskId, next)
+  return next
+}
+
+export function clearMonitorStrike(taskId: string): void {
+  monitorStrikes.delete(taskId)
+}
+
+export function monitorStrike(taskId: string): number {
+  return monitorStrikes.get(taskId) ?? 0
+}
+
+export function resetMonitorStrikes(): void {
+  monitorStrikes.clear()
+}
+
+/** Exponential wait after a proxy block. The ceiling is the caller's cap, and never more than a minute. */
+export function monitorBlockDelay(attempt: number, capMs: number): number {
+  const cap = Math.max(500, Math.min(60_000, Math.round(Number.isFinite(capMs) ? capMs : 2_000)))
+  const exp = Math.min(1_000 * 2 ** Math.min(Math.max(attempt, 1) - 1, 5), cap)
+  return Math.max(500, Math.round(exp))
+}
+
+export function proxyCount(ctx: { proxy?: unknown; proxies?: readonly unknown[] | undefined }): number {
+  if (ctx.proxies?.length) return ctx.proxies.length
+  return ctx.proxy ? 1 : 0
+}
+
+export function storeBlockLine(storeLabel: string, status: number, count: number): string {
+  if (count > 1) return `${storeLabel} blocked this proxy (HTTP ${status}). Trying the next proxy in the group.`
+  return `${storeLabel} blocked this proxy (HTTP ${status}). Add more residential proxies to the group or try another one.`
+}
+
 /** 403, 412, 429, and 435 through a proxy are a block. Other 5xx stay an HTTP retry. */
-export function monitorStatusReason(status: number, hasProxy: boolean): string | null {
+export function monitorStatusReason(status: number, hasProxy: boolean, storeLabel = "The store", count = 1): string | null {
   if (status === 403 || status === 412 || status === 429 || status === 435) {
-    return hasProxy ? "Store blocked this proxy." : `Monitor request returned HTTP ${status}. Retrying.`
+    return hasProxy ? storeBlockLine(storeLabel, status, count) : `Monitor request returned HTTP ${status}. Retrying.`
   }
   if (status >= 500) return `Monitor request returned HTTP ${status}. Retrying.`
   return null
+}
+
+export function monitorBlockReason(
+  ctx: { proxy?: unknown; proxies?: readonly unknown[] | undefined; task: { store: StoreId } },
+  status: number
+): string | null {
+  return monitorStatusReason(status, Boolean(ctx.proxy), storeName(ctx.task.store), proxyCount(ctx))
+}
+
+/** Plain block sentence for an anonymous monitor. Checkout still pauses on a real challenge. */
+export function monitorKeepsWatching(
+  ctx: { monitorOnly?: boolean; proxy?: unknown; proxies?: readonly unknown[] | undefined; task: { store: StoreId } },
+  status: number
+): string | null {
+  if (!ctx.monitorOnly) return null
+  if (status !== 403 && status !== 412 && status !== 429 && status !== 435) return null
+  return monitorBlockReason(ctx, status)
 }
 
 export function stockCheckLine(host: string, proxy?: { host: string; port: number }): string {

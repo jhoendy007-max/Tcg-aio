@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorBlockReason, monitorKeepsWatching, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import type { SessionCookies } from "../../shared/types"
@@ -186,9 +186,11 @@ async function runBandai(ctx: StoreRunContext): Promise<StoreRunResult> {
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page: string): Promise<Step<StockReading>> {
   const response = await sharedValue(ctx, monitorKey("bandai", sku, "product", ctx.proxy), () => store(ctx, jar, { method: "GET", url: productApiUrl(sku), headers: apiHeaders(jar, page) }))
   if (response.kind !== "ok") return response
+  const watching = monitorKeepsWatching(ctx, response.value.status)
+  if (watching) return { kind: "retry", reason: watching }
   if (isChallenge(response.value.status, response.value.body)) return { kind: "paused", reason: BANDAI_PAUSE }
   if (response.value.status === 401) return { kind: "unauthorized", reason: EXPIRED_PAUSE }
-  const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
+  const blocked = monitorBlockReason(ctx, response.value.status)
   if (blocked) return { kind: "retry", reason: blocked }
   const reading = readStock(response.value.body, sku)
   if (reading) {

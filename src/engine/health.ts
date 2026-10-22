@@ -1,4 +1,5 @@
 import type { HttpClient } from "./http"
+import { TARGET_PROBE_VISITOR, targetMonitorUrl } from "../stores/target/redsky"
 import { proxyLabel } from "../shared/proxy"
 import { storeName } from "../shared/stores"
 import { STORE_IDS, type ProxyEndpoint, type StoreBlockRate, type StoreHealth, type StoreId } from "../shared/types"
@@ -6,7 +7,14 @@ import { STORE_IDS, type ProxyEndpoint, type StoreBlockRate, type StoreHealth, t
 export type { StoreHealth }
 
 const PROBES: Record<StoreId, string> = {
-  target: "https://redsky.target.com/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1?key=9f36aeafbe60771e321a7cc95a78140772ab3e96&tcins=88897904&store_id=1881&pricing_store_id=1881&zip=10001&state=NY&channel=WEB&page=%2Fp%2FA-88897904",
+  target: targetMonitorUrl({
+    key: "9f36aeafbe60771e321a7cc95a78140772ab3e96",
+    tcin: "88897904",
+    storeId: "1881",
+    zip: "10001",
+    state: "NY",
+    visitorId: TARGET_PROBE_VISITOR
+  }),
   walmart: "https://www.walmart.com/ip/13816151308",
   bestbuy: "https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&st=6606082",
   "pokemon-center": "https://www.pokemoncenter.com/",

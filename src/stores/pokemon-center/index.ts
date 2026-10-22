@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorBlockReason, monitorKeepsWatching, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
@@ -196,7 +196,7 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
   const response = await sharedValue(ctx, monitorKey("pokemon-center", sku, isProductUrl(ctx.task.sku, sku) ? "page" : "search", ctx.proxy), () => store(ctx, jar, { method: "GET", url: primary, headers: pageHeaders(jar, page) }))
   if (response.kind === "retry") return response
   if (response.kind !== "ok") return response
-  const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
+  const blocked = monitorBlockReason(ctx, response.value.status)
   if (blocked) return { kind: "retry", reason: blocked }
   let reading = readStock(response.value.body, sku)
   let imageBody = response.value.body
@@ -204,7 +204,7 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
   if ((!reading || searchMiss) && !isProductUrl(ctx.task.sku, sku)) {
     const fallback = await store(ctx, jar, { method: "GET", url: page, headers: pageHeaders(jar, page) })
     if (fallback.kind !== "ok") return fallback
-    const fallbackBlocked = monitorStatusReason(fallback.value.status, Boolean(ctx.proxy))
+    const fallbackBlocked = monitorBlockReason(ctx, fallback.value.status)
     if (fallbackBlocked) return { kind: "retry", reason: fallbackBlocked }
     const pageReading = readStock(fallback.value.body, sku)
     if (pageReading) {
@@ -379,15 +379,23 @@ async function pay(ctx: StoreRunContext, jar: CookieJar, page: string): Promise<
 async function store(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest): Promise<Step<HttpResponse>> {
   const response = await send(ctx, jar, { ...request, redirect: "manual" }, "store")
   const location = header(response, "location")
+  const queued = readQueueTarget(response.status, response.body, location)
+  if (!queued) {
+    const watching = monitorKeepsWatching(ctx, response.status)
+    if (watching) return { kind: "retry", reason: watching }
+  }
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: POKEMON_CENTER_PAUSE }
-  const queue = readQueueTarget(response.status, response.body, location)
-  if (queue) {
+  if (queued) {
     if (ctx.module?.queue === "skip") return { kind: "retry", reason: "Pokémon Center waiting room. This store is set to skip the queue." }
     if (ctx.module?.queue === "pause") return { kind: "paused", reason: "Pokémon Center waiting room. This store is set to pause instead of waiting." }
-    const waited = await waitInQueue(ctx, jar, queue)
+    const waited = await waitInQueue(ctx, jar, queued)
     if (waited.kind !== "ok") return waited
     if (ctx.signal.aborted) return { kind: "failed", reason: "Stopped" }
     const again = await send(ctx, jar, { ...request, redirect: "manual" }, "store")
+    const againWatching = monitorKeepsWatching(ctx, again.status)
+    if (againWatching && !readQueueTarget(again.status, again.body, header(again, "location"))) {
+      return { kind: "retry", reason: againWatching }
+    }
     if (isChallenge(again.status, again.body)) return { kind: "paused", reason: POKEMON_CENTER_PAUSE }
     if (readQueueTarget(again.status, again.body, header(again, "location"))) {
       return { kind: "paused", reason: "Pokémon Center returned to the waiting room after a pass. Resume after the line clears." }

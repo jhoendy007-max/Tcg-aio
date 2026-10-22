@@ -7,6 +7,7 @@ import {
   holdMonitorOnly,
   inDropWindow,
   MonitorHub,
+  monitorBlockDelay,
   percentile,
   monitorPlaces,
   monitorStatusReason,
@@ -26,15 +27,19 @@ const base = { ...DEFAULT_SETTINGS, monitorDelayMs: 8000, monitorFastDelayMs: 10
 
 describe("monitor status wording", () => {
   it("names a store block when a proxy is in use and keeps an HTTP retry without one", () => {
-    expect(monitorStatusReason(403, true)).toBe("Store blocked this proxy.")
-    expect(monitorStatusReason(412, true)).toBe("Store blocked this proxy.")
-    expect(monitorStatusReason(429, true)).toBe("Store blocked this proxy.")
-    expect(monitorStatusReason(435, true)).toBe("Store blocked this proxy.")
+    expect(monitorStatusReason(403, true, "Target", 1)).toBe("Target blocked this proxy (HTTP 403). Add more residential proxies to the group or try another one.")
+    expect(monitorStatusReason(412, true, "Walmart", 1)).toBe("Walmart blocked this proxy (HTTP 412). Add more residential proxies to the group or try another one.")
+    expect(monitorStatusReason(429, true, "Best Buy", 2)).toBe("Best Buy blocked this proxy (HTTP 429). Trying the next proxy in the group.")
+    expect(monitorStatusReason(435, true, "Target")).toBe("Target blocked this proxy (HTTP 435). Add more residential proxies to the group or try another one.")
     expect(monitorStatusReason(403, false)).toBe("Monitor request returned HTTP 403. Retrying.")
     expect(monitorStatusReason(500, true)).toBe("Monitor request returned HTTP 500. Retrying.")
     expect(monitorStatusReason(404, true)).toBeNull()
     expect(stockCheckLine("redsky.target.com", { host: "69.85.83.159", port: 48921 })).toBe("Checking stock at redsky.target.com through proxy 69.85.83.159:48921.")
     expect(stockCheckLine("www.walmart.com")).toBe("Checking stock at www.walmart.com.")
+    expect(monitorBlockDelay(1, 8_000)).toBe(1_000)
+    expect(monitorBlockDelay(2, 8_000)).toBe(2_000)
+    expect(monitorBlockDelay(4, 8_000)).toBe(8_000)
+    expect(monitorBlockDelay(6, 8_000)).toBe(8_000)
   })
 })
 

@@ -259,6 +259,9 @@ export class TaskService {
           monitorProxies = proxies
         }
       }
+      if (monitorTask && (monitorProxies?.length ?? 0) === 1) {
+        update({ log: line("warn", "This group has 1 proxy; stores block a single proxy quickly") })
+      }
       const loaded = this.db.getSettings()
       const role = task.kind === "monitor" ? "monitor" : "checkout"
       const pace = resolvedValues(resolveModule(task.store, moduleScope(loaded), overridesWithStoreRole(task.store, role, loaded.storeRoles, task.overrides)))

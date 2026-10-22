@@ -1,4 +1,4 @@
-import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorBlockReason, monitorKeepsWatching, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
 import { note } from "../../engine/test-mode"
 import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -136,8 +136,10 @@ async function readOffer(ctx: StoreRunContext, id: string, page: string): Promis
     catalog(ctx, { method: "GET", url: detailsUrl(id), headers: catalogHeaders(page) })
   )
   if (details.kind !== "ok") return details
+  const watching = monitorKeepsWatching(ctx, details.value.status)
+  if (watching) return { kind: "retry", reason: watching }
   if (isCatalogChallenge(details.value.status, details.value.body)) return { kind: "paused", reason: TCGPLAYER_PAUSE }
-  const blocked = monitorStatusReason(details.value.status, Boolean(ctx.proxy))
+  const blocked = monitorBlockReason(ctx, details.value.status)
   if (blocked) return { kind: "retry", reason: blocked }
   if (details.value.status === 404) {
     return { kind: "ok", value: { product: { id, title: "" }, inStock: false, reason: `TCGplayer product ${id} was not found.`, seller: "" } }
@@ -155,8 +157,10 @@ async function readOffer(ctx: StoreRunContext, id: string, page: string): Promis
     body: listingsBody(directOnly)
   })
   if (listed.kind !== "ok") return listed
+  const listingsWatching = monitorKeepsWatching(ctx, listed.value.status)
+  if (listingsWatching) return { kind: "retry", reason: listingsWatching }
   if (isCatalogChallenge(listed.value.status, listed.value.body)) return { kind: "paused", reason: TCGPLAYER_PAUSE }
-  const listingsBlocked = monitorStatusReason(listed.value.status, Boolean(ctx.proxy))
+  const listingsBlocked = monitorBlockReason(ctx, listed.value.status)
   if (listingsBlocked) return { kind: "retry", reason: listingsBlocked }
   if (listed.value.status >= 400) {
     return { kind: "retry", reason: `Listings returned HTTP ${listed.value.status}. Retrying.` }

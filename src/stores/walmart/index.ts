@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto"
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedCall } from "../../engine/monitor"
+import { holdMonitorOnly, monitorBlockReason, monitorKeepsWatching, monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { proxyLabel } from "../../shared/proxy"
@@ -213,20 +213,22 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, itemId: string): 
     headers: gqlHeaders(jar, "GetAllSellerOffers", "query", itemId),
     body: JSON.stringify({ variables: { itemId, isSubscriptionEligible: false } })
   }))
-  const primary = interpretMonitor(response, Boolean(ctx.proxy))
+  const primary = interpretMonitor(response, ctx)
   if (primary.kind === "ok") {
     primary.value.imageUrl = productImage(response.body) || undefined
     noteWatch(ctx, { ...primary.value, url: `https://www.walmart.com/ip/${itemId}` })
   }
   if (primary.kind === "paused" || primary.kind === "ok") return primary
-  if (monitorStatusReason(response.status, Boolean(ctx.proxy))) return primary
+  if (monitorBlockReason(ctx, response.status)) return primary
   const page = await call(ctx, {
     method: "GET",
     url: `https://www.walmart.com/ip/${itemId}`,
     headers: pageHeaders(jar, itemId)
   })
+  const pageWatching = monitorKeepsWatching(ctx, page.status)
+  if (pageWatching) return { kind: "retry", reason: pageWatching }
   if (isChallenge(page.status, page.body)) return { kind: "paused", reason: WALMART_PAUSE }
-  const pageBlocked = monitorStatusReason(page.status, Boolean(ctx.proxy))
+  const pageBlocked = monitorBlockReason(ctx, page.status)
   if (pageBlocked) return { kind: "retry", reason: pageBlocked }
   const reading = readStock(page.body)
   if (reading) {
@@ -240,9 +242,11 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, itemId: string): 
   return { kind: "retry", reason: `Monitor returned HTTP ${response.status} without a stock reading.` }
 }
 
-function interpretMonitor(response: HttpResponse, hasProxy: boolean): Step<StockReading> {
+function interpretMonitor(response: HttpResponse, ctx: StoreRunContext): Step<StockReading> {
+  const watching = monitorKeepsWatching(ctx, response.status)
+  if (watching) return { kind: "retry", reason: watching }
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: WALMART_PAUSE }
-  const blocked = monitorStatusReason(response.status, hasProxy)
+  const blocked = monitorBlockReason(ctx, response.status)
   if (blocked) return { kind: "retry", reason: blocked }
   const reading = readStock(response.body)
   if (reading) return { kind: "ok", value: reading }

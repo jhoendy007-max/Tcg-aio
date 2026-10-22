@@ -1,4 +1,5 @@
 import { percentile } from "./monitor"
+import { TARGET_PROBE_VISITOR, targetMonitorHeaders, targetMonitorUrl } from "../stores/target/redsky"
 import { STORE_GAP_MS } from "./polite"
 import { chromeUserAgent } from "./chrome-ua"
 import type { HttpClient, HttpResponse } from "./http"
@@ -58,16 +59,14 @@ export function monitorReadUrl(store: StoreId, sku: string): string | null {
   if (store === "target") {
     const tcin = parseTcin(sku)
     if (!tcin) return null
-    const url = new URL("https://redsky.target.com/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1")
-    url.searchParams.set("key", "9f36aeafbe60771e321a7cc95a78140772ab3e96")
-    url.searchParams.set("tcins", tcin)
-    url.searchParams.set("store_id", "1881")
-    url.searchParams.set("pricing_store_id", "1881")
-    url.searchParams.set("zip", "10001")
-    url.searchParams.set("state", "NY")
-    url.searchParams.set("channel", "WEB")
-    url.searchParams.set("page", `/p/A-${tcin}`)
-    return url.toString()
+    return targetMonitorUrl({
+      key: "9f36aeafbe60771e321a7cc95a78140772ab3e96",
+      tcin,
+      storeId: "1881",
+      zip: "10001",
+      state: "NY",
+      visitorId: TARGET_PROBE_VISITOR
+    })
   }
   if (store === "walmart") {
     const itemId = parseItemId(sku)
@@ -109,7 +108,7 @@ function benchPage(spec: PageSpec, sku: string): string | null {
   return parsePageTarget(spec, sku)?.url ?? null
 }
 
-function headersFor(store: StoreId, url: string): Record<string, string> {
+export function monitorReadHeaders(store: StoreId, url: string): Record<string, string> {
   const headers: Record<string, string> = {
     accept: store === "target" || store === "pokemon-center" || store === "crunchyroll" || store === "bandai" || store === "tcgplayer" ? "application/json" : "text/html,application/json",
     "accept-language": "en-US,en;q=0.9",
@@ -120,7 +119,12 @@ function headersFor(store: StoreId, url: string): Record<string, string> {
     headers["x-requested-with"] = "XMLHttpRequest"
     headers.referer = "https://p-bandai.com/us/"
   }
-  if (store === "target") headers.referer = "https://www.target.com/"
+  if (store === "target") {
+    const page = new URL(url).searchParams.get("page") ?? "/p/A-88897904"
+    const tcin = page.split("A-").pop() || "88897904"
+    const visitorId = new URL(url).searchParams.get("visitor_id") ?? TARGET_PROBE_VISITOR
+    return targetMonitorHeaders(tcin, visitorId, true)
+  }
   if (store === "amazon") headers.referer = "https://www.amazon.com/"
   if (store === "crunchyroll") headers.referer = url
   if (store === "tcgplayer") {
@@ -176,7 +180,7 @@ export async function benchmarkStores(options: {
         const response = await http.request({
           method: "GET",
           url,
-          headers: headersFor(store, url),
+          headers: monitorReadHeaders(store, url),
           proxy,
           timeoutMs: 20000
         })
