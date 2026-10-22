@@ -27,9 +27,9 @@ const HOST = "www.bestbuy.com"
 const QUEUE_ATTEMPTS = 8
 
 export const BESTBUY_PAUSE =
-  "Best Buy presented a challenge (Akamai, a captcha, or card authentication). Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges."
+  "Best Buy presented a challenge (Akamai, a captcha, or card authentication). Finish it in your own browser, paste a fresh session if needed, then resume. Zzz AIO does not solve challenges."
 
-const SESSION_PAUSE = "Paste a signed-in Best Buy browser session (the cookie header from www.bestbuy.com). Password sign-in is blocked by Akamai, and TCGAIO does not solve challenges."
+const SESSION_PAUSE = "Paste a signed-in Best Buy browser session (the cookie header from www.bestbuy.com). Password sign-in is blocked by Akamai, and Zzz AIO does not solve challenges."
 const EXPIRED_PAUSE = "The Best Buy session expired. Paste a fresh cookie header, then resume."
 const GUEST_PAUSE = "The Best Buy session is not signed in. Paste the cookie header from a signed-in browser, then resume."
 

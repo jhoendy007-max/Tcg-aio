@@ -148,7 +148,7 @@ export async function activateRemote(http: HttpClient, url: string, key: string,
     redirect: "manual",
     timeoutMs: 15000
   })
-  if (response.status >= 300 && response.status < 400) throw new AppError("The license server redirected. TCGAIO did not follow it.")
+  if (response.status >= 300 && response.status < 400) throw new AppError("The license server redirected. Zzz AIO did not follow it.")
   if (response.status < 200 || response.status >= 300) throw new AppError(`The license server returned ${response.status}.`)
   const parsed = parseObject(response.body)
   rejectSecrets(parsed)

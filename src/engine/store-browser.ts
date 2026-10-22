@@ -25,7 +25,7 @@ export async function refreshStoreSession(input: SessionRefreshRequest): Promise
     width: 1100,
     height: 800,
     show: false,
-    title: "TCGAIO",
+    title: "Zzz AIO",
     autoHideMenuBar: true,
     webPreferences: {
       session: browser,
@@ -48,7 +48,7 @@ export async function refreshStoreSession(input: SessionRefreshRequest): Promise
     await fillMailboxCode(win, input.lookupCode, input.onMailFilled)
     let challenged = await challengeVisible(win)
     if (challenged) {
-      input.onChallenge("The store is showing a check. Solve it in the account browser on this PC. TCGAIO does not send challenges to a solving service.")
+      input.onChallenge("The store is showing a check. Solve it in the account browser on this PC. Zzz AIO does not send challenges to a solving service.")
       if (input.holdMs && input.holdMs > 0) {
         win.setTitle(`Solve ${safeHost(input.homeUrl)}`)
         win.show()

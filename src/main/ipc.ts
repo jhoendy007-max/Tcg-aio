@@ -165,7 +165,7 @@ export function registerIpc(
     if (!webhook) throw new Error("Save a Discord webhook first.")
     await postDiscord(webhook, {
       kind: "success",
-      storeName: "TCGAIO",
+      storeName: "Zzz AIO",
       sku: "Webhook test",
       profileName: "Settings",
       detail: "Discord notifications are connected."

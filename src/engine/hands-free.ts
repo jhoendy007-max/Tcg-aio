@@ -215,7 +215,7 @@ export class HandsFree {
       now
     })
     this.db.setReportDay(dayKey(now, zone))
-    await this.notify({ kind: "health", storeName: "Daily report", sku: "Health", profileName: "TCGAIO", detail: text })
+    await this.notify({ kind: "health", storeName: "Daily report", sku: "Health", profileName: "Zzz AIO", detail: text })
   }
 
   async watchMail(now = Date.now()): Promise<void> {

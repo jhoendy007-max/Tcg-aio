@@ -251,7 +251,7 @@ export class Database {
       return
     }
     const parsed = JSON.parse(readFileSync(this.file, "utf8")) as Partial<DbFile>
-    if (parsed.version !== 1) throw new AppError("This data file was written by a newer TCGAIO version.")
+    if (parsed.version !== 1) throw new AppError("This data file was written by a newer Zzz AIO version.")
     const pcId = typeof parsed.pcId === "string" && /^[0-9a-f-]{36}$/i.test(parsed.pcId) ? parsed.pcId : randomUUID()
     this.data = {
       version: 1,
@@ -1839,7 +1839,7 @@ export class Database {
   }
 
   restoreBackup(doc: BackupDocument): void {
-    if (!doc || doc.v !== 1) throw new AppError("This backup was written by a newer TCGAIO version.")
+    if (!doc || doc.v !== 1) throw new AppError("This backup was written by a newer Zzz AIO version.")
     const snapshot = structuredClone(this.data)
     try {
       const keptPc = this.data.pcId

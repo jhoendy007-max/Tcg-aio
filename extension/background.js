@@ -511,9 +511,9 @@ function parseInvite(text) {
   try {
     value = JSON.parse(String(text || "").trim())
   } catch {
-    throw new Error("That code is not a TCGAIO pairing code.")
+    throw new Error("That code is not a Zzz AIO pairing code.")
   }
-  if (!value || value.v !== 1) throw new Error("This pairing code is from a different TCGAIO version.")
+  if (!value || value.v !== 1) throw new Error("This pairing code is from a different Zzz AIO version.")
   if (typeof value.pcId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.pcId)) throw new Error("Pairing code is missing the PC id.")
   if (typeof value.host !== "string" || !/^[A-Za-z0-9._-]+$/.test(value.host)) throw new Error("Pairing code has an invalid address.")
   if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) throw new Error("Pairing code has an invalid port.")

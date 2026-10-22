@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { BrandLockup, ZzzLogo } from "./Logo"
 import { AccountsPage } from "./pages/Accounts"
 import { ProfilesPage } from "./pages/Profiles"
 import { ProxiesPage } from "./pages/Proxies"
@@ -42,7 +43,7 @@ const NAV: Array<{ id: SectionId; icon: string; label: "navHome" | "navTasks" | 
 ]
 
 function readRail(): boolean {
-  try { return localStorage.getItem("tcgaio-rail") !== "open" } catch { return true }
+  try { return localStorage.getItem("tcgaio-rail") === "icons" } catch { return false }
 }
 
 export function App() {
@@ -73,7 +74,7 @@ export function App() {
       if (cancel) return
       setSettings(payload.settings)
       applyTheme(payload.settings)
-      document.title = payload.settings.appName || "TCGAIO"
+      document.title = brandName(payload.settings.appName)
       setWizard(!payload.settings.wizardDone && profiles.length === 0 && accounts.length === 0)
       try {
         const nextAccount = await unwrap(window.aio.account.status())
@@ -93,7 +94,7 @@ export function App() {
       if (!next) return
       setSettings(next)
       applyTheme(next)
-      document.title = next.appName || "TCGAIO"
+      document.title = brandName(next.appName)
     }
     window.addEventListener("tcgaio-settings", onSettings)
     const onSignOut = () => setAccount(null)
@@ -156,11 +157,11 @@ export function App() {
   return (
     <div className={rail ? "shell rail" : "shell expanded"}>
       <aside className="sidebar">
-        <div className="brand" title={settings.appName || "TCGAIO"}>
-          {settings.logoDataUrl ? <img className="brand-logo" src={settings.logoDataUrl} alt="" /> : <Mark />}
+        <div className="brand" title={brandName(settings.appName)}>
+          {settings.logoDataUrl ? <img className="brand-logo" src={settings.logoDataUrl} alt="" /> : <ZzzLogo size={40} />}
           <div className="brand-copy">
-            <strong>{settings.appName || "TCGAIO"}</strong>
-            <span>v{APP_VERSION}</span>
+            <strong>{brandName(settings.appName)}</strong>
+            <span>Cop while you sleep · v{APP_VERSION}</span>
           </div>
         </div>
         <nav aria-label="Sections">
@@ -177,12 +178,18 @@ export function App() {
           })}
         </nav>
         <footer>
+          <div className="bot-status" title="Bot status">
+            <span className="status-dot" aria-hidden="true" />
+            <span className="nav-text"><span className="bot-status-label">Bot Status</span><strong>{signedIn ? "Running" : "Signed out"}</strong></span>
+          </div>
+          <TopClock />
           <button type="button" className="icon-btn" title={rail ? deskText(lang, "showNames") : deskText(lang, "iconsOnly")} onClick={() => { const next = !rail; setRail(next); try { localStorage.setItem("tcgaio-rail", next ? "icons" : "open") } catch { /* keep the choice for this session */ } }}>{rail ? "»" : "«"}</button>
         </footer>
       </aside>
       <main>
         {update && update.status !== "idle" && update.status !== "current" ? (
           <div className="card update-banner">
+            <ZzzLogo size={40} />
             <div>
               <strong>{update.status === "available" || update.status === "downloading" || update.status === "downloaded" ? `Update ${update.version ?? ""}` : "Updates"}</strong>
               <p>{updateStatusText(update)}</p>
@@ -197,10 +204,10 @@ export function App() {
             </div>
           </div>
         ) : null}
-        {booting ? <section className="page" aria-busy="true" aria-label="Loading"><div className="skeleton sk-title" /><div className="skeleton sk-card" /></section> : null}
+        {booting ? <section className="page splash" aria-busy="true" aria-label="Loading"><BrandLockup size={72} /><div className="skeleton sk-title" /><div className="skeleton sk-card" /></section> : null}
         {!booting && !signedIn && !pending ? <AccountGate lang={lang} settings={settings} onSettings={(next) => { setSettings(next); applyTheme(next) }} onDone={setAccount} /> : null}
         {!booting && pending && account ? <WaitingAccount lang={lang} account={account} onReady={setAccount} onSignedOut={() => setAccount(null)} /> : null}
-        {!booting && signedIn && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = next.appName || "TCGAIO"; setWizard(false); go("home") }} /> : null}
+        {!booting && signedIn && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = brandName(next.appName); setWizard(false); go("home") }} /> : null}
         {!booting && signedIn && !wizard && page === "home" ? <DashboardPage lang={lang} onTasks={() => go("tasks")} /> : null}
         {!booting && signedIn && !wizard && page === "tasks" ? <TasksPage lockedKind={tab === "monitor" || tab === "checkout" ? tab : ""} /> : null}
         {!booting && signedIn && !wizard && page === "profiles" ? <section className="page"><ProfilesPage /></section> : null}
@@ -301,11 +308,17 @@ function NavIcon({ name }: { name: string }) {
   )
 }
 
-function Mark() {
-  return (
-    <svg className="mark" viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="1" y="1" width="30" height="30" rx="7" />
-      <path d="M9 22.5 16 8l7 14.5H9z" />
-    </svg>
-  )
+
+function brandName(saved: string | undefined): string {
+  const name = (saved ?? "").trim()
+  return !name || name === "TCGAIO" ? "Zzz AIO" : name
+}
+
+function TopClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return <span className="top-clock">{now.toLocaleTimeString()}</span>
 }

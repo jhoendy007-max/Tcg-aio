@@ -232,7 +232,7 @@ export class AlertService {
         url: `https://discord.com/api/v10/channels/${encodeURIComponent(channelId)}/messages?limit=20`,
         headers: {
           authorization: `Bot ${token}`,
-          "user-agent": `TCGAIO (tcgaio, ${APP_VERSION})`
+          "user-agent": `Zzz AIO (tcgaio, ${APP_VERSION})`
         },
         timeoutMs: 15000
       })

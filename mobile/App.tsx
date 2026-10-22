@@ -37,7 +37,7 @@ export default function App() {
   const session = useRef<PhoneSession | null>(null)
   const [screen, setScreen] = useState<Screen>("boot")
   const [online, setOnline] = useState(false)
-  const [pcName, setPcName] = useState("TCGAIO")
+  const [pcName, setPcName] = useState("Zzz AIO")
   const [snap, setSnap] = useState<PhoneSnapshot | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [draft, setDraft] = useState<PhoneTaskDraft | null>(null)
@@ -60,7 +60,7 @@ export default function App() {
   function applySnapshot(next: PhoneSnapshot) {
     const tasks = asList<PhoneTask>(next?.tasks)
     setSnap({ ...next, tasks })
-    setPcName(next?.brand?.appName || next?.pcName || "TCGAIO")
+    setPcName(next?.brand?.appName || next?.pcName || "Zzz AIO")
     const active = tasks.filter((task) => isActive(task.status)).length
     updateWidget(next?.analytics?.success ?? 0, active)
   }
@@ -237,7 +237,8 @@ export default function App() {
       {screen === "boot" ? <ActivityIndicator color={theme.accent} style={styles.boot} /> : null}
       {screen === "pair" ? (
         <ScrollView contentContainerStyle={styles.pad}>
-          <Text style={styles.brand}>TCGAIO</Text>
+          <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginBottom: 8 }} accessibilityLabel="Zzz logo" />
+          <Text style={styles.brand}>Zzz APP</Text>
           <Text style={styles.h1}>Pair this phone</Text>
           <Text style={styles.p}>On the PC, open Phone and choose Pair device. Scan that QR code. The PC keeps the card and passwords.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
@@ -273,8 +274,9 @@ export default function App() {
       {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" || screen === "mail" || screen === "stores" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <View style={styles.row}>
-            <View>
-              <Text style={styles.brand}>{snap?.brand?.appName || "TCGAIO"}</Text>
+            <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginRight: 10 }} accessibilityLabel="Zzz logo" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.brand}>{snap?.brand?.appName || "Zzz APP"}</Text>
               <Text style={styles.h1}>{pcName}</Text>
             </View>
             <Text style={[styles.pill, online ? styles.pillOn : styles.pillOff]}>{online ? "PC online" : "PC offline"}</Text>

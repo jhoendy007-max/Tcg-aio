@@ -21,3 +21,6 @@ li strong { display: block; }
 .meta { color: #9aa3b5; font-size: 12px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 label { display: flex; gap: 6px; align-items: center; color: #9aa3b5; }
+
+.zzz-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.zzz-head img { border-radius: 22%; }

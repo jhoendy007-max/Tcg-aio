@@ -500,7 +500,7 @@ export const DEFAULT_SETTINGS: Settings = {
   healthReportZone: "",
   theme: "dark",
   accent: "gold",
-  appName: "TCGAIO",
+  appName: "Zzz AIO",
   logoDataUrl: "",
   successSound: false,
   taskView: "detailed",

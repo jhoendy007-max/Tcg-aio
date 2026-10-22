@@ -19,6 +19,11 @@ export function assertDiscordWebhook(url: string): void {
   }
 }
 
+/** Public copy of the Zzz logo (docs/brand/zzz-logo.png on main) so Discord can show it. */
+export const BRAND_ICON_URL = "https://raw.githubusercontent.com/jhoendy007-max/Tcg-aio/main/docs/brand/zzz-logo.png"
+const BRAND_AUTHOR = { name: "Zzz AIO", icon_url: BRAND_ICON_URL }
+const BRAND_FOOTER = { text: "Zzz AIO · Cop while you sleep", icon_url: BRAND_ICON_URL }
+
 export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string, unknown>> } {
   const color = notice.kind === "success"
     ? 0x3cba8b
@@ -57,13 +62,13 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
   if (notice.url) lines.push(notice.url)
   if (notice.orderId) lines.push(`Order: ${notice.orderId}`)
   if (notice.kind === "paused" && notice.profileName !== "Alerts") {
-    lines.push("Update the account session in TCGAIO, then resume the task.")
+    lines.push("Update the account session in Zzz AIO, then resume the task.")
   }
   if (notice.kind === "challenge") {
-    lines.push("A person solves this in TCGAIO. It is not sent to a solving service.")
+    lines.push("A person solves this in Zzz AIO. It is not sent to a solving service.")
   }
   if (notice.kind === "session") {
-    lines.push("Open the account browser and sign in again. TCGAIO does not create a session for you.")
+    lines.push("Open the account browser and sign in again. Zzz AIO does not create a session for you.")
   }
   if (notice.kind === "drop") {
     lines.push("Times are Atlantic Time (Puerto Rico, UTC−4).")
@@ -78,7 +83,9 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
         description: lines.join("\n").slice(0, 1800),
         color,
         url: notice.url || undefined,
-        thumbnail: notice.imageUrl ? { url: notice.imageUrl } : undefined
+        thumbnail: notice.imageUrl ? { url: notice.imageUrl } : undefined,
+        author: BRAND_AUTHOR,
+        footer: BRAND_FOOTER
       }
     ]
   }
@@ -128,7 +135,9 @@ export function buildGroupBody(notice: Notice): { embeds: Array<Record<string, u
         description: lines.filter(Boolean).join("\n").slice(0, 1800),
         color: safe.kind === "success" ? 0x3cba8b : 0x6aa6ff,
         url: safe.url,
-        thumbnail: safe.imageUrl ? { url: safe.imageUrl } : undefined
+        thumbnail: safe.imageUrl ? { url: safe.imageUrl } : undefined,
+        author: BRAND_AUTHOR,
+        footer: BRAND_FOOTER
       }
     ]
   }

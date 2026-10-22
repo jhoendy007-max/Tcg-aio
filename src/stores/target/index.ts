@@ -26,7 +26,7 @@ const ALLOWED_HOSTS = new Set(["carts.target.com", "redsky.target.com", "gsp.tar
 const FIELD_GROUPS = "ADDRESSES,CART,CART_ITEMS,SUMMARY,PAYMENT_INSTRUCTIONS,PROMOTION_CODES"
 
 export const TARGET_PAUSE =
-  "Target presented a challenge or block. Sign in with your own browser, paste accessToken, visitorId, and refreshToken on the account, then resume. TCGAIO does not send challenges to a solving service."
+  "Target presented a challenge or block. Sign in with your own browser, paste accessToken, visitorId, and refreshToken on the account, then resume. Zzz AIO does not send challenges to a solving service."
 
 class CookieJar {
   accessToken = ""
@@ -504,7 +504,7 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar, key: string, car
     )
     if (isChallenge(cvv.status, cvv.body)) return { kind: "paused", reason: TARGET_PAUSE }
     if (cvv.status < 200 || cvv.status >= 300) return { kind: "failed", reason: `CVV resubmit failed (${cvv.status}).` }
-    return { kind: "paused", reason: "Target requested CVV verification after the order request. Check your Target account for an order before resuming; TCGAIO did not retry the place-order request." }
+    return { kind: "paused", reason: "Target requested CVV verification after the order request. Check your Target account for an order before resuming; Zzz AIO did not retry the place-order request." }
   }
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: TARGET_PAUSE }
   if (bodyHas(response.body, "PAYMENT_DECLINED")) return { kind: "failed", reason: "Target declined the card." }

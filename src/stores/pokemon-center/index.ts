@@ -31,12 +31,12 @@ const STORE_HOST = "www.pokemoncenter.com"
 const FLEX_HOST = "flex.cybersource.com"
 
 export const POKEMON_CENTER_PAUSE =
-  "Pokémon Center presented a challenge (DataDome, Incapsula, or a captcha). Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges."
+  "Pokémon Center presented a challenge (DataDome, Incapsula, or a captcha). Finish it in your own browser, paste a fresh session if needed, then resume. Zzz AIO does not solve challenges."
 
 const QUEUE_CAPTCHA_PAUSE =
-  "Pokémon Center's waiting room asked for a captcha. Finish it in your own browser, then resume. TCGAIO does not solve challenges."
+  "Pokémon Center's waiting room asked for a captcha. Finish it in your own browser, then resume. Zzz AIO does not solve challenges."
 const SESSION_PAUSE =
-  "Paste a signed-in Pokémon Center browser session (the cookie header from www.pokemoncenter.com). Password sign-in is blocked by Incapsula, and TCGAIO does not solve challenges."
+  "Paste a signed-in Pokémon Center browser session (the cookie header from www.pokemoncenter.com). Password sign-in is blocked by Incapsula, and Zzz AIO does not solve challenges."
 const EXPIRED_PAUSE = "The Pokémon Center session expired. Paste a fresh cookie header, then resume."
 const GUEST_PAUSE = "The Pokémon Center session is not signed in. Paste the cookie header from a signed-in browser, then resume."
 

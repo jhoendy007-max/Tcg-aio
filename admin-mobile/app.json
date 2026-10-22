@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "TCGAIO Admin",
+    "name": "Zzz AP",
     "slug": "tcgaio-admin",
     "version": "0.2.34",
     "orientation": "portrait",
@@ -23,7 +23,8 @@
       [
         "expo-notifications",
         {
-          "color": "#e0b15a"
+          "color": "#8b5cf6",
+          "icon": "./assets/android-icon-monochrome.png"
         }
       ],
       "./plugins/withApkInstall.js"
@@ -32,6 +33,11 @@
       "eas": {
         "projectId": ""
       }
+    },
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#050e2b"
     }
   }
 }

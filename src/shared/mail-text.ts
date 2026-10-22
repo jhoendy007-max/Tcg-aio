@@ -8,7 +8,7 @@ export interface MailGuide {
 const TEXT = {
   en: {
     title: "Mail",
-    intro: "Type your email and TCGAIO fills the server. Google and Microsoft can sign in without an app password. iCloud and Yahoo use an app password. Mail is read-only and only messages from the store are used.",
+    intro: "Type your email and Zzz AIO fills the server. Google and Microsoft can sign in without an app password. iCloud and Yahoo use an app password. Mail is read-only and only messages from the store are used.",
     language: "Language",
     add: "Add mailbox",
     edit: "Edit",
@@ -64,7 +64,7 @@ const TEXT = {
   },
   es: {
     title: "Correo",
-    intro: "Escribe tu correo y TCGAIO completa el servidor. Google y Microsoft pueden entrar sin contraseña de aplicación. iCloud y Yahoo usan una contraseña de aplicación. El acceso es de solo lectura y solo cuenta el correo de la tienda.",
+    intro: "Escribe tu correo y Zzz AIO completa el servidor. Google y Microsoft pueden entrar sin contraseña de aplicación. iCloud y Yahoo usan una contraseña de aplicación. El acceso es de solo lectura y solo cuenta el correo de la tienda.",
     language: "Idioma",
     add: "Añadir buzón",
     edit: "Editar",
@@ -134,13 +134,13 @@ export function mailGuide(provider: MailProvider, lang: MailLang): MailGuide {
         ? [
             "Abre el Apple ID e inicia sesión.",
             "Elige Inicio de sesión y seguridad, luego Contraseñas específicas de apps.",
-            "Crea una contraseña llamada TCGAIO.",
+            "Crea una contraseña llamada Zzz AIO.",
             "Pégala aquí. El usuario es tu correo completo de iCloud."
           ]
         : [
             "Open your Apple ID and sign in.",
             "Choose Sign-In and Security, then App-Specific Passwords.",
-            "Create a password named TCGAIO.",
+            "Create a password named Zzz AIO.",
             "Paste it here. The username is your full iCloud email."
           ],
       links: [{ label: es ? "Abrir Apple ID" : "Open Apple ID", href: "https://appleid.apple.com/account/manage" }]

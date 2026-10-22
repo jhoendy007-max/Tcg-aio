@@ -222,7 +222,7 @@ export function SettingsPage() {
         </Field>
         <label className="check span-2">
           <input type="checkbox" checked={form.launchOnBoot} onChange={(event) => setForm({ ...form, launchOnBoot: event.target.checked })} />
-          <span>Launch TCGAIO when Windows starts. This stays off until you turn it on.</span>
+          <span>Launch Zzz AIO when Windows starts. This stays off until you turn it on.</span>
         </label>
         <label className="check span-2">
           <input type="checkbox" checked={form.resumeOnLaunch} onChange={(event) => setForm({ ...form, resumeOnLaunch: event.target.checked })} />

@@ -227,7 +227,7 @@ export function cleanModules(input: Settings["modules"] | undefined): Partial<Re
   const source = input ?? {}
   const next: Partial<Record<StoreId, ModuleRecord>> = {}
   for (const [store, record] of Object.entries(source)) {
-    if (!isStoreId(store)) throw new AppError("That store is not in TCGAIO.")
+    if (!isStoreId(store)) throw new AppError("That store is not in Zzz AIO.")
     if (record) next[store] = cleanModuleRecord(store, record)
   }
   return next
@@ -247,8 +247,8 @@ export function parseModulePreset(text: string): { store: StoreId; record: Modul
   }
   if (!parsed || typeof parsed !== "object") throw new AppError("That preset is not a store settings file.")
   const body = parsed as Record<string, unknown>
-  if (body.v !== 1) throw new AppError("That preset is from a different TCGAIO version.")
-  if (typeof body.store !== "string" || !isStoreId(body.store)) throw new AppError("That preset names a store TCGAIO does not have.")
+  if (body.v !== 1) throw new AppError("That preset is from a different Zzz AIO version.")
+  if (typeof body.store !== "string" || !isStoreId(body.store)) throw new AppError("That preset names a store Zzz AIO does not have.")
   const { v: _v, store: _store, name: _name, ...rest } = body
   return { store: body.store, record: cleanModuleRecord(body.store, rest) }
 }
@@ -366,8 +366,8 @@ export function moduleCheckoutNote(lang: MailLang, store: StoreId): string {
   }
   if (store === "tcgplayer") {
     return es
-      ? "El catálogo público no necesita sesión. La compra sí: hace falta una sesión de www.tcgplayer.com y un formulario de carrito en esa página. TCGAIO no inventa la petición."
-      : "The public catalog does not need a session. Checkout does: it needs a www.tcgplayer.com session and a cart form on that page. TCGAIO does not invent the cart request."
+      ? "El catálogo público no necesita sesión. La compra sí: hace falta una sesión de www.tcgplayer.com y un formulario de carrito en esa página. Zzz AIO no inventa la petición."
+      : "The public catalog does not need a session. Checkout does: it needs a www.tcgplayer.com session and a cart form on that page. Zzz AIO does not invent the cart request."
   }
   return ""
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
+import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
 import Constants from "expo-constants"
 import { StatusBar } from "expo-status-bar"
 import * as LocalAuthentication from "expo-local-authentication"
@@ -240,7 +240,7 @@ export default function App() {
   }
 
   async function unlock() {
-    const result = await LocalAuthentication.authenticateAsync({ promptMessage: "Unlock TCGAIO Admin" })
+    const result = await LocalAuthentication.authenticateAsync({ promptMessage: "Unlock Zzz AP" })
     if (!result.success) {
       setError("Unlock was cancelled.")
       return
@@ -424,11 +424,12 @@ export default function App() {
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        refreshControl={phase === "desk" ? <RefreshControl refreshing={refreshing} onRefresh={() => void pull()} tintColor="#e0b15a" colors={["#e0b15a"]} progressBackgroundColor="#171b22" /> : undefined}
+        refreshControl={phase === "desk" ? <RefreshControl refreshing={refreshing} onRefresh={() => void pull()} tintColor="#8b5cf6" colors={["#8b5cf6"]} progressBackgroundColor="rgba(255,255,255,0.06)" /> : undefined}
       >
         <View style={styles.header}>
+          <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginRight: 10 }} accessibilityLabel="Zzz logo" />
           <View style={styles.headerCopy}>
-            <Text style={styles.mark}>TCGAIO</Text>
+            <Text style={styles.mark}>Zzz AP</Text>
             <Text style={styles.title}>Admin</Text>
             {appVersion ? <Text style={styles.version}>v{appVersion}</Text> : null}
           </View>
@@ -589,11 +590,11 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#0e1116" },
+  page: { flex: 1, backgroundColor: "#070a1f" },
   content: { padding: 16, paddingTop: 54, paddingBottom: 32, gap: 12 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   headerCopy: { flexDirection: "row", alignItems: "baseline", gap: 8, flexShrink: 1 },
-  mark: { color: "#e0b15a", fontSize: 13, fontWeight: "800", letterSpacing: 1.2 },
+  mark: { color: "#8b5cf6", fontSize: 13, fontWeight: "800", letterSpacing: 1.2 },
   title: { color: "#f2f5f8", fontSize: 28, fontWeight: "700" },
   version: { color: "#6d7585", fontSize: 12 },
   signOut: { borderWidth: 1, borderColor: "#3c4658", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
@@ -601,15 +602,15 @@ const styles = StyleSheet.create({
   desk: { gap: 10 },
   toolbar: { flexDirection: "row", justifyContent: "flex-start", gap: 8, flexWrap: "wrap" },
   pills: { gap: 8, paddingVertical: 2 },
-  pill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#171b22", borderColor: "#2a3140", borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  pillOn: { backgroundColor: "#e0b15a", borderColor: "#e0b15a" },
+  pill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(167,139,250,0.22)", borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  pillOn: { backgroundColor: "#8b5cf6", borderColor: "#8b5cf6" },
   pillText: { color: "#d5dbe3", fontSize: 13, fontWeight: "700" },
-  pillTextOn: { color: "#1c1508" },
-  count: { minWidth: 18, height: 18, borderRadius: 9, backgroundColor: "#2a3140", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
-  countOn: { backgroundColor: "#1c1508" },
-  countText: { color: "#e0b15a", fontSize: 11, fontWeight: "800" },
-  countTextOn: { color: "#e0b15a" },
-  card: { backgroundColor: "#171b22", borderRadius: 16, borderWidth: 1, borderColor: "#2a3140", padding: 14, gap: 8 },
+  pillTextOn: { color: "#ffffff" },
+  count: { minWidth: 18, height: 18, borderRadius: 9, backgroundColor: "rgba(167,139,250,0.22)", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
+  countOn: { backgroundColor: "#ffffff" },
+  countText: { color: "#8b5cf6", fontSize: 11, fontWeight: "800" },
+  countTextOn: { color: "#8b5cf6" },
+  card: { backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(167,139,250,0.22)", padding: 14, gap: 8 },
   keyCard: { backgroundColor: "#221c12", borderRadius: 16, borderWidth: 1, borderColor: "#6d5424", padding: 14, gap: 8 },
   cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   cardTitle: { color: "#f2f5f8", fontSize: 16, fontWeight: "700" },
@@ -618,15 +619,15 @@ const styles = StyleSheet.create({
   label: { color: "#93a0b5", fontSize: 12, fontWeight: "600" },
   hint: { color: "#93a0b5", fontSize: 13, lineHeight: 18 },
   error: { color: "#ffd0d0", backgroundColor: "#3a1d1d", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, overflow: "hidden" },
-  input: { backgroundColor: "#10141b", color: "#f2f5f8", borderRadius: 12, borderWidth: 1, borderColor: "#2a3140", paddingHorizontal: 12, paddingVertical: 10 },
-  primary: { backgroundColor: "#e0b15a", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, alignItems: "center" },
-  primaryText: { color: "#1c1508", fontWeight: "800", fontSize: 15 },
+  input: { backgroundColor: "#10141b", color: "#f2f5f8", borderRadius: 12, borderWidth: 1, borderColor: "rgba(167,139,250,0.22)", paddingHorizontal: 12, paddingVertical: 10 },
+  primary: { backgroundColor: "#8b5cf6", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, alignItems: "center" },
+  primaryText: { color: "#ffffff", fontWeight: "800", fontSize: 15 },
   ghost: { borderWidth: 1, borderColor: "#3c4658", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  ghostText: { color: "#e0b15a", fontSize: 13, fontWeight: "700" },
+  ghostText: { color: "#8b5cf6", fontSize: 13, fontWeight: "700" },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginVertical: 6 },
   danger: { backgroundColor: "#b4232c", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   dangerText: { color: "#ffffff", fontSize: 13, fontWeight: "700" },
-  link: { color: "#e0b15a", fontWeight: "700", paddingVertical: 4 },
+  link: { color: "#8b5cf6", fontWeight: "700", paddingVertical: 4 },
   key: { color: "#f2f5f8", fontSize: 15 },
   rowActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   status: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
@@ -637,15 +638,15 @@ const styles = StyleSheet.create({
   statusText: { color: "#f2f5f8", fontSize: 11, fontWeight: "800" },
   check: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
   box: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: "#6d7585", alignItems: "center", justifyContent: "center" },
-  boxOn: { backgroundColor: "#e0b15a", borderColor: "#e0b15a" },
-  boxMark: { color: "#1c1508", fontSize: 14, fontWeight: "800" },
+  boxOn: { backgroundColor: "#8b5cf6", borderColor: "#8b5cf6" },
+  boxMark: { color: "#ffffff", fontSize: 14, fontWeight: "800" },
   checkLabel: { color: "#f2f5f8", fontSize: 14, fontWeight: "700" },
-  empty: { borderWidth: 1, borderColor: "#2a3140", borderStyle: "dashed", borderRadius: 16, paddingVertical: 28, paddingHorizontal: 16, alignItems: "center" },
+  empty: { borderWidth: 1, borderColor: "rgba(167,139,250,0.22)", borderStyle: "dashed", borderRadius: 16, paddingVertical: 28, paddingHorizontal: 16, alignItems: "center" },
   emptyTitle: { color: "#93a0b5", fontSize: 15, fontWeight: "700" },
-  alertRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "#2a3140" },
+  alertRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "rgba(167,139,250,0.22)" },
   alertName: { color: "#f2f5f8", fontSize: 14 },
   switchPill: { borderRadius: 999, backgroundColor: "#10141b", paddingHorizontal: 10, paddingVertical: 4 },
-  switchOn: { backgroundColor: "#e0b15a" },
+  switchOn: { backgroundColor: "#8b5cf6" },
   switchText: { color: "#93a0b5", fontSize: 12, fontWeight: "800" },
-  switchTextOn: { color: "#1c1508" }
+  switchTextOn: { color: "#ffffff" }
 })

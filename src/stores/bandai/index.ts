@@ -24,10 +24,10 @@ import {
 const ORIGIN = "https://p-bandai.com"
 
 export const BANDAI_PAUSE =
-  "Premium Bandai presented a challenge. Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges."
+  "Premium Bandai presented a challenge. Finish it in your own browser, paste a fresh session if needed, then resume. Zzz AIO does not solve challenges."
 
 const SESSION_PAUSE =
-  "Paste a signed-in Premium Bandai session (the p-bandai.com cookie header) or use Sign in on the Session Keeper page. TCGAIO does not solve challenges."
+  "Paste a signed-in Premium Bandai session (the p-bandai.com cookie header) or use Sign in on the Session Keeper page. Zzz AIO does not solve challenges."
 const EXPIRED_PAUSE = "The Premium Bandai session expired. Sign in again on the Session Keeper page, then resume."
 const GUEST_PAUSE = "The Premium Bandai session is not signed in. Sign in on the Session Keeper page, then resume."
 const PAYMENT_PAUSE =

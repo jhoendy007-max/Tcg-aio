@@ -150,6 +150,18 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
     for (const task of filtered) counts.set(folderName(task), (counts.get(folderName(task)) ?? 0) + 1)
     return [...counts.entries()]
   }, [filtered])
+  const folderStats = useMemo(() => {
+    const stats = new Map<string, { carts: number; wins: number; fails: number; live: number }>()
+    for (const task of filtered) {
+      const row = stats.get(folderName(task)) ?? { carts: 0, wins: 0, fails: 0, live: 0 }
+      if (task.status === "adding_to_cart" || task.status === "checking_out") row.carts += 1
+      if (task.status === "success" || task.status === "tested") row.wins += 1
+      if (task.status === "failed") row.fails += 1
+      if (isActiveStatus(task.status)) row.live += 1
+      stats.set(folderName(task), row)
+    }
+    return stats
+  }, [filtered])
   const listed = useMemo(() => (folder ? filtered.filter((task) => folderName(task) === folder) : filtered), [filtered, folder])
   const sections = useMemo(() => {
     if (!grouped) return [{ label: "", rows: listed }]
@@ -182,13 +194,6 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
     void commitOrder(next)
   }
 
-  function moveVisible(id: string, delta: number) {
-    const visible = filtered.map((task) => task.id)
-    const index = visible.indexOf(id)
-    const target = visible[index + delta]
-    if (!target) return
-    place(id, target, delta > 0)
-  }
 
   async function setView(taskView: Settings["taskView"]) {
     if (!settings) return
@@ -275,17 +280,18 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
   }
 
   async function bulkRun(action: "start" | "stop" | "delete") {
-    if (!picked.length) return
+    const ids = picked.length ? picked : listed.map((task) => task.id)
+    if (!ids.length) return
     if (action === "delete" && !window.confirm(deskText(lang, "confirmDelete"))) return
     setError("")
     try {
       if (action === "delete") {
-        await unwrap(window.aio.bulk.delete(picked))
+        await unwrap(window.aio.bulk.delete(ids))
         setPicked([])
         await reload()
         return
       }
-      for (const id of picked) {
+      for (const id of ids) {
         if (action === "start") await unwrap(window.aio.tasks.start(id))
         else await unwrap(window.aio.tasks.stop(id))
       }
@@ -311,21 +317,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
 
   return (
     <section className="page">
-      <header className="page-head">
-        <div>
-          <h1>{deskText(lang, "navTasks")}</h1>
-          <p>{deskText(lang, "emptyHint")}</p>
-        </div>
-        <div className="actions">
-          <button type="button" onClick={() => setShowQuick((open) => !open)}>{deskText(lang, "quickSetup")}</button>
-          <button type="button" className="primary" onClick={() => { setForm(freshTask(settings, kindFilter === "monitor" ? "monitor" : "checkout")); setError("") }}>{deskText(lang, "newTask")}</button>
-        </div>
-      </header>
-      <div className="segments" role="tablist">
-        {(["", "monitor", "checkout"] as const).map((kind) => (
-          <a key={kind || "all"} href={kind ? `#tasks/${kind}` : "#tasks"} aria-current={role === kind ? "page" : undefined}>{deskText(lang, kind === "" ? "tabAll" : kind === "monitor" ? "tabMonitor" : "tabCheckout")}</a>
-        ))}
-      </div>
+      <h1 className="sr-only">{deskText(lang, "navTasks")}</h1>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {showQuick && settings ? (
         <QuickSetup
@@ -352,7 +344,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
           <h2>Solve the challenge</h2>
           <p>{challenge.storeName} · {challenge.sku} · {challenge.proxyLabel} · {Math.max(0, Math.ceil((challenge.expiresAt - now) / 1000))}s left</p>
           <p>{challenge.reason}</p>
-          <p>A person solves this page. TCGAIO does not send it to a solving service. Open browser uses this PC, the task proxy, and the task cookies. The phone can open the same page on the phone network, and that path only sends back cookies JavaScript can see.</p>
+          <p>A person solves this page. Zzz AIO does not send it to a solving service. Open browser uses this PC, the task proxy, and the task cookies. The phone can open the same page on the phone network, and that path only sends back cookies JavaScript can see.</p>
           <div className="actions">
             <button type="button" className="primary" onClick={() => void unwrap(window.aio.challenge.open()).catch((err) => setError(errorText(err)))}>Open browser</button>
             <button type="button" onClick={() => void unwrap(window.aio.challenge.done()).catch((err) => setError(errorText(err)))}>I solved it</button>
@@ -421,6 +413,8 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
         <summary>{deskText(lang, "createMany")}</summary>
         <TasksBulk tasks={tasks} profiles={profiles} accounts={accounts} groups={groups} stores={stores} lang={lang} onChanged={() => reload()} />
       </details>
+      <details className="advanced">
+      <summary>Filters &amp; view</summary>
       <div className="card toolbar">
         <Field label="Search">
           <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SKU, store, or group" aria-label="Search tasks" />
@@ -459,51 +453,73 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
           <button type="button" aria-pressed={taskView === "detailed"} onClick={() => void setView("detailed")}>Detailed</button>
         </div>
       </div>
+      </details>
       <div className="task-desk">
         <aside className="folders">
-          <h2>{deskText(lang, "folders")}</h2>
-          <button type="button" aria-pressed={folder === ""} onClick={() => setFolder("")}><span>{deskText(lang, "allGroups")}</span><span className="count">{filtered.length}</span></button>
-          {folders.map(([label, count]) => (
-            <button key={label} type="button" aria-pressed={folder === label} onClick={() => setFolder(label)}><span>{label}</span><span className="count">{count}</span></button>
-          ))}
+          <div className="groups-head">
+            <div><h2>Task Groups</h2><span className="hint">{folders.length + 1} total</span></div>
+            <button type="button" className="plus-btn" aria-label={deskText(lang, "newTask")} title={deskText(lang, "newTask")} onClick={() => { setForm(freshTask(settings, kindFilter === "monitor" ? "monitor" : "checkout")); setError("") }}>+</button>
+          </div>
+          {([["", filtered.length], ...folders] as Array<[string, number]>).map(([label, count]) => {
+            const stat = label ? folderStats.get(label) : [...folderStats.values()].reduce((sum, row) => ({ carts: sum.carts + row.carts, wins: sum.wins + row.wins, fails: sum.fails + row.fails, live: sum.live + row.live }), { carts: 0, wins: 0, fails: 0, live: 0 })
+            return (
+              <button key={label || "all"} type="button" className="group-card" aria-pressed={folder === label} onClick={() => setFolder(label)}>
+                <span className="group-top"><strong>{label || deskText(lang, "allGroups")}</strong><span className="count">{stat?.live ?? 0} / {count}</span></span>
+                <span className="group-stats">
+                  <span className="gs cart" title="Carts">🛒 {stat?.carts ?? 0}</span>
+                  <span className="gs win" title="Checkouts">✓ {stat?.wins ?? 0}</span>
+                  <span className="gs fail" title="Declines">✕ {stat?.fails ?? 0}</span>
+                </span>
+              </button>
+            )
+          })}
         </aside>
-        <div>
-          <div className="bulk-bar">
-            <label className="check">
-              <input type="checkbox" checked={allPicked} onChange={() => {
-                const ids = listed.map((task) => task.id)
-                setPicked((current) => allPicked ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])])
-              }} />
-              <span>{deskText(lang, "selectAll")}</span>
-            </label>
-            <button type="button" disabled={!picked.length} onClick={() => void bulkRun("start")}>{deskText(lang, "bulkStart")}</button>
-            <button type="button" disabled={!picked.length} onClick={() => void bulkRun("stop")}>{deskText(lang, "bulkStop")}</button>
-            <button type="button" disabled={picked.length !== 1} onClick={() => {
-              const task = tasks.find((item) => item.id === picked[0])
-              if (task) { setForm(toInput(task)); setError("") }
-            }}>{deskText(lang, "editSelected")}</button>
-            <button type="button" className="danger" disabled={!picked.length} onClick={() => void bulkRun("delete")}>{deskText(lang, "bulkDelete")}</button>
+        <div className="group-main">
+          <div className="group-head">
+            <div className="group-title">
+              <span className="store-badge">{(folder || "A").slice(0, 1).toUpperCase()}</span>
+              <div><strong>{folder || deskText(lang, "allGroups")}</strong><span className="hint">{listed.length} Tasks</span></div>
+              <button type="button" className="plus-btn" aria-label={deskText(lang, "newTask")} onClick={() => { setForm(freshTask(settings, kindFilter === "monitor" ? "monitor" : "checkout")); setError("") }}>+</button>
+              <div className="pill-tabs" role="tablist">
+                {(["", "monitor", "checkout"] as const).map((kind) => (
+                  <a key={kind || "all"} href={kind ? `#tasks/${kind}` : "#tasks"} aria-current={role === kind ? "page" : undefined}>{deskText(lang, kind === "" ? "tabAll" : kind === "monitor" ? "tabMonitor" : "tabCheckout")}</a>
+                ))}
+              </div>
+              <TextInput className="group-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search tasks" />
+            </div>
+            <div className="actions group-actions">
+              <button type="button" onClick={() => setShowQuick((open) => !open)}>⚙ {deskText(lang, "quickSetup")}</button>
+              <button type="button" className="dark" disabled={picked.length !== 1} onClick={() => {
+                const task = tasks.find((item) => item.id === picked[0])
+                if (task) { setForm(toInput(task)); setError("") }
+              }}>✎ Edit</button>
+              <button type="button" className="primary" disabled={!listed.length} onClick={() => void bulkRun("start")}>▶ Start {picked.length ? "Selected" : "All"}</button>
+              <button type="button" className="primary" disabled={!listed.length} onClick={() => void bulkRun("stop")}>■ Stop {picked.length ? "Selected" : "All"}</button>
+              <button type="button" className="danger solid" disabled={!listed.length} onClick={() => void bulkRun("delete")}>🗑 Delete {picked.length ? "Selected" : "All"}</button>
+            </div>
           </div>
       <div className="table-wrap card">
         <table>
           <thead>
             <tr>
-              <th></th>
-              <th>Order</th>
-              <th>Product</th>
+              <th><input type="checkbox" aria-label={deskText(lang, "selectAll")} checked={allPicked} onChange={() => {
+                const ids = listed.map((task) => task.id)
+                setPicked((current) => allPicked ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])])
+              }} /></th>
+              <th>Item/s</th>
               {taskView === "detailed" ? <th className="col-extra">Qty</th> : null}
               {taskView === "detailed" ? <th className="col-extra">Profile</th> : null}
               {taskView === "detailed" ? <th className="col-extra">Account</th> : null}
               {taskView === "detailed" ? <th className="col-extra">Proxy</th> : null}
               <th>Status</th>
-              <th></th>
+              <th className="th-actions">Actions</th>
             </tr>
           </thead>
           <tbody>
             {tasks.length === 0 ? (
-              <tr><td colSpan={taskView === "detailed" ? 9 : 5} className="empty">{deskText(lang, "emptyTasks")} <button type="button" className="primary" onClick={() => { setForm(freshTask(settings, "checkout")); setError("") }}>{deskText(lang, "emptyNext")}</button></td></tr>
+              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty"><div className="empty-ico">☰</div>{deskText(lang, "emptyTasks")} <button type="button" className="primary" onClick={() => { setForm(freshTask(settings, "checkout")); setError("") }}>{deskText(lang, "emptyNext")}</button></td></tr>
             ) : listed.length === 0 ? (
-              <tr><td colSpan={taskView === "detailed" ? 9 : 5} className="empty">No tasks match this search.</td></tr>
+              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty">No tasks match this search.</td></tr>
             ) : sections.map((section) => (
               <SectionRows
                 key={section.label || "all"}
@@ -523,7 +539,6 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
                 onToggle={togglePick}
                 onDrag={setDragId}
                 onDrop={(target) => { if (dragId) place(dragId, target, false); setDragId(null) }}
-                onMove={moveVisible}
                 onStart={start}
                 onStop={stop}
                 onTest={runTest}
@@ -576,7 +591,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
   )
 }
 
-function SectionRows({ section, grouped, taskView, selectedId, picked, globalTest, dragId, names, accounts, groups, lang, checkoutIssues, onSelect, onToggle, onDrag, onDrop, onMove, onStart, onStop, onTest, onEdit, onDelete }: {
+function SectionRows({ section, grouped, taskView, selectedId, picked, globalTest, dragId, names, accounts, groups, lang, checkoutIssues, onSelect, onToggle, onDrag, onDrop, onStart, onStop, onTest, onEdit, onDelete }: {
   section: { label: string; rows: PublicTask[] }
   grouped: boolean
   taskView: "compact" | "detailed"
@@ -593,14 +608,13 @@ function SectionRows({ section, grouped, taskView, selectedId, picked, globalTes
   onToggle: (id: string) => void
   onDrag: (id: string | null) => void
   onDrop: (id: string) => void
-  onMove: (id: string, delta: number) => void
   onStart: (id: string) => void
   onStop: (id: string) => void
   onTest: (id: string) => void
   onEdit: (task: PublicTask) => void
   onDelete: (id: string) => void
 }) {
-  const cols = taskView === "detailed" ? 9 : 5
+  const cols = taskView === "detailed" ? 8 : 4
   return (
     <>
       {grouped ? <tr className="group-row"><td colSpan={cols}>{section.label}</td></tr> : null}
@@ -614,12 +628,9 @@ function SectionRows({ section, grouped, taskView, selectedId, picked, globalTes
         >
           <td>
             <input type="checkbox" aria-label={task.sku} checked={picked.includes(task.id)} onClick={(event) => event.stopPropagation()} onChange={() => onToggle(task.id)} />
+            <button type="button" className="drag-handle" draggable title="Drag to reorder" aria-label={`Drag ${task.sku}`} onDragStart={(event) => { event.dataTransfer.setData("text/plain", task.id); event.dataTransfer.effectAllowed = "move"; onDrag(task.id) }} onDragEnd={() => onDrag(null)}>⋮⋮</button>
           </td>
-          <td className="row-actions">
-            <button type="button" className="drag-handle" draggable aria-label={`Drag ${task.sku}`} onDragStart={(event) => { event.dataTransfer.setData("text/plain", task.id); event.dataTransfer.effectAllowed = "move"; onDrag(task.id) }} onDragEnd={() => onDrag(null)}>Move</button>
-            <button type="button" aria-label={`Move ${task.sku} up`} onClick={(event) => { event.stopPropagation(); onMove(task.id, -1) }}>Up</button>
-            <button type="button" aria-label={`Move ${task.sku} down`} onClick={(event) => { event.stopPropagation(); onMove(task.id, 1) }}>Down</button>
-          </td>
+          
           <td>
             <div className="product-cell">
               <ProductVisual store={task.store} name={storeName(task.store)} sku={task.sku} imageUrl={task.imageUrl} />
@@ -633,7 +644,7 @@ function SectionRows({ section, grouped, taskView, selectedId, picked, globalTes
             </div>
           </td>
           {taskView === "detailed" ? <td className="col-extra">{task.quantity}</td> : null}
-          {taskView === "detailed" ? <td className="col-extra">{names.profile.get(task.profileId) ?? "Missing"}</td> : null}
+          {taskView === "detailed" ? <td className="col-extra">{task.kind === "monitor" ? "—" : names.profile.get(task.profileId) ?? "Missing"}</td> : null}
           {taskView === "detailed" ? <td className="col-extra">{bindingCell(task, accounts, groups, lang).account}</td> : null}
           {taskView === "detailed" ? <td className="col-extra">{bindingCell(task, accounts, groups, lang).proxy}</td> : null}
           <td>
@@ -766,6 +777,10 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
   }
   return (
     <form className="card form-grid" onSubmit={onSubmit}>
+      <div className="span-2 modal-title">
+        <h2>{form.id ? "Edit" : "Create"} <u>{monitor ? "Monitor" : "Checkout"}</u> Task</h2>
+        <button type="button" className="icon-btn" aria-label="Close" onClick={onCancel}>✕</button>
+      </div>
       <div className="span-2 role-switch" role="group" aria-label={taskText(lang, "roleTitle")}>
         <span className="role-title">{taskText(lang, "roleTitle")}</span>
         <div className="choices">

@@ -465,9 +465,9 @@ export function parsePairingPayload(text: string): PairingPayload {
   try {
     value = JSON.parse(text) as Partial<PairingPayload>
   } catch {
-    throw new Error("That QR code is not a TCGAIO pairing code.")
+    throw new Error("That QR code is not a Zzz AIO pairing code.")
   }
-  if (value.v !== 1) throw new Error("This pairing code is from a different TCGAIO version.")
+  if (value.v !== 1) throw new Error("This pairing code is from a different Zzz AIO version.")
   if (!value.pcId || !/^[0-9a-f-]{36}$/i.test(value.pcId)) throw new Error("Pairing code is missing the PC id.")
   if (!value.name || typeof value.name !== "string") throw new Error("Pairing code is missing the PC name.")
   if (!value.host || !/^[A-Za-z0-9._-]+$/.test(value.host)) throw new Error("Pairing code has an invalid address.")

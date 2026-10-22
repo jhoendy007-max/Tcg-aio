@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { crc32 } from "node:zlib"
 
-const FILES = ["manifest.json", "background.js", "popup.html", "popup.js", "popup.css", "policy.mjs", "wire.mjs"]
+const FILES = ["manifest.json", "background.js", "popup.html", "popup.js", "popup.css", "policy.mjs", "wire.mjs", "icons/icon16.png", "icons/icon32.png", "icons/icon48.png", "icons/icon128.png"]
 
 export function extensionZip(dir = join(dirname(fileURLToPath(import.meta.url)), "..", "extension")) {
   const parts = []

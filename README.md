@@ -1,3 +1,7 @@
+<p align="center"><img src="docs/brand/zzz-logo.png" width="128" alt="Zzz AIO logo" /></p>
+<h1 align="center">Zzz AIO</h1>
+<p align="center"><em>Cop while you sleep</em></p>
+
 # TCGAIO
 
 Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops. v0.2 checks out Target by TCIN, Walmart by item ID, Best Buy by SKU, Pokémon Center by SKU or product URL, Crunchyroll Store by product ID or URL, Amazon by ASIN or product URL, and Premium Bandai by product code. GameStop, Barnes & Noble, Costco, and Sam's Club use your saved session and the store's own checkout forms. TCGplayer Direct reads the public catalog and checks out only when www.tcgplayer.com shows a cart form. If a page has no form, TCGAIO pauses so you can add the item in that browser. Pokémon Center and Premium Bandai remain the official US preorder sources. A companion iOS and Android app can watch and control tasks. The PC keeps running the checkout.

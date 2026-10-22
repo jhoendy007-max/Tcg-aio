@@ -48,8 +48,8 @@ const COPY = {
   cardOrdersHint: { en: "0 means no cap. Successful orders for that last four today.", es: "0 significa sin tope. Pedidos exitosos de esos últimos cuatro hoy." },
   shipTitle: { en: "Shipments", es: "Envíos" },
   shipIntro: {
-    en: "Status comes from shipping mail in the mailboxes you connected. TCGAIO only reads that mail.",
-    es: "El estado sale del correo de envío en los buzones que conectaste. TCGAIO solo lee ese correo."
+    en: "Status comes from shipping mail in the mailboxes you connected. Zzz AIO only reads that mail.",
+    es: "El estado sale del correo de envío en los buzones que conectaste. Zzz AIO solo lee ese correo."
   },
   shipEmpty: { en: "No orders yet. A win with an order number shows up here.", es: "Aún no hay pedidos. Una compra con número de orden aparece aquí." },
   shipScan: { en: "Read shipping mail", es: "Leer correo de envío" },

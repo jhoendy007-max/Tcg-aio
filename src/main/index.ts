@@ -38,6 +38,7 @@ import { registerIpc } from "./ipc"
 import { heartbeatAccount, reportCheckout } from "../engine/account-client"
 import { machineFingerprint } from "./machine-fingerprint"
 import { HEARTBEAT_MS } from "../shared/license-proof"
+import appIcon from "../../resources/icon.png?asset"
 import type { Settings } from "../shared/types"
 
 const gotLock = app.requestSingleInstanceLock()
@@ -92,7 +93,8 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     backgroundColor: "#0b0d12",
-    title: "TCGAIO",
+    title: "Zzz AIO",
+    icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),

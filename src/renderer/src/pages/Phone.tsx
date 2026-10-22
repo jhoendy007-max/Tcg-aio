@@ -67,7 +67,7 @@ export function PhonePage() {
           {inviteLive ? (
             <>
               <img className="qr" alt="Pairing QR code" src={inviteLive.qrDataUrl} />
-              <p>Scan this with the TCGAIO phone app. It expires in {secondsLeft}s and works once.</p>
+              <p>Scan this with the Zzz AIO phone app. It expires in {secondsLeft}s and works once.</p>
               <span className="mono">{status ? `${status.host}:${status.port}` : ""}</span>
             </>
           ) : (

@@ -111,7 +111,7 @@ describe("session sync policy", () => {
 
   it("packs a loadable zip and a crx around the same files", () => {
     const zip = pack.extensionZip()
-    expect(pack.zipNames(zip)).toEqual(["manifest.json", "background.js", "popup.html", "popup.js", "popup.css", "policy.mjs", "wire.mjs"])
+    expect(pack.zipNames(zip)).toEqual(["manifest.json", "background.js", "popup.html", "popup.js", "popup.css", "policy.mjs", "wire.mjs", "icons/icon16.png", "icons/icon32.png", "icons/icon48.png", "icons/icon128.png"])
     expect(zip.includes(Buffer.from("PRIVATE KEY"))).toBe(false)
     const crx = pack.extensionCrx(zip)
     expect(crx.subarray(0, 4).toString()).toBe("Cr24")

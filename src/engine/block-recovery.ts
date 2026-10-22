@@ -149,7 +149,7 @@ export async function sendWithRecovery(
     const blocked = options.blocked(response) && (kind === "rate_limit" || kind === "hard_block")
     if (!blocked) {
       if (kind === "challenge") {
-        ctx.log("warn", "The store is showing a challenge. A person can solve it in the account browser. TCGAIO does not solve challenges.")
+        ctx.log("warn", "The store is showing a challenge. A person can solve it in the account browser. Zzz AIO does not solve challenges.")
       }
       return response
     }

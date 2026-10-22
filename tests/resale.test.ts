@@ -40,7 +40,7 @@ describe("resale math", () => {
     expect(readEbaySold(challenge).challenge).toBe(true)
     expect(readEbaySold(challenge).prices).toEqual([])
     expect(readPricepointMarket(points)).toBe(88.25)
-    expect(draftListing({ title: "Charizard ex", quantity: 1, price: 90, source: "eBay sold median" })).toContain("TCGAIO did not post this listing.")
+    expect(draftListing({ title: "Charizard ex", quantity: 1, price: 90, source: "eBay sold median" })).toContain("Zzz AIO did not post this listing.")
   })
 })
 
