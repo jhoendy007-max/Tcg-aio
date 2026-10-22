@@ -243,26 +243,87 @@ describe("hardware-bound accounts", () => {
     expect(post(reopened, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintA }).status).toBe(200)
   })
 
-  it("does not use an owner seat until that PC confirms", () => {
+  it("signs the owner in on any PC without a key, a device slot, or a client flag", () => {
     const { api: server, dir } = api()
     open.push(server)
     const pcs = Array.from({ length: 9 }, (_, index) => fingerprintHash([`owner-pc-${index}`]))
+    const tokens: string[] = []
     for (let index = 0; index < pcs.length; index += 1) {
-      const signed = post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[index] }, "", `198.51.100.${index + 1}`)
-      expect(signed.status).toBe(200)
-    }
-    expect(devices(dir, "Owner").devices).toEqual([])
-    for (let index = 0; index < 8; index += 1) {
-      const signed = body(post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[index] }, "", `203.0.113.${index + 1}`))
+      const signed = body(post(server, "/v1/account/login", {
+        email: OWNER_EMAIL,
+        password: "owner-password",
+        fingerprint: pcs[index],
+        role: "user",
+        unlimited: false,
+        key: ""
+      }, "", `198.51.100.${index + 1}`))
+      const grant = readGrant(String(signed.envelope), server.publicKey)
+      expect(grant?.role).toBe("owner")
+      expect(grant?.expiresAt).toBeNull()
+      expect(grant?.plan).toBe("owner")
+      expect(grant?.fingerprint).toBe(pcs[index])
+      expect(accessAllowed(grant!, pcs[index], grant!.serverTime + 1000)).toBe(true)
+      expect(accessAllowed(grant!, pcs[(index + 1) % pcs.length], grant!.serverTime + 1000)).toBe(false)
       expect(post(server, "/v1/session/confirm", { token: signed.token }).status).toBe(200)
+      tokens.push(String(signed.token))
     }
-    expect(devices(dir, "Owner").devices).toHaveLength(8)
-    const ninth = body(post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[8] }, "", "203.0.113.30"))
-    const rejected = post(server, "/v1/session/confirm", { token: ninth.token })
-    expect(rejected.status).toBe(403)
-    expect(body(rejected).error).toMatch(/allowed PCs/)
-    expect(devices(dir, "Owner").devices).toHaveLength(8)
-    expect(post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[0] }, "", "203.0.113.40").status).toBe(200)
-    expect(devices(dir, "Owner").devices).toHaveLength(8)
+    expect(devices(dir, "Owner")).toEqual({ devices: [], confirmed: 0 })
+    const copied = post(server, "/v1/session/heartbeat", { token: tokens[0], fingerprint: pcs[8] })
+    expect(copied.status).toBe(403)
+    expect(body(copied).error).toBe("This license is already active on another PC")
+    expect(post(server, "/v1/session/heartbeat", { token: tokens[0], fingerprint: pcs[0] }).status).toBe(200)
+    expect(post(server, "/v1/session/heartbeat", { token: tokens[8], fingerprint: pcs[8] }).status).toBe(200)
+    expect(devices(dir, "Owner").devices).toEqual([])
+
+    const admin = body(post(server, "/v1/admin/login", { email: OWNER_EMAIL, password: "owner-password" }))
+    const listed = body(server.handle("GET", "/v1/admin/users", { authorization: `Bearer ${admin.token}` }, ""))
+    const ownerRow = (listed.users as Array<{ id: string; email: string; role: string }>).find((row) => row.email === OWNER_EMAIL)
+    expect(ownerRow?.role).toBe("owner")
+    for (const action of ["reset", "suspend"]) {
+      const refused = post(server, `/v1/admin/users/${ownerRow?.id}/${action}`, {}, String(admin.token))
+      expect(refused.status).toBe(403)
+      expect(body(refused).error).toBe("The owner account stays active.")
+    }
+    const overview = body(server.handle("GET", "/v1/admin/overview", { authorization: `Bearer ${admin.token}` }, ""))
+    const ownerLicense = (overview.licenses as Array<{ id: string; role: string }>).find((row) => row.role === "owner")
+    for (const action of ["reset", "suspend", "revoke"]) {
+      const refused = post(server, `/v1/admin/licenses/${ownerLicense?.id}/${action}`, {}, String(admin.token))
+      expect(refused.status).toBe(403)
+      expect(body(refused).error).toBe("The owner license cannot be reset, suspended, or revoked.")
+    }
+
+    const raw = new DatabaseSync(join(dir, "license.sqlite"))
+    raw.prepare("UPDATE users SET account_status = 'suspended' WHERE email = ?").run(OWNER_EMAIL)
+    raw.prepare("UPDATE licenses SET status = 'revoked', fingerprint = ?, devices = ?, fingerprint_confirmed = 1, expires_at = 1 WHERE note = 'Owner'").run(pcs[0], JSON.stringify([pcs[0], pcs[1]]))
+    raw.close()
+    const repaired = body(post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[3] }, "", "203.0.113.10"))
+    const repairedGrant = readGrant(String(repaired.envelope), server.publicKey)
+    expect(repairedGrant?.role).toBe("owner")
+    expect(repairedGrant?.expiresAt).toBeNull()
+    expect(devices(dir, "Owner")).toEqual({ devices: [], confirmed: 0 })
+    expect(post(server, "/v1/session/heartbeat", { token: tokens[1], fingerprint: pcs[1] }).status).toBe(200)
+
+    const created = body(post(server, "/v1/admin/licenses", { note: "Shop" }, String(admin.token)))
+    post(server, `/v1/admin/licenses/${created.id}/access`, {}, String(admin.token))
+    const claimed = body(post(server, "/v1/account/claim", {
+      email: "ada@example.com",
+      password: "password1",
+      key: created.key,
+      fingerprint: fingerprintA,
+      role: "owner",
+      unlimited: true
+    }))
+    expect(readGrant(String(claimed.envelope), server.publicKey)?.role).toBe("user")
+    expect(post(server, "/v1/session/confirm", { token: claimed.token }).status).toBe(200)
+    const other = post(server, "/v1/account/login", {
+      email: "ada@example.com",
+      password: "password1",
+      fingerprint: fingerprintB,
+      role: "owner",
+      unlimited: true
+    })
+    expect(other.status).toBe(403)
+    expect(body(other).error).toBe("This license is already active on another PC")
+    expect(devices(dir, "Shop").devices).toEqual([fingerprintA])
   })
 })

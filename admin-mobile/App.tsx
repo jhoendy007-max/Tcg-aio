@@ -514,7 +514,7 @@ export default function App() {
                   </View>
                 </View>
                 <Text style={styles.hint}>Signed up {when(row.createdAt)} · PC {row.fingerprint || "not bound"}</Text>
-                {row.role === "owner" ? <Text style={styles.hint}>This owner account stays active.</Text> : (
+                {row.role === "owner" ? <Text style={styles.hint}>This owner account stays active on every PC.</Text> : (
                   <View style={styles.cardBody}>
                     <Text style={styles.label}>Payment method</Text>
                     <TextInput style={styles.input} value={row.paymentMethod || "Not configured"} placeholder="Not configured" placeholderTextColor="#6d7585" onEndEditing={(event) => void userAct(row.id, "payment", { paymentMethod: event.nativeEvent.text })} />

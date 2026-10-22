@@ -331,6 +331,9 @@ function ensureOwner(db: DatabaseSync, options: LicenseApiOptions): void {
   if (!owner.password_hash && options.ownerPassword && options.ownerSetupToken) {
     setOwnerPassword(db, options.ownerSetupToken, options.ownerPassword)
   }
+  // The owner role is the only unlimited seat. Startup clears any stored PC so an older cap cannot linger.
+  db.prepare("UPDATE users SET account_status = 'active' WHERE email = ? AND role = 'owner'").run(OWNER_EMAIL)
+  db.prepare("UPDATE licenses SET fingerprint = NULL, devices = '[]', fingerprint_confirmed = 0, status = 'active', expires_at = NULL WHERE id = (SELECT license_id FROM users WHERE email = ? AND role = 'owner')").run(OWNER_EMAIL)
 }
 
 export function setOwnerPassword(db: DatabaseSync, token: string, password: string): void {
@@ -422,11 +425,13 @@ function login(db: DatabaseSync, privateKey: string, body: Record<string, unknow
     noteFailure(db, email, ip, now, push)
     return json(401, { ok: false, error: "That email and password did not match." })
   }
-  if (user.account_status === "suspended") return json(403, { ok: false, error: "This account is suspended." })
-  const license = licenseFor(db, user)
-  if (license?.status === "suspended") return json(403, { ok: false, error: "This license is suspended." })
-  if (license?.status === "revoked") return json(403, { ok: false, error: "This license was revoked." })
-  if (!readyLicense(license)) return issuePending(db, user.id, now)
+  if (user.role !== "owner") {
+    if (user.account_status === "suspended") return json(403, { ok: false, error: "This account is suspended." })
+    const license = licenseFor(db, user)
+    if (license?.status === "suspended") return json(403, { ok: false, error: "This license is suspended." })
+    if (license?.status === "revoked") return json(403, { ok: false, error: "This license was revoked." })
+    if (!readyLicense(license)) return issuePending(db, user.id, now)
+  }
   return bindAndIssue(db, privateKey, user, fingerprint, now, push)
 }
 
@@ -451,6 +456,7 @@ function heartbeat(db: DatabaseSync, privateKey: string, body: Record<string, un
     return json(403, { ok: false, error: "This license is already active on another PC" })
   }
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id) as unknown as UserRow
+  if (user.role === "owner") return bindAndIssue(db, privateKey, user, fingerprint, now, push, "heartbeat")
   if (user.account_status === "suspended") return json(403, { ok: false, error: "This account is suspended." })
   const license = licenseFor(db, user)
   if (!readyLicense(license)) {
@@ -491,7 +497,7 @@ function transfer(db: DatabaseSync, privateKey: string, body: Record<string, unk
   const session = sessionByToken(db, text(body.token), now())
   if (!session || session.kind !== "user") return json(401, { ok: false, error: "Sign in again." })
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id) as unknown as UserRow
-  if (user.role === "owner") return bindAndIssue(db, privateKey, user, text(body.fingerprint), now, undefined, "heartbeat")
+  if (user.role === "owner") return bindAndIssue(db, privateKey, user, text(body.fingerprint), now)
   const license = licenseFor(db, user)
   if (!license) return json(400, { ok: false, error: "This account has no license." })
   if (license.last_transfer_at && now() - license.last_transfer_at < TRANSFER_MS) {
@@ -547,8 +553,8 @@ function licenseAction(db: DatabaseSync, id: string, action: string, push?: Lice
   const license = db.prepare("SELECT * FROM licenses WHERE id = ?").get(id) as LicenseRow | undefined
   if (!license) return json(404, { ok: false, error: "That license was not found." })
   const owner = db.prepare("SELECT role FROM users WHERE id = ?").get(license.user_id ?? "") as { role: string } | undefined
-  if (owner?.role === "owner" && (action === "suspend" || action === "revoke")) {
-    return json(403, { ok: false, error: "The owner license cannot be suspended or revoked." })
+  if (owner?.role === "owner" && (action === "reset" || action === "suspend" || action === "revoke")) {
+    return json(403, { ok: false, error: "The owner license cannot be reset, suspended, or revoked." })
   }
   if (action === "access") {
     if (license.status === "revoked") return json(400, { ok: false, error: "A revoked license stays revoked." })
@@ -569,7 +575,7 @@ function licenseAction(db: DatabaseSync, id: string, action: string, push?: Lice
 function userAction(db: DatabaseSync, id: string, action: string, body: Record<string, unknown>, now: () => number, push?: LicenseApiOptions["push"]): { status: number; body: string } {
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined
   if (!user) return json(404, { ok: false, error: "That account was not found." })
-  if (user.role === "owner" && action !== "reset") return json(403, { ok: false, error: "The owner account stays active." })
+  if (user.role === "owner") return json(403, { ok: false, error: "The owner account stays active." })
   if (action === "license") return linkGeneratedLicense(db, user, body, now)
   if (action === "paid") {
     if (typeof body.paid !== "boolean") return json(400, { ok: false, error: "Say whether this account is paid." })
@@ -701,6 +707,11 @@ function confirmSession(db: DatabaseSync, body: Record<string, unknown>, now: ()
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id) as UserRow | undefined
   if (!user) return json(401, { ok: false, error: "Sign in again." })
   const license = licenseFor(db, user)
+  if (user.role === "owner") {
+    if (!license) return json(400, { ok: false, error: "This account has no license." })
+    releaseOwner(db, user.id, license.id, now())
+    return json(200, { ok: true })
+  }
   const blocked = licenseBlock(license, now())
   if (blocked) return blocked
   const rejected = lockDevice(db, user, license as LicenseRow, session.fingerprint, now(), push)
@@ -717,16 +728,13 @@ function licenseBlock(license: LicenseRow | undefined, at: number): { status: nu
   return null
 }
 
+function releaseOwner(db: DatabaseSync, userId: string, licenseId: string, at: number): void {
+  db.prepare("UPDATE users SET account_status = 'active' WHERE id = ? AND role = 'owner'").run(userId)
+  db.prepare("UPDATE licenses SET fingerprint = NULL, devices = '[]', fingerprint_confirmed = 0, status = 'active', expires_at = NULL, last_seen = ? WHERE id = ?").run(at, licenseId)
+}
+
 function lockDevice(db: DatabaseSync, user: UserRow, license: LicenseRow, fingerprint: string, at: number, push?: LicenseApiOptions["push"]): { status: number; body: string } | null {
-  if (user.role === "owner") {
-    const devices = parseDevices(license.devices)
-    if (!devices.includes(fingerprint)) {
-      if (devices.length >= OWNER_DEVICE_LIMIT) return json(403, { ok: false, error: "This owner account is already active on its allowed PCs." })
-      devices.push(fingerprint)
-    }
-    db.prepare("UPDATE licenses SET fingerprint = ?, devices = ?, fingerprint_confirmed = 1, last_seen = ? WHERE id = ?").run(fingerprint, JSON.stringify(devices), at, license.id)
-    return null
-  }
+  if (user.role === "owner") return null
   if (license.fingerprint && license.fingerprint !== fingerprint) {
     notify(db, push, "foreign_pc", "Different PC", "Someone tried to use a license from a different PC.")
     return json(403, { ok: false, error: "This license is already active on another PC" })
@@ -738,16 +746,17 @@ function lockDevice(db: DatabaseSync, user: UserRow, license: LicenseRow, finger
 function bindAndIssue(db: DatabaseSync, privateKey: string, user: UserRow, fingerprint: string, now: () => number, push?: LicenseApiOptions["push"], mode: "login" | "heartbeat" = "login"): { status: number; body: string } {
   if (!/^[0-9a-f]{64}$/.test(fingerprint)) return json(400, { ok: false, error: "This PC could not be recognized." })
   const license = licenseFor(db, user)
+  if (user.role === "owner") {
+    if (!license) return json(400, { ok: false, error: "This account has no license." })
+    releaseOwner(db, user.id, license.id, now())
+    return issueSession(db, privateKey, user.id, fingerprint, now, true)
+  }
   const blocked = licenseBlock(license, now())
   if (blocked) return blocked
   const row = license as LicenseRow
   if (mode === "heartbeat") {
     const rejected = lockDevice(db, user, row, fingerprint, now(), push)
     if (rejected) return rejected
-  } else if (user.role === "owner") {
-    const devices = parseDevices(row.devices)
-    if (devices.includes(fingerprint)) db.prepare("UPDATE licenses SET fingerprint = ?, last_seen = ? WHERE id = ?").run(fingerprint, now(), row.id)
-    else db.prepare("UPDATE licenses SET last_seen = ? WHERE id = ?").run(now(), row.id)
   } else {
     const confirmed = Number(row.fingerprint_confirmed ?? 1) === 1
     if (row.fingerprint && row.fingerprint !== fingerprint && confirmed) {
@@ -761,22 +770,24 @@ function bindAndIssue(db: DatabaseSync, privateKey: string, user: UserRow, finge
   return issueSession(db, privateKey, user.id, fingerprint, now)
 }
 
-function issueSession(db: DatabaseSync, privateKey: string, userId: string, fingerprint: string, now: () => number): { status: number; body: string } {
+function issueSession(db: DatabaseSync, privateKey: string, userId: string, fingerprint: string, now: () => number, keepOtherPcs = false): { status: number; body: string } {
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as unknown as UserRow
   const license = licenseFor(db, user)
   if (!license) return json(400, { ok: false, error: "This account has no license." })
+  const owner = user.role === "owner"
   const token = randomBytes(32).toString("base64url")
-  db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user'").run(userId)
+  if (owner && keepOtherPcs) db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user' AND fingerprint = ?").run(userId, fingerprint)
+  else db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user'").run(userId)
   db.prepare("INSERT INTO sessions (token_hash, user_id, fingerprint, expires_at, kind) VALUES (?, ?, ?, ?, 'user')").run(sha(token), userId, fingerprint, now() + SESSION_MS)
   const grant: AccessGrant = {
     v: 1,
     ok: true,
     email: user.email,
-    role: user.role === "owner" ? "owner" : "user",
+    role: owner ? "owner" : "user",
     licenseId: license.id,
     holder: license.note || user.email,
-    plan: license.plan,
-    expiresAt: license.expires_at,
+    plan: owner ? "owner" : license.plan,
+    expiresAt: owner ? null : license.expires_at,
     fingerprint,
     serverTime: now(),
     graceMs: GRANT_GRACE_MS
@@ -876,15 +887,6 @@ function sessionByToken(db: DatabaseSync, token: string, at: number): { user_id:
 function licenseFor(db: DatabaseSync, user: UserRow): LicenseRow | undefined {
   if (!user.license_id) return undefined
   return db.prepare("SELECT * FROM licenses WHERE id = ?").get(user.license_id) as LicenseRow | undefined
-}
-
-function parseDevices(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []
-  } catch {
-    return []
-  }
 }
 
 function hashPassword(password: string): string {

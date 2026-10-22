@@ -205,6 +205,10 @@
         }
         if (row.licenseId) add("Reset PC", "reset")
         add(row.status === "suspended" ? "Unsuspend" : "Suspend", row.status === "suspended" ? "unsuspend" : "suspend")
+      } else {
+        const note = document.createElement("p")
+        note.textContent = "This owner account stays active on every PC."
+        actions.append(note)
       }
       card.append(title, meta, actions)
       return card
