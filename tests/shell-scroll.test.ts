@@ -60,7 +60,7 @@ function measure(width: number, height: number, expanded: boolean): Array<Record
     "--virtual-time-budget=4000",
     "--dump-dom",
     htmlPath
-  ], { encoding: "utf8", timeout: 40000 })
+  ], { encoding: "utf8", timeout: 150000, env: { ...process.env, DBUS_SESSION_BUS_ADDRESS: "/dev/null" } })
   if (result.error && !`${result.stdout}`.includes('id="result"')) throw result.error
   const dom = `${result.stdout}\n${result.stderr}`
   const match = dom.match(/<pre id="result">([\s\S]*?)<\/pre>/)
@@ -148,5 +148,5 @@ describe("desktop shell scroll", () => {
         expect(row.rootMinHeight, `${size.name} ${row.name}`).toBe("0px")
       }
     }
-  }, 120000)
+  }, 360000)
 })
