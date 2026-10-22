@@ -2,7 +2,8 @@ import { applySolvedCookies, challengePageUrl, classifyChallenge, cookieHeader }
 import type { ChallengeGate } from "./challenge-gate"
 import { isBlockStatus as blockStatus, sendWithRecovery, type SessionRefresher } from "./block-recovery"
 import { classifyTraffic, pollQueue } from "./traffic"
-import { adaptiveDelay, detectChanges, MonitorHub, type WatchSnapshot } from "./monitor"
+import { plainNetworkError } from "./chromium-session"
+import { adaptiveDelay, detectChanges, MonitorHub, stockCheckLine, type WatchSnapshot } from "./monitor"
 import type { RequestTiming } from "./http"
 import { productImage } from "../shared/image"
 import { cleanImageUrl } from "./validate"
@@ -275,6 +276,8 @@ export class TaskService {
       if (testMode) update({ log: line("warn", "TEST MODE. The real flow runs through payment, then stops. The place-order request is not sent.") })
       let handoffs = 0
       let detectedAt = 0
+      let announcedStock = false
+      let openedStock = false
       const guarded = testMode ? guardTestMode(task.store, http) : http
       const ctx = {
         task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store, maxPrice: task.maxPrice },
@@ -342,6 +345,14 @@ export class TaskService {
           if (status === "monitoring") {
             ctx.proxy = monitorProxy
             ctx.proxies = monitorProxies
+            if (monitorTask && !openedStock) {
+              openedStock = true
+              update({
+                log: line("info", monitorProxy
+                  ? `Opening the stock check through proxy ${proxyLabel(monitorProxy)}.`
+                  : "Opening the stock check with a direct connection.")
+              })
+            }
           } else {
             ctx.proxy = proxy
             ctx.proxies = proxies
@@ -363,7 +374,11 @@ export class TaskService {
           ctx.account = account
           update({ log: line("info", `Saved the refreshed ${module.displayName} session locally.`) })
         },
-        share: <T>(key: string, load: () => Promise<T>) => this.hub.share(key, async () => {
+        share: <T>(key: string, load: () => Promise<T>) => {
+          if (monitorTask && this.hub.pending(key)) {
+            update({ log: line("info", "This stock check is already running through the same proxy. Waiting for that result.") })
+          }
+          return this.hub.share(key, async () => {
           const started = Date.now()
           const value = await load()
           const status = readStatus(value)
@@ -394,7 +409,8 @@ export class TaskService {
             }
           }
           return value
-        }),
+          })
+        },
         observe: (snapshot: WatchSnapshot) => {
           const fresh = this.refreshLive(id, settings, pace, ctx)
           const key = `${fresh.store}:${fresh.sku}`
@@ -466,6 +482,16 @@ export class TaskService {
       }
       ctx.http = {
         request: async (input) => {
+          if (monitorTask && !announcedStock) {
+            announcedStock = true
+            let host = "the store"
+            try {
+              host = new URL(input.url).hostname
+            } catch {
+              host = "the store"
+            }
+            update({ log: line("info", stockCheckLine(host, input.proxy ?? monitorProxy)) })
+          }
           const stamped = account.id && !monitorTask ? { ...input, partition: accountPartition(account.id) } : input
           if (isFinalSubmit(task.store, stamped)) {
             if (!testMode) {
@@ -550,7 +576,7 @@ export class TaskService {
         })
         return
       }
-      const message = err instanceof Error ? err.message : String(err)
+      const message = plainNetworkError(err).message
       finish(update, "failed", message, "error")
       await this.safeNotify(update, {
         kind: "failure",

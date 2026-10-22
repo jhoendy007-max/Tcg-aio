@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, monitorPlaces, noteWatch, sharedCall } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, monitorPlaces, monitorStatusReason, noteWatch, sharedCall } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
@@ -278,7 +278,7 @@ async function readStock(
   summary.searchParams.set("channel", "WEB")
   summary.searchParams.set("page", `/p/A-${tcin}`)
   const primary = await sharedCall(ctx, monitorKey("target", tcin, `${location.zip}:${location.storeId}`, ctx.proxy), () => call(ctx, { method: "GET", url: summary.toString(), headers: monitorHeaders(tcin) }))
-  const primaryStep = interpretMonitor(primary)
+  const primaryStep = interpretMonitor(primary, Boolean(ctx.proxy))
   if (primaryStep.kind === "paused") return primaryStep
   if (primaryStep.kind === "ok" && primaryStep.value.status !== "UNKNOWN" && primaryStep.value.status !== "NOT_FOUND") {
     return primaryStep
@@ -292,17 +292,16 @@ async function readStock(
   legacy.searchParams.set("state", location.state)
   legacy.searchParams.set("channel", "WEB")
   const secondary = await call(ctx, { method: "GET", url: legacy.toString(), headers: monitorHeaders(tcin) })
-  const secondaryStep = interpretMonitor(secondary)
+  const secondaryStep = interpretMonitor(secondary, Boolean(ctx.proxy))
   if (secondaryStep.kind === "ok" || secondaryStep.kind === "paused") return secondaryStep
   if (primaryStep.kind === "ok") return primaryStep
   return secondaryStep
 }
 
-function interpretMonitor(response: HttpResponse): Step<StockReading> {
+function interpretMonitor(response: HttpResponse, hasProxy: boolean): Step<StockReading> {
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: TARGET_PAUSE }
-  if (response.status === 429 || response.status >= 500) {
-    return { kind: "retry", reason: `Monitor request returned HTTP ${response.status}. Retrying.` }
-  }
+  const blocked = monitorStatusReason(response.status, hasProxy)
+  if (blocked) return { kind: "retry", reason: blocked }
   const reading = parseStock(response.body)
   if (reading) reading.imageUrl = productImage(response.body) || undefined
   const problem = stockProblem(response.body)

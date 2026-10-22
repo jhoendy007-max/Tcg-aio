@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
@@ -196,18 +196,16 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
   const response = await sharedValue(ctx, monitorKey("pokemon-center", sku, isProductUrl(ctx.task.sku, sku) ? "page" : "search", ctx.proxy), () => store(ctx, jar, { method: "GET", url: primary, headers: pageHeaders(jar, page) }))
   if (response.kind === "retry") return response
   if (response.kind !== "ok") return response
-  if (response.value.status === 429 || response.value.status >= 500) {
-    return { kind: "retry", reason: `Monitor request returned HTTP ${response.value.status}. Retrying.` }
-  }
+  const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
+  if (blocked) return { kind: "retry", reason: blocked }
   let reading = readStock(response.value.body, sku)
   let imageBody = response.value.body
   const searchMiss = reading?.status === "NOT_FOUND" && !isProductUrl(ctx.task.sku, sku)
   if ((!reading || searchMiss) && !isProductUrl(ctx.task.sku, sku)) {
     const fallback = await store(ctx, jar, { method: "GET", url: page, headers: pageHeaders(jar, page) })
     if (fallback.kind !== "ok") return fallback
-    if (fallback.value.status === 429 || fallback.value.status >= 500) {
-      return { kind: "retry", reason: `Monitor request returned HTTP ${fallback.value.status}. Retrying.` }
-    }
+    const fallbackBlocked = monitorStatusReason(fallback.value.status, Boolean(ctx.proxy))
+    if (fallbackBlocked) return { kind: "retry", reason: fallbackBlocked }
     const pageReading = readStock(fallback.value.body, sku)
     if (pageReading) {
       reading = pageReading

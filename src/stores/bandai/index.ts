@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import type { SessionCookies } from "../../shared/types"
@@ -188,9 +188,8 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
   if (response.kind !== "ok") return response
   if (isChallenge(response.value.status, response.value.body)) return { kind: "paused", reason: BANDAI_PAUSE }
   if (response.value.status === 401) return { kind: "unauthorized", reason: EXPIRED_PAUSE }
-  if (response.value.status === 429 || response.value.status >= 500) {
-    return { kind: "retry", reason: `Monitor request returned HTTP ${response.value.status}. Retrying.` }
-  }
+  const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
+  if (blocked) return { kind: "retry", reason: blocked }
   const reading = readStock(response.value.body, sku)
   if (reading) {
     reading.imageUrl = productImage(response.value.body) || undefined

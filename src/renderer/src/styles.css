@@ -238,6 +238,7 @@ tbody tr { cursor: pointer; }
 }
 .log-line { display: grid; grid-template-columns: 88px 1fr; gap: 10px; padding: 3px 14px; }
 .log-line time { color: var(--log-time); }
+.log-line.info { color: var(--muted); }
 .log-line.success { color: #8ee0b8; }
 .log-line.error { color: #ffb1b1; }
 .log-line.warn { color: #f0d092; }
@@ -326,6 +327,7 @@ legend { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @keyframes pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
 @media (max-width: 900px) { .chart-grid, .hbar-row { grid-template-columns: 1fr; } }
+:root[data-theme="light"] .log-line.info { color: var(--muted); }
 :root[data-theme="light"] .log-line.success { color: #0f7a45; }
 :root[data-theme="light"] .log-line.error { color: #a12626; }
 :root[data-theme="light"] .log-line.warn { color: #8a5a10; }

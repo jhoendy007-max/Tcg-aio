@@ -1,4 +1,5 @@
 import { app, BrowserWindow, session, type Session, type WebContents } from "electron"
+import { chromiumProxyRules } from "../engine/chromium-session"
 import type { Database } from "../engine/database"
 import { applySolvedCookies, challengePageUrl, cookieHeader, splitCookieHeader } from "../engine/challenge"
 import { looksSignedOut, sessionOrigin, sessionPartition, storeHome } from "../engine/session-care"
@@ -193,7 +194,7 @@ async function bindProxy(ses: Session, proxy: ProxyEndpoint | undefined): Promis
     await ses.setProxy({ mode: "direct" })
     return
   }
-  await ses.setProxy({ proxyRules: `http://${proxy.host}:${proxy.port};https://${proxy.host}:${proxy.port}` })
+  await ses.setProxy({ proxyRules: chromiumProxyRules(proxy) })
 }
 
 function watchProxyLogin(ses: Session, proxy: ProxyEndpoint | undefined): () => void {

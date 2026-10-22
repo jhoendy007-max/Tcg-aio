@@ -3,13 +3,18 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { chromeUserAgent } from "../src/engine/chrome-ua"
 import {
+  chromiumCallOptions,
+  chromiumProxyRules,
   chromiumTiming,
+  classifyProxyLogin,
   cookieDiff,
   cookieWrites,
   monitorPartition,
   parseCookieHeader,
   partitionForRequest,
   planChromiumCall,
+  plainNetworkError,
+  STOCK_CHECK_TIMEOUT,
   toHttpHeaders
 } from "../src/engine/chromium-session"
 import type { ProxyEndpoint } from "../src/shared/types"
@@ -109,6 +114,54 @@ describe("chromium request mapping", () => {
 
   it("records total time when Chromium does not report DNS or connect", () => {
     expect(chromiumTiming(10, 25.4, 40.2)).toEqual({ dnsMs: 0, connectMs: 0, ttfbMs: 15, totalMs: 30 })
+  })
+})
+
+describe("anonymous monitor network", () => {
+  it("sends both web schemes through an HTTP proxy and keeps the full referer", () => {
+    const rules = chromiumProxyRules(proxyA)
+    expect(rules).toBe("http=10.0.0.1:8000;https=10.0.0.1:8000")
+    expect(rules).not.toContain("https://")
+    const call = chromiumCallOptions("follow")
+    expect(call.referrerPolicy).toBe("unsafe-url")
+    expect(call.useSessionCookies).toBe(true)
+    expect(call.redirect).toBe("follow")
+  })
+
+  it("answers proxy login and leaves a store login alone", () => {
+    expect(classifyProxyLogin({ isProxy: true, host: "10.0.0.1", port: 8000 }, proxyA)).toBe("credentials")
+    expect(classifyProxyLogin({ isProxy: true, host: "10.0.0.1", port: 8000 }, { host: "10.0.0.1", port: 8000 })).toBe("missing")
+    expect(classifyProxyLogin({ isProxy: false, host: "10.0.0.1", port: 8000 }, proxyA)).toBe("credentials")
+    expect(classifyProxyLogin({ isProxy: false, host: "redsky.target.com", port: 443 }, proxyA)).toBe("store")
+  })
+
+  it("turns Chromium network errors into plain sentences", () => {
+    expect(plainNetworkError(new Error("net::ERR_BLOCKED_BY_CLIENT")).message).toBe("Request blocked inside the app.")
+    expect(plainNetworkError(new Error("net::ERR_PROXY_CONNECTION_FAILED")).message).toBe("Proxy failed.")
+    expect(plainNetworkError(new Error("connect ETIMEDOUT")).message).toBe(STOCK_CHECK_TIMEOUT)
+    const stopped = new Error("The task was stopped.")
+    stopped.name = "AbortError"
+    expect(plainNetworkError(stopped)).toBe(stopped)
+    expect(plainNetworkError(new Error("Choose a saved profile before starting this task.")).message).toBe("Choose a saved profile before starting this task.")
+  })
+
+  it("keeps the referrer policy and proxy rules on every Chromium request", () => {
+    const files = [
+      "src/main/chromium-http.ts",
+      "src/main/challenge-window.ts",
+      "src/main/session-window.ts",
+      "src/engine/store-browser.ts"
+    ]
+    for (const file of files) {
+      const text = readFileSync(join(process.cwd(), file), "utf8")
+      expect(text).toContain("chromiumProxyRules")
+      expect(text).not.toContain("proxyRules: `http://")
+    }
+    const http = readFileSync(join(process.cwd(), "src/main/chromium-http.ts"), "utf8")
+    const request = http.slice(http.indexOf("async function chromiumRequest"), http.indexOf("function untilAbort"))
+    expect(http).toContain("chromiumCallOptions")
+    expect(request.indexOf("new AbortController")).toBeLessThan(request.indexOf("ensureProxy"))
+    expect(readFileSync(join(process.cwd(), "src/renderer/src/styles.css"), "utf8")).toContain(".log-line.info { color: var(--muted); }")
   })
 })
 

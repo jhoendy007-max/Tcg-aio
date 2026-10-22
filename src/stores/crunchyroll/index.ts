@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
@@ -168,9 +168,8 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
 async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string): Promise<Step<StockReading>> {
   const response = await sharedValue(ctx, monitorKey("crunchyroll", sku, "product", ctx.proxy), () => store(ctx, { method: "GET", url: productApiUrl(sku), headers: apiHeaders(jar, productPageUrl(sku)) }))
   if (response.kind !== "ok") return response
-  if (response.value.status === 429 || response.value.status >= 500) {
-    return { kind: "retry", reason: `Monitor request returned HTTP ${response.value.status}. Retrying.` }
-  }
+  const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
+  if (blocked) return { kind: "retry", reason: blocked }
   const reading = readStock(response.value.body, sku)
   if (reading) {
     reading.imageUrl = productImage(response.value.body) || undefined

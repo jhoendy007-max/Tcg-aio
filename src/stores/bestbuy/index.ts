@@ -1,5 +1,5 @@
 import { attachSession } from "../../engine/block-recovery"
-import { holdMonitorOnly, monitorKey, noteWatch, sharedCall } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedCall } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { finishTest, note } from "../../engine/test-mode"
 import { redact } from "../../shared/redact"
@@ -188,7 +188,8 @@ async function readOffer(ctx: StoreRunContext, jar: CookieJar, sku: string, page
   const response = await sharedCall(ctx, monitorKey("bestbuy", sku, "page", ctx.proxy), () => call(ctx, { method: "GET", url: pageUrl, headers: pageHeaders(jar, pageUrl) }))
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: BESTBUY_PAUSE }
   if (isUnauthorized(response.status, response.body)) return { kind: "unauthorized", reason: "Unauthorized" }
-  if (response.status === 429 || response.status >= 500) return { kind: "retry", reason: `Monitor request returned HTTP ${response.status}. Retrying.` }
+  const blocked = monitorStatusReason(response.status, Boolean(ctx.proxy))
+  if (blocked) return { kind: "retry", reason: blocked }
   const reading = readStock(response.body, sku)
   if (reading) {
     reading.imageUrl = productImage(response.body) || undefined

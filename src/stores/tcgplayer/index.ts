@@ -1,4 +1,4 @@
-import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
 import { note } from "../../engine/test-mode"
 import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
@@ -137,9 +137,8 @@ async function readOffer(ctx: StoreRunContext, id: string, page: string): Promis
   )
   if (details.kind !== "ok") return details
   if (isCatalogChallenge(details.value.status, details.value.body)) return { kind: "paused", reason: TCGPLAYER_PAUSE }
-  if (details.value.status === 429 || details.value.status >= 500) {
-    return { kind: "retry", reason: `Catalog request returned HTTP ${details.value.status}. Retrying.` }
-  }
+  const blocked = monitorStatusReason(details.value.status, Boolean(ctx.proxy))
+  if (blocked) return { kind: "retry", reason: blocked }
   if (details.value.status === 404) {
     return { kind: "ok", value: { product: { id, title: "" }, inStock: false, reason: `TCGplayer product ${id} was not found.`, seller: "" } }
   }
@@ -157,9 +156,8 @@ async function readOffer(ctx: StoreRunContext, id: string, page: string): Promis
   })
   if (listed.kind !== "ok") return listed
   if (isCatalogChallenge(listed.value.status, listed.value.body)) return { kind: "paused", reason: TCGPLAYER_PAUSE }
-  if (listed.value.status === 429 || listed.value.status >= 500) {
-    return { kind: "retry", reason: `Listings request returned HTTP ${listed.value.status}. Retrying.` }
-  }
+  const listingsBlocked = monitorStatusReason(listed.value.status, Boolean(ctx.proxy))
+  if (listingsBlocked) return { kind: "retry", reason: listingsBlocked }
   if (listed.value.status >= 400) {
     return { kind: "retry", reason: `Listings returned HTTP ${listed.value.status}. Retrying.` }
   }

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, session, type Session } from "electron"
 import type { ChallengeGate } from "../engine/challenge-gate"
+import { chromiumProxyRules } from "../engine/chromium-session"
 import { challengeHost, splitCookieHeader } from "../engine/challenge"
 import type { PublicChallenge } from "../shared/types"
 
@@ -147,7 +148,7 @@ async function bindProxy(ses: Session, proxy: { host: string; port: number; user
     await ses.setProxy({ mode: "direct" })
     return
   }
-  await ses.setProxy({ proxyRules: `http://${proxy.host}:${proxy.port};https://${proxy.host}:${proxy.port}` })
+  await ses.setProxy({ proxyRules: chromiumProxyRules(proxy) })
 }
 
 function watchProxyLogin(proxy: { username?: string; password?: string } | undefined): () => void {

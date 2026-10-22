@@ -124,6 +124,65 @@ export function cookieDiff(before: CookieSnap[], after: CookieSnap[]): string[] 
   return lines
 }
 
+/** Destination schemes, both through an HTTP proxy. `https://host` would speak TLS to the proxy. */
+export function chromiumProxyRules(proxy: { host: string; port: number }): string {
+  return `http=${proxy.host}:${proxy.port};https=${proxy.host}:${proxy.port}`
+}
+
+/**
+ * Electron 25+ defaults referrerPolicy to strict-origin-when-cross-origin.
+ * A full Referer to another host (www.target.com → redsky.target.com) is then
+ * cancelled inside Chromium as net::ERR_BLOCKED_BY_CLIENT and never sent.
+ */
+export function chromiumCallOptions(redirect: "follow" | "manual"): {
+  redirect: "follow" | "manual"
+  referrerPolicy: "unsafe-url"
+  useSessionCookies: true
+} {
+  return { redirect, referrerPolicy: "unsafe-url", useSessionCookies: true }
+}
+
+export interface ProxyLoginChallenge {
+  isProxy?: boolean
+  host?: string
+  port?: number
+}
+
+/** Proxy auth is the proxy flag or a host:port match. An empty login callback cancels the request. */
+export function classifyProxyLogin(
+  auth: ProxyLoginChallenge,
+  proxy?: { host: string; port: number; username?: string }
+): "credentials" | "missing" | "store" {
+  const sameProxy = Boolean(
+    proxy &&
+    auth.host &&
+    auth.port !== undefined &&
+    auth.host.toLowerCase() === proxy.host.toLowerCase() &&
+    Number(auth.port) === Number(proxy.port)
+  )
+  if (!auth.isProxy && !sameProxy) return "store"
+  return proxy?.username ? "credentials" : "missing"
+}
+
+export const STOCK_CHECK_TIMEOUT = "The stock check timed out. The proxy or the store did not answer."
+
+/** Chromium net errors become one plain sentence. A user stop stays a stop. */
+export function plainNetworkError(error: unknown): Error {
+  if (error instanceof Error && (error.name === "AbortError" || error.message === "The task was stopped.")) return error
+  const message = error instanceof Error ? error.message : String(error)
+  if (/ERR_BLOCKED_BY_CLIENT/i.test(message)) return new Error("Request blocked inside the app.")
+  if (/ERR_PROXY|ERR_TUNNEL|PROXY_CONNECTION_FAILED|PROXY_AUTH/i.test(message)) return new Error("Proxy failed.")
+  if (message === STOCK_CHECK_TIMEOUT || /ETIMEDOUT|ERR_TIMED_OUT|\btimed out\b/i.test(message)) return new Error(STOCK_CHECK_TIMEOUT)
+  if (/ECONNRESET|ECONNREFUSED|ERR_CONNECTION_RESET|ERR_CONNECTION_REFUSED|ERR_CONNECTION_CLOSED|ERR_EMPTY_RESPONSE/i.test(message)) {
+    return new Error("Proxy failed. The connection closed before the store answered.")
+  }
+  if (/ENOTFOUND|EAI_AGAIN|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_ADDRESS_UNREACHABLE|ERR_NETWORK_CHANGED/i.test(message)) {
+    return new Error("Proxy failed. The address could not be reached.")
+  }
+  if (/net::/i.test(message)) return new Error("Proxy failed.")
+  return error instanceof Error ? error : new Error(message)
+}
+
 export function planChromiumCall(input: HttpRequest): ChromiumPlan {
   const headers: Record<string, string> = {}
   let cookie: string | undefined

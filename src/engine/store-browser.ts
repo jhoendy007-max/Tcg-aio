@@ -1,5 +1,6 @@
 import { app, BrowserWindow, session, type Session } from "electron"
 import { pageLooksLikeChallenge, type SessionRefreshRequest, type SessionRefreshResult } from "./block-recovery"
+import { chromiumProxyRules } from "./chromium-session"
 import { otpFillScript } from "./otp"
 import { parseSession } from "./session"
 import { sessionPartition } from "./session-care"
@@ -17,7 +18,7 @@ const pendingProxy = new Map<number, ProxyEndpoint>()
 export async function refreshStoreSession(input: SessionRefreshRequest): Promise<SessionRefreshResult> {
   const browser = session.fromPartition(sessionPartition(input.accountId))
   if (input.existing) await writeCookieHeader(browser, input.homeUrl, cookieHeader(input.existing))
-  if (input.proxy) await browser.setProxy({ proxyRules: `http://${input.proxy.host}:${input.proxy.port}` })
+  if (input.proxy) await browser.setProxy({ proxyRules: chromiumProxyRules(input.proxy) })
   else await browser.setProxy({ mode: "direct" })
 
   const win = new BrowserWindow({

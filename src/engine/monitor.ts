@@ -87,6 +87,10 @@ const STORE_ID_RE = /^\d{3,8}$/
 export class MonitorHub {
   private readonly inflight = new Map<string, Promise<unknown>>()
 
+  pending(key: string): boolean {
+    return this.inflight.has(key)
+  }
+
   share<T>(key: string, load: () => Promise<T>): Promise<T> {
     const existing = this.inflight.get(key) as Promise<T> | undefined
     if (existing) return existing
@@ -119,6 +123,20 @@ export async function sharedCall(
 export function monitorKey(store: string, sku: string, location: string, proxy?: { host: string; port: number }): string {
   const where = proxy ? `${proxy.host}:${proxy.port}` : "direct"
   return `${store}:${sku}:${location}:${where}`
+}
+
+/** 403, 412, 429, and 435 through a proxy are a block. Other 5xx stay an HTTP retry. */
+export function monitorStatusReason(status: number, hasProxy: boolean): string | null {
+  if (status === 403 || status === 412 || status === 429 || status === 435) {
+    return hasProxy ? "Store blocked this proxy." : `Monitor request returned HTTP ${status}. Retrying.`
+  }
+  if (status >= 500) return `Monitor request returned HTTP ${status}. Retrying.`
+  return null
+}
+
+export function stockCheckLine(host: string, proxy?: { host: string; port: number }): string {
+  if (proxy) return `Checking stock at ${host} through proxy ${proxy.host}:${proxy.port}.`
+  return `Checking stock at ${host}.`
 }
 
 export function noteWatch(

@@ -1,4 +1,4 @@
-import { holdMonitorOnly, monitorKey, noteWatch, sharedValue } from "../../engine/monitor"
+import { holdMonitorOnly, monitorKey, monitorStatusReason, noteWatch, sharedValue } from "../../engine/monitor"
 import { productImage } from "../../shared/image"
 import { note } from "../../engine/test-mode"
 import { chromeUserAgent } from "../../engine/chrome-ua"
@@ -124,9 +124,8 @@ async function readOffer(
   if (response.value.status === 401 || isLoginWall(response.value.body)) {
     return { kind: "paused", reason: checkoutCopy(checkoutLang(ctx.settings.language)).notSignedIn(spec.name) }
   }
-  if (response.value.status === 429 || response.value.status >= 500) {
-    return { kind: "retry", reason: `Monitor request returned HTTP ${response.value.status}. Retrying.` }
-  }
+  const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
+  if (blocked) return { kind: "retry", reason: blocked }
   const reading = readPageOffer(spec, response.value.body, sku)
   if (response.value.status === 404) {
     return {

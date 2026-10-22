@@ -223,4 +223,52 @@ describe("task runner", () => {
     expect(saved.detectToCartMs).toBeGreaterThanOrEqual(0)
     expect(cart).toBe(true)
   })
+
+  it("logs each anonymous stock check and turns a client block into a plain failure", async () => {
+    const { db } = setup()
+    const group = db.saveProxyGroup({ name: "test 1", network: "residential", text: "69.85.83.159:48921:user:pass" })
+    const monitor = db.saveTask({
+      store: "target",
+      sku: "94827540",
+      quantity: 1,
+      profileId: "",
+      accountId: "",
+      proxyGroupId: null,
+      monitorProxyGroupId: group.id,
+      confirmPurchase: false,
+      kind: "monitor",
+      monitorOnly: true
+    })
+    const module: StoreModule = {
+      id: "target",
+      displayName: "Target",
+      skuHint: "TCIN",
+      implemented: true,
+      async run(ctx) {
+        ctx.phase("monitoring")
+        await ctx.http.request({
+          method: "GET",
+          url: "https://redsky.target.com/redsky_aggregations/v1/web/product_summary_with_fulfillment_v1",
+          proxy: ctx.proxy
+        })
+        return { outcome: "success", detail: "should not win" }
+      }
+    }
+    const service = new TaskService(db, new Map([["target", module]]), () => undefined, async () => false, {
+      async request() {
+        throw new Error("net::ERR_BLOCKED_BY_CLIENT")
+      }
+    })
+    service.start(monitor.id)
+    await service.wait(monitor.id)
+    const saved = db.getTask(monitor.id)
+    const messages = saved.logs.map((entry) => entry.message)
+    expect(messages).toContain("Opening the stock check through proxy 69.85.83.159:48921.")
+    expect(messages).toContain("Checking stock at redsky.target.com through proxy 69.85.83.159:48921.")
+    expect(saved.status).toBe("failed")
+    expect(saved.detail).toBe("Request blocked inside the app.")
+    expect(messages).not.toContain("net::ERR_BLOCKED_BY_CLIENT")
+    const webhook = saved.logs.find((entry) => entry.message === "Discord webhook is not set.")
+    expect(webhook?.level).toBe("info")
+  })
 })
