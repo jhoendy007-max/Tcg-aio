@@ -21,6 +21,7 @@ import {
   signEnvelope,
   type AccessGrant
 } from "./proof"
+import { featuresForPlan, isPlanId, PLAN_IDS } from "./plans"
 
 export const OWNER_EMAIL = "jhoendy007@gmail.com"
 export const ALERT_TYPES = ["signup", "claimed", "foreign_pc", "failed_logins", "expiring", "revoked", "suspended", "server_error", "checkout"] as const
@@ -176,6 +177,11 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       if (method === "POST" && route === "/v1/admin/licenses") return createLicense(db, body, now)
       const userMatch = /^\/v1\/admin\/users\/([^/]+)\/(license|paid|payment|suspend|unsuspend|reset)$/.exec(route)
       if (method === "POST" && userMatch) return userAction(db, userMatch[1], userMatch[2], body, now, options.push)
+      const planMatch = /^\/v1\/admin\/licenses\/([^/]+)\/plan$/.exec(route)
+      if (method === "POST" && planMatch) return changePlan(db, planMatch[1], body)
+      const deleteMatch = /^\/v1\/admin\/licenses\/([^/]+)$/.exec(route)
+      if (method === "DELETE" && deleteMatch) return deleteLicense(db, deleteMatch[1], admin.email ?? "admin", now)
+      if (method === "GET" && route === "/v1/admin/plans") return json(200, { ok: true, plans: PLAN_IDS })
       const licenseMatch = /^\/v1\/admin\/licenses\/([^/]+)\/(access|reset|suspend|revoke)$/.exec(route)
       if (method === "POST" && licenseMatch) return licenseAction(db, licenseMatch[1], licenseMatch[2], options.push)
       if (method === "GET" && route === "/v1/admin/notifications") return json(200, { ok: true, notifications: notificationMap(db) })
@@ -359,6 +365,15 @@ function migrateUsers(db: DatabaseSync): void {
   ensureColumn(db, "users", "paid", "paid INTEGER NOT NULL DEFAULT 0")
   ensureColumn(db, "licenses", "fingerprint_confirmed", "fingerprint_confirmed INTEGER NOT NULL DEFAULT 1")
   db.prepare("UPDATE users SET account_status = 'pending' WHERE license_id IS NULL AND role != 'owner' AND account_status = 'active'").run()
+  migratePlans(db)
+}
+
+/** One time: every license from before plans existed had full access, so it becomes ACO. */
+function migratePlans(db: DatabaseSync): void {
+  const done = db.prepare("SELECT value FROM meta WHERE key = 'plans_v1'").get() as { value: string } | undefined
+  if (done) return
+  db.prepare("UPDATE licenses SET plan = 'aco' WHERE plan != 'owner'").run()
+  db.prepare("INSERT INTO meta (key, value) VALUES ('plans_v1', ?)").run(String(Date.now()))
 }
 
 function ensureColumn(db: DatabaseSync, table: string, name: string, definition: string): void {
@@ -591,12 +606,48 @@ function readyLicense(license: LicenseRow | undefined): boolean {
 function createLicense(db: DatabaseSync, body: Record<string, unknown>, now: () => number): { status: number; body: string } {
   const note = text(body.note).slice(0, 80)
   const plan = text(body.plan).slice(0, 40) || "standard"
+  if (!isPlanId(plan)) return json(400, { ok: false, error: `Pick a plan: ${PLAN_IDS.join(" or ")}.` })
   const expiresAt = body.expiresAt === undefined || body.expiresAt === null || body.expiresAt === "" ? now() + YEAR_MS : Number(body.expiresAt)
   if (!Number.isFinite(expiresAt) || expiresAt < now()) return json(400, { ok: false, error: "Expiry has to be a future time." })
   const id = randomId()
   const key = `TCGAIO-${randomBytes(16).toString("hex")}`
   db.prepare("INSERT INTO licenses (id, key_hash, note, plan, expires_at, status, fingerprint, devices, last_seen, user_id, last_transfer_at, device_limit, last_expiry_alert) VALUES (?, ?, ?, ?, ?, 'draft', NULL, '[]', NULL, NULL, NULL, ?, NULL)").run(id, sha(key), note, plan, expiresAt, USER_DEVICE_LIMIT)
   return json(200, { ok: true, id, key, note, plan, expiresAt, status: "draft" })
+}
+
+function licenseOwnerRole(db: DatabaseSync, license: LicenseRow): string {
+  const owner = db.prepare("SELECT role FROM users WHERE id = ?").get(license.user_id ?? "") as { role: string } | undefined
+  return license.plan === "owner" ? "owner" : owner?.role ?? ""
+}
+
+/** Change a license's plan. The PC picks up the new feature list at its next check-in. */
+function changePlan(db: DatabaseSync, id: string, body: Record<string, unknown>): { status: number; body: string } {
+  const license = db.prepare("SELECT * FROM licenses WHERE id = ?").get(id) as LicenseRow | undefined
+  if (!license) return json(404, { ok: false, error: "That license was not found." })
+  if (licenseOwnerRole(db, license) === "owner") return json(403, { ok: false, error: "The owner license always has every feature." })
+  const plan = text(body.plan)
+  if (!isPlanId(plan)) return json(400, { ok: false, error: `Pick a plan: ${PLAN_IDS.join(" or ")}.` })
+  db.prepare("UPDATE licenses SET plan = ? WHERE id = ?").run(plan, id)
+  return json(200, { ok: true, id, plan })
+}
+
+/**
+ * Delete a key. The customer loses access right away (their sessions end) but their account stays,
+ * back in pending, so a new key can be linked later. The owner's key cannot be deleted.
+ */
+function deleteLicense(db: DatabaseSync, id: string, by: string, now: () => number): { status: number; body: string } {
+  const license = db.prepare("SELECT * FROM licenses WHERE id = ?").get(id) as LicenseRow | undefined
+  if (!license) return json(404, { ok: false, error: "That license was not found." })
+  if (licenseOwnerRole(db, license) === "owner") return json(403, { ok: false, error: "The owner license cannot be deleted." })
+  const users = db.prepare("SELECT id, email FROM users WHERE license_id = ?").all(id) as Array<{ id: string; email: string }>
+  for (const user of users) {
+    db.prepare("UPDATE users SET license_id = NULL, account_status = CASE WHEN account_status = 'suspended' THEN 'suspended' ELSE 'pending' END WHERE id = ?").run(user.id)
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user'").run(user.id)
+  }
+  if (license.user_id) db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user'").run(license.user_id)
+  db.prepare("DELETE FROM licenses WHERE id = ?").run(id)
+  db.prepare("INSERT INTO alerts (type, body, created_at) VALUES ('revoked', ?, ?)").run(`Key deleted by ${by}: ${license.note || license.id}${users.length ? ` (${users.map((u) => u.email).join(", ")} back to pending)` : ""}`, now())
+  return json(200, { ok: true, id, deleted: true, pending: users.map((u) => u.email) })
 }
 
 function licenseAction(db: DatabaseSync, id: string, action: string, push?: LicenseApiOptions["push"]): { status: number; body: string } {
@@ -659,6 +710,7 @@ function linkGeneratedLicense(db: DatabaseSync, user: UserRow, body: Record<stri
   if (user.license_id) return json(400, { ok: false, error: "This account already has a license." })
   const note = text(body.note).slice(0, 80) || user.email
   const plan = text(body.plan).slice(0, 40) || "standard"
+  if (!isPlanId(plan)) return json(400, { ok: false, error: `Pick a plan: ${PLAN_IDS.join(" or ")}.` })
   const expiresAt = body.expiresAt === undefined || body.expiresAt === null || body.expiresAt === "" ? now() + YEAR_MS : Number(body.expiresAt)
   if (!Number.isFinite(expiresAt) || expiresAt < now()) return json(400, { ok: false, error: "Expiry has to be a future time." })
   const id = randomId()
@@ -861,6 +913,7 @@ function issueSession(db: DatabaseSync, privateKey: string, userId: string, fing
     licenseId: license.id,
     holder: license.note || user.email,
     plan: owner ? "owner" : license.plan,
+    features: featuresForPlan(owner ? "owner" : license.plan),
     expiresAt: owner ? null : license.expires_at,
     fingerprint,
     serverTime: now(),

@@ -148,6 +148,7 @@ export function App() {
 
   const lang = settings.language === "es" ? "es" : "en"
   const signedIn = Boolean(account?.signedIn && !account.pending)
+  const features = grantFeatures({ role: account?.role, email: account?.email, features: account?.features })
   const pending = Boolean(account?.pending)
   const page = route.section
   const tab = route.tab
@@ -165,10 +166,12 @@ export function App() {
         <nav aria-label="Sections">
           {NAV.map((item) => {
             const label = deskText(lang, item.label)
+            const locked = item.id === "aco" && signedIn && !features.includes("aco")
             return (
-              <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined} aria-label={label} title={label}>
+              <a key={item.id} href={`#${item.id}`} className={locked ? "locked" : undefined} aria-current={page === item.id ? "page" : undefined} aria-label={locked ? `${label} (locked)` : label} title={locked ? `${label} · locked on this license` : label}>
                 <NavIcon name={item.icon} />
                 <span className="nav-text">{label}</span>
+                {locked ? <span className="nav-lock" aria-hidden="true">🔒</span> : null}
               </a>
             )
           })}
@@ -203,7 +206,7 @@ export function App() {
         {!booting && signedIn && !wizard && page === "profiles" ? <section className="page"><ProfilesPage /></section> : null}
         {!booting && signedIn && !wizard && page === "proxies" ? <section className="page"><ProxiesPage /></section> : null}
         {!booting && signedIn && !wizard && page === "accounts" ? <section className="page"><AccountsPage /></section> : null}
-        {!booting && signedIn && !wizard && page === "aco" ? <AcoPage unlocked={grantFeatures({ role: account?.role, email: account?.email }).includes("aco")} advanced={tab === "advanced"} /> : null}
+        {!booting && signedIn && !wizard && page === "aco" ? <AcoPage unlocked={features.includes("aco")} advanced={tab === "advanced"} /> : null}
         {!booting && signedIn && !wizard && page === "settings" ? <SettingsTabs tab={tab || "general"} lang={lang} onSettings={setSettings} /> : null}
       </main>
       {win ? <SuccessScreen win={win} sound={settings.successSound} onSound={(on) => void setSound(on)} onClose={() => setWin(null)} /> : null}
@@ -248,17 +251,19 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
     ["vault", deskText(lang, "setVault")]
   ] as const
   const advanced = items.filter(([id]) => id !== "general")
+  const inAdvanced = tab !== "general" && tab !== "advanced"
+  const tools = (
+    <details className="advanced" open={inAdvanced}>
+      <summary>More tools: logs, store defaults, phone, alerts, drops, stats</summary>
+      <div className="segments scroll-x" role="tablist">
+        {advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`} aria-current={tab === id ? "page" : undefined}>{label}</a>)}
+      </div>
+    </details>
+  )
   return (
     <section className="page">
-      <div className="segments" role="tablist">
-        <a href="#settings" aria-current={tab === "general" ? "page" : undefined}>{deskText(lang, "setGeneral")}</a>
-      </div>
-      <details className="advanced" open={tab !== "general"}>
-        <summary>Advanced</summary>
-        <div className="segments scroll-x" role="tablist">
-          {advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`} aria-current={tab === id ? "page" : undefined}>{label}</a>)}
-        </div>
-      </details>
+      {inAdvanced ? <div className="segments" role="tablist"><a href="#settings">← {deskText(lang, "setGeneral")}</a></div> : null}
+      {inAdvanced ? tools : null}
       {tab === "logs" ? <LogsPage /> : null}
       {tab === "stores" ? <StoresTab onSettings={onSettings} /> : null}
       {tab === "phone" ? <PhonePage /> : null}
@@ -269,7 +274,7 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
       {tab === "autopilot" ? <AutopilotPage /> : null}
       {tab === "keeper" ? <KeeperPage /> : null}
       {tab === "vault" ? <VaultPage /> : null}
-      {tab === "general" || !items.some(([id]) => id === tab) ? <SettingsPage /> : null}
+      {tab === "general" || tab === "advanced" || !items.some(([id]) => id === tab) ? <><SettingsPage />{tools}</> : null}
     </section>
   )
 }

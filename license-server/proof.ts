@@ -10,6 +10,8 @@ export const USER_DEVICE_LIMIT = 1
 
 const FORBIDDEN = ["cardnumber", "card", "cvv", "password", "cookie", "cookies", "session", "pan", "proxy", "accesstoken"]
 
+export { FEATURES, PLANS, PLAN_IDS, isPlanId, featuresForPlan, type FeatureId } from "./plans"
+
 export interface AccessGrant {
   v: 1
   ok: true
@@ -18,6 +20,8 @@ export interface AccessGrant {
   licenseId: string
   holder: string
   plan: string
+  /** Signed feature list. Only these features unlock on the PC. The owner always gets every feature. */
+  features?: string[]
   expiresAt: number | null
   fingerprint: string
   serverTime: number
@@ -86,6 +90,7 @@ export function readGrant(envelope: string, publicKey: string): AccessGrant | nu
     licenseId: grant.licenseId,
     holder: grant.holder.slice(0, 80),
     plan: grant.plan.slice(0, 40),
+    ...(Array.isArray(grant.features) ? { features: grant.features.filter((item): item is string => typeof item === "string").slice(0, 32) } : {}),
     expiresAt,
     fingerprint: grant.fingerprint,
     serverTime,

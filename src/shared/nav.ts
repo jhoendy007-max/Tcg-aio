@@ -1,7 +1,7 @@
 export const SECTIONS = ["home", "tasks", "profiles", "proxies", "accounts", "aco", "settings"] as const
 export type SectionId = (typeof SECTIONS)[number]
 
-export type SettingsTab = "general" | "logs" | "stores" | "phone" | "alerts" | "drops" | "stats" | "ship" | "autopilot" | "keeper" | "vault"
+export type SettingsTab = "general" | "advanced" | "logs" | "stores" | "phone" | "alerts" | "drops" | "stats" | "ship" | "autopilot" | "keeper" | "vault"
 export type TaskTab = "" | "monitor" | "checkout"
 
 export interface AppRoute {
@@ -28,7 +28,7 @@ const LEGACY: Record<string, AppRoute> = {
   stores: { section: "settings", tab: "stores" }
 }
 
-const SETTINGS_TABS = new Set(["general", "logs", "stores", "phone", "alerts", "drops", "stats", "ship", "autopilot", "keeper", "vault"])
+const SETTINGS_TABS = new Set(["general", "advanced", "logs", "stores", "phone", "alerts", "drops", "stats", "ship", "autopilot", "keeper", "vault"])
 
 export function parseRoute(hash: string): AppRoute {
   const clean = hash.replace(/^#/, "").split("?")[0]

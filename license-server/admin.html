@@ -12,6 +12,10 @@
     h1 span { color: #e0b15a; font-size: 13px; letter-spacing: 0.12em; margin-right: 8px; }
     p, small { color: #93a0b5; }
     button, input { font: inherit; color: inherit; border-radius: 8px; border: 1px solid #343b49; background: #181c24; padding: 8px 12px; }
+    button.danger { background: #b4232c; color: #fff; border-color: transparent; font-weight: 700; }
+    dialog { background: #12151c; color: inherit; border: 1px solid #343b49; border-radius: 12px; max-width: 420px; }
+    dialog::backdrop { background: rgba(0,0,0,.6); }
+    select { font: inherit; color: inherit; border-radius: 8px; border: 1px solid #343b49; background: #181c24; padding: 8px 12px; }
     button.primary { background: #e0b15a; color: #1c1508; border-color: transparent; font-weight: 700; }
     button.tab { background: #171b22; border-radius: 999px; }
     button.tab.on { background: #e0b15a; color: #1c1508; border-color: transparent; }
@@ -68,7 +72,7 @@
       <form id="create-form" class="card" hidden>
         <div class="row">
           <label>Note<input id="note" placeholder="Gift" /></label>
-          <label>Plan<input id="plan" value="standard" /></label>
+          <label>Plan<select id="plan"><option value="standard">Standard (no ACO)</option><option value="aco">ACO</option></select></label>
           <label>Expires in days<input id="days" type="number" min="1" value="365" /></label>
           <button class="primary" type="submit">Create</button>
         </div>
@@ -103,6 +107,47 @@
       document.getElementById("desk").hidden = false
       document.getElementById("sign-out").hidden = false
       document.getElementById("change-password").hidden = false
+    }
+    const PLAN_LABELS = { standard: "Standard (no ACO)", aco: "ACO" }
+    function planSelect(value, onChange) {
+      const select = document.createElement("select")
+      for (const [id, label] of Object.entries(PLAN_LABELS)) {
+        const option = document.createElement("option")
+        option.value = id
+        option.textContent = label
+        select.append(option)
+      }
+      select.value = PLAN_LABELS[value] ? value : "standard"
+      if (onChange) select.onchange = () => onChange(select.value)
+      const wrap = document.createElement("label")
+      wrap.textContent = "Plan"
+      wrap.append(select)
+      return { wrap, select }
+    }
+    function confirmDelete(text) {
+      const dialog = document.getElementById("confirm-delete")
+      document.getElementById("confirm-delete-text").textContent = text
+      return new Promise((resolve) => {
+        dialog.onclose = () => resolve(dialog.returnValue === "delete")
+        dialog.returnValue = "cancel"
+        dialog.showModal()
+      })
+    }
+    function keyButtons(actions, licenseId, plan, label) {
+      const picker = planSelect(plan, async (next) => {
+        showError("")
+        try { await api("/v1/admin/licenses/" + licenseId + "/plan", { method: "POST", body: { plan: next } }); await load() } catch (err) { guard(err) }
+      })
+      const remove = document.createElement("button")
+      remove.type = "button"
+      remove.className = "danger"
+      remove.textContent = "Delete key"
+      remove.onclick = async () => {
+        if (!(await confirmDelete("Delete the key for " + label + "?"))) return
+        showError("")
+        try { await api("/v1/admin/licenses/" + licenseId, { method: "DELETE" }); await load() } catch (err) { guard(err) }
+      }
+      actions.append(picker.wrap, remove)
     }
     async function api(path, options = {}) {
       const response = await fetch(path, {
@@ -179,6 +224,8 @@
         methodLabel.append(method)
         actions.append(methodLabel, paid)
         if (!row.licenseId) {
+          const linkPlan = planSelect("aco")
+          actions.append(linkPlan.wrap)
           const link = document.createElement("button")
           link.className = "primary"
           link.type = "button"
@@ -186,7 +233,7 @@
           link.onclick = async () => {
             showError("")
             try {
-              const payload = await api("/v1/admin/users/" + row.id + "/license", { method: "POST", body: {} })
+              const payload = await api("/v1/admin/users/" + row.id + "/license", { method: "POST", body: { plan: linkPlan.select.value } })
               window.alert("License linked. Copy the key if you want a record:\n" + payload.key)
               await load()
             } catch (err) { guard(err) }
@@ -204,6 +251,7 @@
           actions.append(button)
         }
         if (row.licenseId) add("Reset PC", "reset")
+        if (row.licenseId) keyButtons(actions, row.licenseId, row.plan, row.email)
         add(row.status === "suspended" ? "Unsuspend" : "Suspend", row.status === "suspended" ? "unsuspend" : "suspend")
       } else {
         const note = document.createElement("p")
@@ -264,6 +312,7 @@
         add("Reset binding", "reset")
         add("Suspend", "suspend")
         add("Revoke", "revoke")
+        keyButtons(actions, row.id, row.plan, row.note || "this gift key")
         card.append(title, meta, actions)
         list.append(card)
       }
@@ -325,5 +374,16 @@
     }
     setInterval(() => { if (token) load().catch(guard) }, 15000)
   </script>
+  <dialog id="confirm-delete">
+    <form method="dialog">
+      <h2>Delete this key?</h2>
+      <p id="confirm-delete-text"></p>
+      <p class="hint">The customer loses access right away. Their account stays, back in Pending, so you can link a new key later. This cannot be undone.</p>
+      <div class="row">
+        <button value="cancel" type="submit">Cancel</button>
+        <button value="delete" type="submit" class="danger">Delete key</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

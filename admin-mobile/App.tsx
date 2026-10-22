@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
 import Constants from "expo-constants"
 import { StatusBar } from "expo-status-bar"
 import * as LocalAuthentication from "expo-local-authentication"
@@ -70,6 +70,20 @@ function emptyCopy(tab: DeskTab, query: string): string {
   return "No gift keys"
 }
 
+const PLAN_CHOICES: Array<[string, string]> = [["standard", "Standard (no ACO)"], ["aco", "ACO"]]
+
+function PlanPicker({ value, onChange }: { value: string; onChange: (plan: string) => void }) {
+  return (
+    <View style={styles.row}>
+      {PLAN_CHOICES.map(([id, label]) => (
+        <Pressable key={id} style={[styles.pill, value === id && styles.pillOn]} onPress={() => onChange(id)} accessibilityRole="radio" accessibilityState={{ selected: value === id }}>
+          <Text style={[styles.pillText, value === id && styles.pillTextOn]}>{label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  )
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("boot")
   const [tab, setTab] = useState<DeskTab>("pending")
@@ -79,6 +93,7 @@ export default function App() {
   const [token, setToken] = useState("")
   const [note, setNote] = useState("")
   const [plan, setPlan] = useState("standard")
+  const [linkPlan, setLinkPlan] = useState("aco")
   const [days, setDays] = useState("365")
   const [createdKey, setCreatedKey] = useState("")
   const [createdId, setCreatedId] = useState("")
@@ -343,6 +358,41 @@ export default function App() {
     }
   }
 
+  async function setLicensePlan(id: string, next: string) {
+    setError("")
+    try {
+      await call(base, `/v1/admin/licenses/${id}/plan`, token, "POST", { plan: next })
+      await refresh(base, token, query, tab, false)
+    } catch (err) {
+      report(err)
+    }
+  }
+
+  function deleteKey(id: string, label: string) {
+    Alert.alert(
+      "Delete this key?",
+      `Delete the key for ${label}? They lose access right away. Their account stays, back in Pending. This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete key",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setError("")
+              try {
+                await call(base, `/v1/admin/licenses/${id}`, token, "DELETE")
+                await refresh(base, token, query, tab, false)
+              } catch (err) {
+                report(err)
+              }
+            })()
+          }
+        }
+      ]
+    )
+  }
+
   async function act(id: string, action: string) {
     setError("")
     try {
@@ -475,7 +525,8 @@ export default function App() {
                       <View style={[styles.box, row.paid && styles.boxOn]}>{row.paid ? <Text style={styles.boxMark}>✓</Text> : null}</View>
                       <Text style={styles.checkLabel}>Paid</Text>
                     </Pressable>
-                    {!row.licenseId ? <Pressable style={styles.primary} onPress={() => void userAct(row.id, "license")}><Text style={styles.primaryText}>Generate and link license</Text></Pressable> : <Text style={styles.hint}>{row.plan || "standard"} license linked</Text>}
+                    {!row.licenseId ? <PlanPicker value={linkPlan} onChange={setLinkPlan} /> : <PlanPicker value={row.plan || "standard"} onChange={(next) => void setLicensePlan(row.licenseId, next)} />}
+                    {!row.licenseId ? <Pressable style={styles.primary} onPress={() => void userAct(row.id, "license", { plan: linkPlan })}><Text style={styles.primaryText}>Generate and link license</Text></Pressable> : <Pressable style={styles.danger} onPress={() => deleteKey(row.licenseId, row.email)}><Text style={styles.dangerText}>Delete key</Text></Pressable>}
                     <View style={styles.rowActions}>
                       {row.licenseId ? <Pressable style={styles.ghost} onPress={() => void userAct(row.id, "reset")}><Text style={styles.ghostText}>Reset PC</Text></Pressable> : null}
                       <Pressable style={styles.ghost} onPress={() => void userAct(row.id, row.status === "suspended" ? "unsuspend" : "suspend")}><Text style={styles.ghostText}>{row.status === "suspended" ? "Unsuspend" : "Suspend"}</Text></Pressable>
@@ -491,7 +542,7 @@ export default function App() {
                   <Text style={styles.label}>Note</Text>
                   <TextInput style={styles.input} value={note} onChangeText={setNote} placeholder="Gift" placeholderTextColor="#6d7585" />
                   <Text style={styles.label}>Plan</Text>
-                  <TextInput style={styles.input} value={plan} onChangeText={setPlan} />
+                  <PlanPicker value={plan} onChange={setPlan} />
                   <Text style={styles.label}>Expires in days</Text>
                   <TextInput style={styles.input} keyboardType="number-pad" value={days} onChangeText={setDays} />
                   <Pressable style={styles.primary} onPress={() => void createLicense()} disabled={busy}><Text style={styles.primaryText}>{busy ? "Creating…" : "Create gift key"}</Text></Pressable>
@@ -505,12 +556,14 @@ export default function App() {
                         <Text style={styles.statusText}>{titleCase(row.status)}</Text>
                       </View>
                     </View>
-                    <Text style={styles.hint}>{row.plan} · PC {row.fingerprint || "not bound"}</Text>
+                    <Text style={styles.hint}>PC {row.fingerprint || "not bound"}</Text>
+                    <PlanPicker value={row.plan || "standard"} onChange={(next) => void setLicensePlan(row.id, next)} />
                     <View style={styles.rowActions}>
                       {row.status === "draft" || row.status === "suspended" ? <Pressable style={styles.ghost} onPress={() => void act(row.id, "access")}><Text style={styles.ghostText}>Give access</Text></Pressable> : null}
                       <Pressable style={styles.ghost} onPress={() => void act(row.id, "reset")}><Text style={styles.ghostText}>Reset PC</Text></Pressable>
                       <Pressable style={styles.ghost} onPress={() => void act(row.id, "suspend")}><Text style={styles.ghostText}>Suspend</Text></Pressable>
                       <Pressable style={styles.ghost} onPress={() => void act(row.id, "revoke")}><Text style={styles.ghostText}>Revoke</Text></Pressable>
+                      <Pressable style={styles.danger} onPress={() => deleteKey(row.id, row.note || "this gift key")}><Text style={styles.dangerText}>Delete key</Text></Pressable>
                     </View>
                   </View>
                 ))}
@@ -570,6 +623,9 @@ const styles = StyleSheet.create({
   primaryText: { color: "#1c1508", fontWeight: "800", fontSize: 15 },
   ghost: { borderWidth: 1, borderColor: "#3c4658", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
   ghostText: { color: "#e0b15a", fontSize: 13, fontWeight: "700" },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginVertical: 6 },
+  danger: { backgroundColor: "#b4232c", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  dangerText: { color: "#ffffff", fontSize: 13, fontWeight: "700" },
   link: { color: "#e0b15a", fontWeight: "700", paddingVertical: 4 },
   key: { color: "#f2f5f8", fontSize: 15 },
   rowActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

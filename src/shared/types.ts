@@ -535,6 +535,8 @@ export interface AccountView {
   role: "owner" | "user" | ""
   holder: string
   plan: string
+  /** Features this license unlocks, from the signed grant. Locked features stay visible. */
+  features: string[]
   expiresAt: number | null
   fingerprint: string
 }

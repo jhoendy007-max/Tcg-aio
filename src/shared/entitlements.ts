@@ -1,22 +1,20 @@
-export const FEATURES = ["aco"] as const
-export type FeatureId = (typeof FEATURES)[number]
+import { FEATURES, featuresForPlan, PLANS, type FeatureId } from "../../license-server/plans"
 
-export const PLAN_FEATURES: Record<"standard" | "aco", FeatureId[]> = {
-  standard: [],
-  aco: ["aco"]
-}
+export { FEATURES, featuresForPlan, PLANS, type FeatureId }
 
 const OWNER_EMAIL = "jhoendy007@gmail.com"
 
-/** Signed feature list. Owner gets every feature. A grant with no list keeps ACO until the next heartbeat. */
+/**
+ * Features this PC may use, read from the signed grant. The owner gets every feature.
+ * A grant signed before plans existed has no list; those licenses were migrated to ACO,
+ * so it keeps ACO until the next check-in replaces it with a signed list.
+ */
 export function grantFeatures(input: { role?: string; email?: string; features?: readonly string[] | null }): FeatureId[] {
   if (input.role === "owner" || input.email?.trim().toLowerCase() === OWNER_EMAIL) return [...FEATURES]
   if (Array.isArray(input.features)) return FEATURES.filter((id) => input.features!.includes(id))
   return ["aco"]
 }
 
-export function featuresForPlan(plan: string): FeatureId[] {
-  if (plan === "owner") return [...FEATURES]
-  if (plan === "aco") return [...PLAN_FEATURES.aco]
-  return [...PLAN_FEATURES.standard]
+export function hasFeature(input: { role?: string; email?: string; features?: readonly string[] | null }, feature: FeatureId): boolean {
+  return grantFeatures(input).includes(feature)
 }

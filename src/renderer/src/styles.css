@@ -456,3 +456,22 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); 
   .span-2 { grid-column: auto; }
   main { padding: 20px; }
 }
+
+/* 0.2.34 ACO and locked features */
+.lock-note { display: flex; gap: 12px; align-items: flex-start; border-color: #6b5420; background: linear-gradient(180deg, rgba(224,177,90,.10), transparent); }
+.lock-note p { margin: 4px 0 0; color: var(--muted); }
+.lock-badge { font-size: 20px; line-height: 1; }
+.aco-start.locked { opacity: .55; }
+.aco-preview, .aco-steps { list-style: none; display: flex; gap: 10px; flex-wrap: wrap; padding: 0; margin: 12px 0 16px; }
+.aco-preview li, .aco-steps li { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--card-2); color: var(--muted); font-size: 13px; }
+.aco-preview li span, .aco-steps li span { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--line); color: var(--text); font-weight: 700; font-size: 12px; }
+.aco-steps li[aria-current="step"] { background: var(--accent, #e0b15a); color: #1c1508; font-weight: 700; }
+.aco-steps li[aria-current="step"] span { background: #1c1508; color: #e0b15a; }
+.aco-steps li.done span { background: #2f6b3a; }
+.aco .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.aco-summary { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 8px 0 16px; }
+.aco-summary dt { color: var(--muted); }
+.aco-summary dd { margin: 0; }
+.aco .advanced { margin-top: 16px; }
+nav a.locked { opacity: .6; }
+nav a .nav-lock { margin-left: auto; font-size: 11px; }

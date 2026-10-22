@@ -12,6 +12,7 @@ import { errorText, unwrap } from "../lib"
 export function SettingsPage() {
   const [payload, setPayload] = useState<SettingsPayload | null>(null)
   const [form, setForm] = useState<Settings>(DEFAULT_SETTINGS)
+  const [advancedOpen, setAdvancedOpen] = useState(() => typeof location !== "undefined" && location.hash === "#settings/advanced")
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
@@ -93,7 +94,7 @@ export function SettingsPage() {
       <header className="page-head">
         <div>
           <h1>Settings</h1>
-          <p>Notifications and the Target monitor location. Stock is checked for ship-to-home near the store and ZIP below.</p>
+          <p>The basics. Everything technical is under Advanced.</p>
         </div>
       </header>
       {error && !/public key/i.test(error) ? <Banner tone="error">{error}</Banner> : null}
@@ -110,17 +111,6 @@ export function SettingsPage() {
           {account.role === "owner" ? <p className="hint">Owner debug: this signed-in role comes from the license server, not from the email typed on this PC.</p> : null}
         </div>
       ) : null}
-      <div className="card stack">
-        <h2>License server</h2>
-        <Field label="Address">
-          <TextInput value={form.licenseServerUrl || DEFAULT_LICENSE_SERVER_URL} autoComplete="off" onChange={(event) => setForm({ ...form, licenseServerUrl: event.target.value })} />
-        </Field>
-        <p className="hint">The session stays on this PC. The address starts at {DEFAULT_LICENSE_SERVER_URL} and can be changed.</p>
-        <div className="actions">
-          <button type="button" onClick={() => void unwrap(window.aio.settings.save({ ...form, licenseServerUrl: form.licenseServerUrl.trim() || DEFAULT_LICENSE_SERVER_URL })).then((next) => { setPayload(next); setForm({ ...next.settings, licenseServerUrl: next.settings.licenseServerUrl || DEFAULT_LICENSE_SERVER_URL }); setMessage("License server saved.") }).catch((err) => setError(errorText(err)))}>Save server</button>
-        </div>
-      </div>
-      {payload ? <div className="card security">{payload.security.description}</div> : null}
       <form className="card form-grid" onSubmit={save}>
         <div className="span-2">
           <h2>Appearance</h2>
@@ -164,6 +154,16 @@ export function SettingsPage() {
         <Field className="span-2" label="Discord webhook" hint="https://discord.com/api/webhooks/… Success, failure, and challenge pauses are posted here. Card data is not.">
           <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
         </Field>
+        <Field label="Monitor delay (ms)" hint="Wait between stock checks outside a drop window. 1000–60000.">
+          <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
+        </Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.testMode} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
+          <span>Test mode for every task. The real flow runs through payment and stops before place order. Nothing is charged.</span>
+        </label>
+        <details className="advanced span-2" open={advancedOpen} onToggle={(event) => setAdvancedOpen((event.target as HTMLDetailsElement).open)}>
+          <summary>Advanced</summary>
+          <div className="form-grid">
         <label className="check span-2">
           <input type="checkbox" checked={form.groupDiscord} onChange={(event) => setForm({ ...form, groupDiscord: event.target.checked })} />
           <span>Also post restocks and successful checkouts to a shared group webhook. This stays off until you turn it on. The group post leaves out profile, email, card, and proxy details.</span>
@@ -171,10 +171,6 @@ export function SettingsPage() {
         <Field className="span-2" label="Group webhook" hint="A different https://discord.com/api/webhooks/… URL. Nothing is sent here while the switch above is off.">
           <TextInput value={form.groupWebhook} onChange={(event) => setForm({ ...form, groupWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
         </Field>
-        <label className="check span-2">
-          <input type="checkbox" checked={form.testMode} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
-          <span>Test mode for every task. The real flow runs through payment and stops before place order. Nothing is charged.</span>
-        </label>
         <label className="check span-2">
           <input type="checkbox" checked={form.clearCartAfterTest} onChange={(event) => setForm({ ...form, clearCartAfterTest: event.target.checked })} />
           <span>After a passed test, remove the test line from the Target or Walmart cart. Other stores leave the cart for you.</span>
@@ -198,9 +194,6 @@ export function SettingsPage() {
         </Field>
         <Field label="Challenge timeout (seconds)" hint="How long a person has to solve a store challenge before the task pauses. 30–600.">
           <TextInput type="number" min={30} max={600} value={form.challengeTimeoutSec} onChange={(event) => setForm({ ...form, challengeTimeoutSec: Number(event.target.value) })} required />
-        </Field>
-        <Field label="Monitor delay (ms)" hint="Wait between stock checks outside a drop window. 1000–60000.">
-          <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
         </Field>
         <Field label="Fast delay (ms)" hint="Used inside a drop window. Each store still waits at least its own gap.">
           <TextInput type="number" min={250} max={60000} value={form.monitorFastDelayMs} onChange={(event) => setForm({ ...form, monitorFastDelayMs: Number(event.target.value) })} required />
@@ -307,11 +300,59 @@ export function SettingsPage() {
         <Field label="Target API key" hint="Leave blank to use the key embedded in Target's web app. It can change when the site deploys.">
           <TextInput value={form.targetApiKey} onChange={(event) => setForm({ ...form, targetApiKey: event.target.value })} autoComplete="off" />
         </Field>
+          </div>
+        </details>
         <div className="actions span-2">
           <button className="primary" type="submit" disabled={busy}>Save settings</button>
           <button type="button" onClick={() => void testWebhook()} disabled={busy}>Send test webhook</button>
         </div>
       </form>
+      <form className="card stack" onSubmit={(event) => {
+        event.preventDefault()
+        setBusy(true)
+        setError("")
+        void unwrap(window.aio.updates.saveToken({ action: token ? "replace" : "clear", token }))
+          .then(async (status) => {
+            setHasToken(status.hasToken)
+            setToken("")
+            if (status.hasToken) setUpdate(await unwrap(window.aio.updates.check()))
+            setMessage(status.hasToken ? "GitHub token saved on this PC. Checking releases." : "GitHub token removed.")
+          })
+          .catch((err) => setError(errorText(err)))
+          .finally(() => setBusy(false))
+      }}>
+        <div>
+          <h2>Updates</h2>
+          <p className="hint">New versions show a popup with Install now or Later. You can also check here.</p>
+          {update ? <p className="hint" aria-live="polite">{updateStatusText(update)}</p> : null}
+          {update?.status === "downloading" ? <progress className="update-progress" value={update.percent ?? 0} max={100} /> : null}
+        </div>
+        <details className="advanced">
+          <summary>Private repo token</summary>
+        <Field label="GitHub token" hint={hasToken ? "A token is saved. Paste a new one to replace it." : "No token saved. A public repo does not need one."}>
+          <TextInput type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="github_pat_…" />
+        </Field>
+        </details>
+        <div className="actions">
+          <button className="primary" type="submit" disabled={busy}>{token ? "Save token" : "Remove token"}</button>
+          <button type="button" disabled={busy || update?.status === "checking" || update?.status === "downloading"} onClick={() => void unwrap(window.aio.updates.check()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update?.status === "checking" ? "Checking…" : "Check for updates"}</button>
+          {update?.status === "available" || update?.status === "downloading" ? <button type="button" disabled={busy || update.status === "downloading"} onClick={() => void unwrap(window.aio.updates.download()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update.status === "downloading" ? `Downloading ${Math.round(update.percent ?? 0)}%` : "Download"}</button> : null}
+          {update?.status === "downloaded" ? <button type="button" className="primary" disabled={busy} onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setError(errorText(err)))}>Restart and install</button> : null}
+        </div>
+      </form>
+      <details className="advanced card" open={advancedOpen} onToggle={(event) => setAdvancedOpen((event.target as HTMLDetailsElement).open)}>
+        <summary>Advanced: license server, mail, backup</summary>
+      <div className="card stack">
+        <h2>License server</h2>
+        <Field label="Address">
+          <TextInput value={form.licenseServerUrl || DEFAULT_LICENSE_SERVER_URL} autoComplete="off" onChange={(event) => setForm({ ...form, licenseServerUrl: event.target.value })} />
+        </Field>
+        <p className="hint">The session stays on this PC. The address starts at {DEFAULT_LICENSE_SERVER_URL} and can be changed.</p>
+        <div className="actions">
+          <button type="button" onClick={() => void unwrap(window.aio.settings.save({ ...form, licenseServerUrl: form.licenseServerUrl.trim() || DEFAULT_LICENSE_SERVER_URL })).then((next) => { setPayload(next); setForm({ ...next.settings, licenseServerUrl: next.settings.licenseServerUrl || DEFAULT_LICENSE_SERVER_URL }); setMessage("License server saved.") }).catch((err) => setError(errorText(err)))}>Save server</button>
+        </div>
+      </div>
+      {payload ? <div className="card security">{payload.security.description}</div> : null}
       <MailSettings />
       <form className="card stack" onSubmit={(event) => event.preventDefault()}>
         <div>
@@ -402,36 +443,7 @@ export function SettingsPage() {
           })()}>Download from URL</button>
         </div>
       </form>
-      <form className="card stack" onSubmit={(event) => {
-        event.preventDefault()
-        setBusy(true)
-        setError("")
-        void unwrap(window.aio.updates.saveToken({ action: token ? "replace" : "clear", token }))
-          .then(async (status) => {
-            setHasToken(status.hasToken)
-            setToken("")
-            if (status.hasToken) setUpdate(await unwrap(window.aio.updates.check()))
-            setMessage(status.hasToken ? "GitHub token saved on this PC. Checking releases." : "GitHub token removed.")
-          })
-          .catch((err) => setError(errorText(err)))
-          .finally(() => setBusy(false))
-      }}>
-        <div>
-          <h2>Updates</h2>
-          <p className="hint">Check for updates reads the public GitHub releases for jhoendy007-max/Tcg-aio, including prereleases and latest.yml. A token is optional. Save one only if the repo is private: a fine-grained personal access token with Contents: Read on that repo. The token stays on this PC and is not sent to the phone. Leave the field blank and save to remove it. Download and Restart and install call electron-updater. A development build can check, then explains that the installed Windows app is what downloads and restarts.</p>
-          {update ? <p className="hint" aria-live="polite">{updateStatusText(update)}</p> : null}
-          {update?.status === "downloading" ? <progress className="update-progress" value={update.percent ?? 0} max={100} /> : null}
-        </div>
-        <Field label="GitHub token" hint={hasToken ? "A token is saved. Paste a new one to replace it." : "No token saved. A public repo does not need one."}>
-          <TextInput type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="github_pat_…" />
-        </Field>
-        <div className="actions">
-          <button className="primary" type="submit" disabled={busy}>{token ? "Save token" : "Remove token"}</button>
-          <button type="button" disabled={busy || update?.status === "checking" || update?.status === "downloading"} onClick={() => void unwrap(window.aio.updates.check()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update?.status === "checking" ? "Checking…" : "Check for updates"}</button>
-          {update?.status === "available" || update?.status === "downloading" ? <button type="button" disabled={busy || update.status === "downloading"} onClick={() => void unwrap(window.aio.updates.download()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update.status === "downloading" ? `Downloading ${Math.round(update.percent ?? 0)}%` : "Download"}</button> : null}
-          {update?.status === "downloaded" ? <button type="button" className="primary" disabled={busy} onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setError(errorText(err)))}>Restart and install</button> : null}
-        </div>
-      </form>
+      </details>
     </section>
   )
 }
