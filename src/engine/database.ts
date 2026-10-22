@@ -195,6 +195,7 @@ interface DbFile {
   license?: LicenseFile
   accountGateMigration?: string
   accountSession?: { tokenSecret: string; envelope: string; fingerprint: string; pending?: boolean; email?: string }
+  phoneRelay?: { channel: string; tokenSecret: string }
   stockLog?: RestockEvent[]
   monitorSamples?: MonitorSample[]
   templates?: TaskTemplate[]
@@ -270,6 +271,7 @@ export class Database {
       license: normalizeLicense(parsed.license),
       accountGateMigration: parsed.accountGateMigration === "accounts-1" ? "accounts-1" : undefined,
       accountSession: normalizeAccountSession(parsed.accountSession),
+      phoneRelay: normalizePhoneRelay(parsed.phoneRelay, this.cipher),
       stockLog: Array.isArray(parsed.stockLog) ? parsed.stockLog.slice(0, 400) : [],
       monitorSamples: Array.isArray(parsed.monitorSamples) ? parsed.monitorSamples.slice(0, 500) : [],
       templates: Array.isArray(parsed.templates) ? parsed.templates : [],
@@ -295,6 +297,13 @@ export class Database {
         task.status = "paused"
         task.detail = "App closed while this task was running. Resume to continue."
         task.logs.push({ ts: Date.now(), level: "warn", message: task.detail })
+        changed = true
+      }
+      if (normalizeRole(task).kind === "monitor" && (task.accountId || task.profileId || task.proxyGroupId)) {
+        if (!task.monitorProxyGroupId && task.proxyGroupId) task.monitorProxyGroupId = task.proxyGroupId
+        task.accountId = ""
+        task.profileId = ""
+        task.proxyGroupId = null
         changed = true
       }
     }
@@ -544,7 +553,7 @@ export class Database {
   }
 
   deleteAccount(id: string): void {
-    if (this.data.tasks.some((task) => task.accountId === id)) {
+    if (this.data.tasks.some((task) => task.accountId === id && normalizeRole(task).kind !== "monitor")) {
       throw new AppError("Delete or edit the tasks that use this account first.")
     }
     this.data.accounts = this.data.accounts.filter((account) => account.id !== id)
@@ -1710,6 +1719,25 @@ export class Database {
     const secret = this.data.accountSession?.tokenSecret
     if (!secret) return ""
     try { return this.cipher.decrypt(secret) } catch { return "" }
+  }
+
+  readPhoneRelay(): { channel: string; token: string } | null {
+    const saved = this.data.phoneRelay
+    if (!saved?.channel || !saved.tokenSecret) return null
+    try {
+      const token = this.cipher.decrypt(saved.tokenSecret)
+      return token ? { channel: saved.channel, token } : null
+    } catch {
+      return null
+    }
+  }
+
+  savePhoneRelay(input: { channel: string; token: string }): void {
+    const channel = input.channel.trim()
+    const token = input.token.trim()
+    if (!channel || !token) throw new AppError("The phone relay could not be saved.")
+    this.data.phoneRelay = { channel, tokenSecret: this.cipher.encrypt(token) }
+    this.flush()
   }
 
   private accessOk = false
@@ -3077,7 +3105,36 @@ function cardSecretFrom(card: { number: string; cvv: string; expMonth: string; e
 
 function cloneTask(task: PublicTask): PublicTask {
   const role = normalizeRole(task)
-  return { ...task, ...role, group: task.group ?? "", testMode: task.testMode === true, monitorProxyGroupId: task.monitorProxyGroupId ?? null, rank: task.rank ?? 0, imageUrl: task.imageUrl ?? "", monitorOnly: role.kind === "monitor" || task.monitorOnly === true, monitorMs: task.monitorMs, detectToCartMs: task.detectToCartMs, overrides: task.overrides ? { ...task.overrides } : undefined, logs: (task.logs ?? []).map((line) => ({ ...line })) }
+  const monitor = role.kind === "monitor"
+  return {
+    ...task,
+    ...role,
+    accountId: monitor ? "" : task.accountId,
+    profileId: monitor ? "" : task.profileId,
+    proxyGroupId: monitor ? null : task.proxyGroupId,
+    monitorProxyGroupId: monitor ? task.monitorProxyGroupId ?? task.proxyGroupId ?? null : task.monitorProxyGroupId ?? null,
+    group: task.group ?? "",
+    testMode: task.testMode === true,
+    rank: task.rank ?? 0,
+    imageUrl: task.imageUrl ?? "",
+    monitorOnly: monitor || task.monitorOnly === true,
+    monitorMs: task.monitorMs,
+    detectToCartMs: task.detectToCartMs,
+    overrides: task.overrides ? { ...task.overrides } : undefined,
+    logs: (task.logs ?? []).map((line) => ({ ...line }))
+  }
+}
+
+function normalizePhoneRelay(value: DbFile["phoneRelay"], cipher: Cipher): DbFile["phoneRelay"] {
+  if (!value || typeof value.channel !== "string" || typeof value.tokenSecret !== "string") return undefined
+  const channel = value.channel.trim()
+  if (!channel || channel.length > 80) return undefined
+  try {
+    if (!cipher.decrypt(value.tokenSecret)) return undefined
+  } catch {
+    return undefined
+  }
+  return { channel, tokenSecret: value.tokenSecret }
 }
 
 function normalizeAccountSession(value: DbFile["accountSession"]): DbFile["accountSession"] {

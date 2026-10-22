@@ -1,5 +1,7 @@
 import { hostname } from "node:os"
 import type { AlertService } from "../engine/alerts"
+import { mintRelayDevice, provisionHostedRelay, revokeRelayDevice } from "./hosted-relay"
+import { DEFAULT_LICENSE_SERVER_URL } from "../shared/types"
 import { checkStoreHealth } from "../engine/health"
 import { defaultHttp, type HttpClient } from "../engine/http"
 import type { Database } from "../engine/database"
@@ -153,6 +155,29 @@ export function createPhoneHost(
     pcId: db.pcId(),
     pcName,
     relayUrl: () => db.getSettings().phoneRelayUrl,
+    async provisionRelay() {
+      const sessionToken = db.sessionToken()
+      if (!sessionToken) throw new Error("Sign in on this PC before pairing a phone.")
+      const licenseUrl = db.getSettings().licenseServerUrl.trim() || DEFAULT_LICENSE_SERVER_URL
+      const saved = db.readPhoneRelay()
+      const hosted = await provisionHostedRelay({ licenseUrl, sessionToken, saved })
+      if (!saved || saved.channel !== hosted.channel || saved.token !== hosted.pcToken) {
+        db.savePhoneRelay({ channel: hosted.channel, token: hosted.pcToken })
+      }
+      return hosted
+    },
+    async issueRelayDevice(deviceId: string) {
+      const sessionToken = db.sessionToken()
+      if (!sessionToken) return undefined
+      const licenseUrl = db.getSettings().licenseServerUrl.trim() || DEFAULT_LICENSE_SERVER_URL
+      return mintRelayDevice({ licenseUrl, sessionToken, deviceId })
+    },
+    async revokeRelayDevice(deviceId: string) {
+      const sessionToken = db.sessionToken()
+      if (!sessionToken) return
+      const licenseUrl = db.getSettings().licenseServerUrl.trim() || DEFAULT_LICENSE_SERVER_URL
+      await revokeRelayDevice({ licenseUrl, sessionToken, deviceId })
+    },
     snapshot,
     saveTask(draft: PhoneTaskDraft) {
       const saved = db.saveTask(draft)

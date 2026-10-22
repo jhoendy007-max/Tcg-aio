@@ -220,7 +220,8 @@ const TEXT = {
     monitorStart: "Triggered by a monitor",
     restock: "Triggered by a restock alert",
     builtin: "Built-in monitor",
-    hintMonitor: "A monitor watches stock and can start the checkout tasks linked here. It does not add to cart.",
+    hintMonitor: "A monitor watches stock without a store account and can start the checkout tasks linked here. It does not sign in or add to cart.",
+    monitorAnonymous: "Monitors check stock without a store account. A linked checkout uses the account when it runs.",
     hintCheckout: "A checkout can wait for a monitor or a restock alert, or watch the product itself.",
     inherit: "Blank uses the store setting, then the global setting.",
     live: "Delays, caps, hours, links, and the webhook can change while this task is running.",
@@ -256,7 +257,7 @@ const TEXT = {
     quickPassword: "Password",
     quickMade: "The monitor and checkout are ready. Start the monitor when you want to watch.",
     quickAdded: "Added this account to the same monitor.",
-    quickWarm: "Warm the account session when the monitor starts, if it is stale.",
+    quickWarm: "Warm checkout accounts on a schedule. Monitors stay signed out.",
     quickProfiles: "Open profiles",
     inQueue: "In queue"
   },
@@ -300,7 +301,8 @@ const TEXT = {
     monitorStart: "La dispara un monitor",
     restock: "La dispara una alerta de restock",
     builtin: "Monitor propio",
-    hintMonitor: "Un monitor vigila el stock y puede iniciar las compras enlazadas. No añade al carrito.",
+    hintMonitor: "Un monitor vigila el stock sin una cuenta de la tienda y puede iniciar las compras enlazadas. No inicia sesión ni añade al carrito.",
+    monitorAnonymous: "Los monitores revisan el stock sin una cuenta de la tienda. La compra enlazada usa la cuenta cuando corre.",
     hintCheckout: "Una compra puede esperar un monitor o una alerta, o vigilar el producto ella misma.",
     inherit: "Vacío usa el ajuste de la tienda y después el global.",
     live: "Las esperas, topes, horas, enlaces y el webhook se pueden cambiar con la tarea en marcha.",
@@ -336,7 +338,7 @@ const TEXT = {
     quickPassword: "Contraseña",
     quickMade: "El monitor y la compra están listos. Inicia el monitor cuando quieras vigilar.",
     quickAdded: "Esta cuenta quedó en el mismo monitor.",
-    quickWarm: "Calentar la sesión de la cuenta al iniciar el monitor, si está vieja.",
+    quickWarm: "Calentar las cuentas de compra en un horario. Los monitores siguen sin sesión.",
     quickProfiles: "Abrir perfiles",
     inQueue: "En cola"
   }

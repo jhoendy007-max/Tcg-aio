@@ -20,9 +20,21 @@ fi
 
 VER="$(node -p "require('$ROOT/admin-mobile/package.json').version")"
 CODE="$(node -p "require('$ROOT/admin-mobile/app.json').expo.android.versionCode")"
+NOTES="${TCGAIO_ADMIN_NOTES:-}"
+if [[ -z "$NOTES" && -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "${GITHUB_REF_NAME:-}" ]]; then
+  NOTES="$(curl --fail --silent --show-error \
+    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" \
+    | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const body=JSON.parse(s).body;process.stdout.write(typeof body==="string"?body:"")}catch{}})' || true)"
+fi
+NOTES="$(printf '%s' "$NOTES" | tr '\n\r' ' ' | sed 's/  */ /g' | cut -c1-500)"
 echo "Uploading admin ${VER} (${CODE}) to ${URL}. Token length ${#TOKEN}."
 HDR="$(mktemp)"
 printf 'Authorization: Bearer %s\nX-TCGAIO-Upload-Token: %s\nX-TCGAIO-Version: %s\nX-TCGAIO-Version-Code: %s\nContent-Type: application/vnd.android.package-archive\n' "$TOKEN" "$TOKEN" "$VER" "$CODE" > "$HDR"
+if [[ -n "$NOTES" ]]; then
+  printf 'X-TCGAIO-Notes: %s\n' "$NOTES" >> "$HDR"
+fi
 curl --fail-with-body --silent --show-error \
   -X POST \
   -H @"$HDR" \

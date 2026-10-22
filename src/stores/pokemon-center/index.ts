@@ -110,16 +110,19 @@ async function runPokemonCenter(ctx: StoreRunContext): Promise<StoreRunResult> {
   const sku = parseSku(ctx.task.sku)
   if (!sku) return fail("Enter a Pokémon Center SKU or a product URL from www.pokemoncenter.com/product/.")
   if (ctx.profile.shipping.country !== "US") return fail("v1 places US ship-to-home orders only.")
-  if (ctx.account.store !== "pokemon-center") return fail("Choose a Pokémon Center account.")
-  if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(SESSION_PAUSE)
-
   const jar = new CookieJar()
-  jar.load(ctx.account.session)
-  attachSession(ctx, (cookies) => jar.load(cookies))
-  ctx.log("info", "Using the saved Pokémon Center session.")
-  note(ctx, "session", "pass", "Saved Pokémon Center session loaded.")
-  const probe = await probeCart(ctx, jar)
-  if (probe.kind !== "ok") return asResult(probe)
+  if (!ctx.monitorOnly) {
+    if (ctx.account.store !== "pokemon-center") return fail("Choose a Pokémon Center account.")
+    if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(SESSION_PAUSE)
+    jar.load(ctx.account.session)
+    attachSession(ctx, (cookies) => jar.load(cookies))
+    ctx.log("info", "Using the saved Pokémon Center session.")
+    note(ctx, "session", "pass", "Saved Pokémon Center session loaded.")
+    const probe = await probeCart(ctx, jar)
+    if (probe.kind !== "ok") return asResult(probe)
+  } else {
+    note(ctx, "session", "skip", "Monitors check stock without a store account.")
+  }
 
   const page = productUrl(ctx.task.sku, sku)
   ctx.phase("monitoring")

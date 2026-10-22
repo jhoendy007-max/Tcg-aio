@@ -183,12 +183,14 @@ export class TaskService {
       finishedAt: undefined,
       log: line("info", "Task started.")
     })
-    await this.warmIfDue(task, update)
+    const monitorTask = task.kind === "monitor" || task.monitorOnly === true
+    if (!monitorTask) await this.warmIfDue(task, update)
     let proxy: ProxyEndpoint | undefined
     let proxies: ProxyEndpoint[] | undefined
     try {
-      const profile = task.profileId ? this.db.readProfile(task.profileId) : blankProfile()
-      let account = task.accountId ? this.db.readAccount(task.accountId) : blankAccount(task.store)
+      const profile = !monitorTask && task.profileId ? this.db.readProfile(task.profileId) : blankProfile()
+      let account = blankAccount(task.store)
+      if (!monitorTask && task.accountId) account = this.db.readAccount(task.accountId)
       let monitorProxy: ProxyEndpoint | undefined
       let monitorProxies: ProxyEndpoint[] | undefined
       if (account.id) {
@@ -248,8 +250,9 @@ export class TaskService {
               : `Checkout uses ${network} proxy ${proxyLabel(proxy)} from ${group.name}.`
           update({ log: line(choice.allBenched ? "warn" : "info", detail) })
         } else if (!monitorProxy) {
-          update({ log: line("info", "Direct connection. No proxy group selected.") })
+          update({ log: line("info", monitorTask ? "Monitoring anonymously. No proxy group selected." : "Direct connection. No proxy group selected.") })
         }
+        if (monitorTask) update({ log: line("info", "Monitoring anonymously. Store accounts are used only when a checkout runs.") })
         if (!monitorProxy) {
           monitorProxy = proxy
           monitorProxies = proxies
@@ -263,7 +266,7 @@ export class TaskService {
       const http = this.polite.wrap(task.store, monitorProxy?.id, this.http, (proxyId, status) => {
         this.db.noteTraffic(task.store, proxyId, status)
       }, controller.signal, {
-        accountId: account.id || undefined,
+        accountId: monitorTask ? undefined : account.id || undefined,
         proxyId: monitorProxy?.id,
         gapMs: pace.rateLimitMs,
         jitterPct
@@ -463,7 +466,7 @@ export class TaskService {
       }
       ctx.http = {
         request: async (input) => {
-          const stamped = account.id ? { ...input, partition: accountPartition(account.id) } : input
+          const stamped = account.id && !monitorTask ? { ...input, partition: accountPartition(account.id) } : input
           if (isFinalSubmit(task.store, stamped)) {
             if (!testMode) {
               const price = this.watches.get(`${task.store}:${task.sku}`)?.price ?? null

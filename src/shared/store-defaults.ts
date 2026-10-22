@@ -66,11 +66,13 @@ export function resolveRoleDefaults(
   for (const field of FIELDS) {
     const taskValue = taskPatch[field]
     const storeValue = storePatch[field]
-    const chosen = taskValue !== undefined
-      ? { value: taskValue, source: "task" as const }
-      : storeValue !== undefined
-        ? { value: storeValue, source: "store" as const }
-        : { value: builtin[field], source: "builtin" as const }
+    const chosen = field === "warmOnStart" && role === "monitor"
+      ? { value: false as RoleDefaults[typeof field], source: "builtin" as const }
+      : taskValue !== undefined
+        ? { value: taskValue, source: "task" as const }
+        : storeValue !== undefined
+          ? { value: storeValue, source: "store" as const }
+          : { value: builtin[field], source: "builtin" as const }
     Object.assign(out, { [field]: chosen })
   }
   return out
@@ -120,6 +122,7 @@ export function cleanStoreRoles(input: unknown): StoreRoles {
     if (!isStoreId(store) || !raw || typeof raw !== "object" || Array.isArray(raw)) continue
     const row = raw as { monitor?: unknown; checkout?: unknown }
     const monitor = cleanPatch(row.monitor)
+    if (monitor) monitor.warmOnStart = false
     const checkout = cleanPatch(row.checkout)
     if (monitor || checkout) next[store] = { ...(monitor ? { monitor } : {}), ...(checkout ? { checkout } : {}) }
   }

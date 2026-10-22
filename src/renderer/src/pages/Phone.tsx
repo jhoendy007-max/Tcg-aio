@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react"
 import type { PhoneInvite, PhoneStatus } from "../../../phone/protocol"
-import { Banner, Field, TextInput } from "../components/ui"
+import { Banner } from "../components/ui"
 import { errorText, formatTime, unwrap } from "../lib"
 
 export function PhonePage() {
   const [status, setStatus] = useState<PhoneStatus | null>(null)
   const [invite, setInvite] = useState<PhoneInvite | null>(null)
-  const [relay, setRelay] = useState("")
   const [error, setError] = useState("")
-  const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
   const [now, setNow] = useState(Date.now())
 
@@ -16,7 +14,6 @@ export function PhonePage() {
     void unwrap(window.aio.phone.status())
       .then((next) => {
         setStatus(next)
-        setRelay(next.relay)
       })
       .catch((err) => setError(errorText(err)))
     return window.aio.phone.onEvent((next) => setStatus(next))
@@ -30,26 +27,9 @@ export function PhonePage() {
   const inviteLive = invite && invite.inviteExpiresAt && invite.inviteExpiresAt > now ? invite : null
   const secondsLeft = inviteLive?.inviteExpiresAt ? Math.max(0, Math.ceil((inviteLive.inviteExpiresAt - now) / 1000)) : 0
 
-  async function saveRelay() {
-    setBusy(true)
-    setError("")
-    setMessage("")
-    try {
-      const next = await unwrap(window.aio.phone.saveRelay(relay))
-      setStatus(next)
-      setRelay(next.relay)
-      setMessage(next.relay ? "Relay saved. Pair again so the QR includes it." : "Relay cleared. Phones on this Wi-Fi can still pair.")
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   async function pair() {
     setBusy(true)
     setError("")
-    setMessage("")
     try {
       const next = await unwrap(window.aio.phone.invite())
       setInvite(next)
@@ -76,12 +56,11 @@ export function PhonePage() {
       <header className="page-head">
         <div>
           <h1>Phone</h1>
-          <p>The PC keeps monitoring and checking out. A paired phone can watch tasks and start or stop them. Session Sync, the browser extension, uses this same one-time code. Card numbers, CVVs, and passwords stay on this PC.</p>
+          <p>The PC keeps monitoring and checking out. A paired phone can watch tasks and start or stop them. Pairing opens an away-from-home relay on your license server and puts it in the QR. On the same Wi-Fi the phone connects directly. Away from home it uses that relay. Card numbers, CVVs, and passwords stay on this PC.</p>
         </div>
         <button type="button" className="primary" onClick={() => void pair()} disabled={busy || !status?.listening}>Pair device</button>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
-      {message ? <Banner tone="info">{message}</Banner> : null}
       <div className="phone-grid">
         <div className="card qr-wrap">
           <h2>Pair device</h2>
@@ -92,19 +71,16 @@ export function PhonePage() {
               <span className="mono">{status ? `${status.host}:${status.port}` : ""}</span>
             </>
           ) : (
-            <p>Choose Pair device to show a one-time QR code. On the same Wi-Fi the phone connects directly. Away from home, save a relay first.</p>
+            <p>Choose Pair device to show a one-time QR code. It already includes the away-from-home relay. On the same Wi-Fi the phone connects directly, and away from home it uses the relay.</p>
           )}
         </div>
         <div className="stack">
-          <form className="card form-grid" onSubmit={(event) => { event.preventDefault(); void saveRelay() }}>
-            <Field className="span-2" label="Relay for away from home" hint="Optional ws:// or wss:// URL of a TCGAIO relay you run. Leave blank for Wi-Fi only. The relay routes encrypted frames and cannot read them.">
-              <TextInput value={relay} onChange={(event) => setRelay(event.target.value)} placeholder="wss://relay.example.com" autoComplete="off" />
-            </Field>
-            <div className="actions span-2">
-              <button className="primary" type="submit" disabled={busy}>Save relay</button>
-              <span className="mono">{status?.listening ? `Listening on ${status.host}:${status.port}` : "Phone listener is off"}</span>
-            </div>
-          </form>
+          <div className="card">
+            <h2>Away from home</h2>
+            <p className="hint">Pair device opens the relay with this PC's license session. The phone gets a revocable token in the QR. Messages stay encrypted, and this PC does not accept connections from the internet.</p>
+            <p className="mono">{status?.relay ? "Relay ready" : "The relay is created when you pair."}</p>
+            <p className="mono">{status?.listening ? `Listening on ${status.host}:${status.port}` : "Phone listener is off"}</p>
+          </div>
           <div className="card table-wrap">
             <table>
               <thead>

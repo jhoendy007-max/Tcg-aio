@@ -5,6 +5,15 @@ import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { argon2id } from "@noble/hashes/argon2"
 import {
+  PhoneRelayHub,
+  authorizeRelayJoin,
+  migratePhoneRelay,
+  mintPhoneDevice,
+  mintPhoneInvite,
+  provisionPhoneChannel,
+  revokePhoneDevice
+} from "./phone-relay"
+import {
   GRANT_GRACE_MS,
   OWNER_DEVICE_LIMIT,
   USER_DEVICE_LIMIT,
@@ -40,8 +49,9 @@ export interface LicenseApiOptions {
 export interface LicenseApi {
   publicKey: string
   handle(method: string, path: string, headers: Record<string, string | undefined>, raw: string, ip?: string): { status: number; body: string }
-  storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string }): { status: number; body: string }
+  storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string; notes?: string }): { status: number; body: string }
   adminDownload(headers: Record<string, string | undefined>): { status: number; body: string; file?: string; size?: number }
+  attachRelay(server: { on(event: "upgrade", listener: (req: IncomingMessage, socket: unknown, head: Buffer) => void): void }): void
   close(): void
 }
 
@@ -98,6 +108,8 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
   }
   const identity = loadIdentity(db, options.privateKey)
   ensureOwner(db, options)
+  migratePhoneRelay(db)
+  const relay = new PhoneRelayHub((input) => authorizeRelayJoin(db, input, now()))
   const apkDir = options.adminApkDir?.trim() || dirname(options.dbPath)
   const rates = new Map<string, { count: number; resetAt: number }>()
 
@@ -123,6 +135,27 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       if (method === "POST" && route === "/v1/session/confirm") return confirmSession(db, body, now, options.push)
       if (method === "POST" && route === "/v1/session/transfer") return transfer(db, identity.privateKey, body, now)
       if (method === "POST" && route === "/v1/session/checkout") return checkout(db, body, now, options.push)
+      if (method === "POST" && (route === "/v1/phone/relay" || route === "/v1/phone/relay/invite" || route === "/v1/phone/relay/device" || route === "/v1/phone/relay/revoke")) {
+        const userId = relayUser(db, headers, body, now())
+        if (!userId) return json(401, { ok: false, error: "Sign in to this PC again." })
+        if (route === "/v1/phone/relay") {
+          const next = provisionPhoneChannel(db, userId, body.rotate === true, now())
+          return json(200, { ok: true, channel: next.channel, ...(next.pcToken ? { pcToken: next.pcToken } : {}) })
+        }
+        if (route === "/v1/phone/relay/invite") {
+          const invite = mintPhoneInvite(db, userId, now())
+          if (!invite) return json(400, { ok: false, error: "Open the phone relay before pairing." })
+          return json(200, { ok: true, channel: invite.channel, token: invite.token, expiresAt: invite.expiresAt })
+        }
+        if (route === "/v1/phone/relay/device") {
+          const minted = mintPhoneDevice(db, userId, text(body.deviceId), now())
+          if (!minted) return json(400, { ok: false, error: "This phone could not be added to the relay." })
+          return json(200, { ok: true, channel: minted.channel, token: minted.token })
+        }
+        const revoked = revokePhoneDevice(db, userId, text(body.deviceId))
+        if (revoked) relay.dropDevice(revoked.channel, text(body.deviceId))
+        return json(200, { ok: true })
+      }
       const admin = adminUser(db, headers, now())
       if (!admin) return json(401, { ok: false, error: "Sign in to the admin desk again." })
       if (method === "POST" && route === "/v1/admin/password") return changeAdminPassword(db, admin, body)
@@ -130,7 +163,7 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       if (method === "GET" && route === "/v1/admin/users") return json(200, { ok: true, ...listUsers(db, url.searchParams.get("q") ?? "", url.searchParams.get("status") ?? "") })
       if (method === "GET" && route === "/v1/admin/app") {
         const release = adminRelease(db)
-        return json(200, { ok: true, version: release.version, versionCode: release.versionCode, size: release.size, available: release.available })
+        return json(200, { ok: true, version: release.version, versionCode: release.versionCode, size: release.size, available: release.available, notes: release.notes })
       }
       if (method === "POST" && route === "/v1/admin/licenses") return createLicense(db, body, now)
       const userMatch = /^\/v1\/admin\/users\/([^/]+)\/(license|paid|payment|suspend|unsuspend|reset)$/.exec(route)
@@ -148,7 +181,7 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
     }
   }
 
-  function storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string }): { status: number; body: string } {
+  function storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string; notes?: string }): { status: number; body: string } {
     const configured = normalizeUploadToken(options.adminUploadToken ?? process.env.TCGAIO_ADMIN_UPLOAD_TOKEN ?? "")
     if (!configured) return json(404, { ok: false, error: "Admin APK upload is not configured." })
     const presented = normalizeUploadToken(input.authorization)
@@ -168,6 +201,8 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
     setMeta(db, "adminApkVersionCode", String(input.versionCode))
     setMeta(db, "adminApkFile", file)
     setMeta(db, "adminApkSize", String(input.bytes.length))
+    const notes = (input.notes ?? "").replace(/\s+/g, " ").trim().slice(0, 500) || `Admin ${version}`
+    setMeta(db, "adminApkNotes", notes)
     return json(200, { ok: true, version, versionCode: input.versionCode, size: input.bytes.length })
   }
 
@@ -183,7 +218,11 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
     handle,
     storeAdminApk,
     adminDownload,
-    close: () => db.close()
+    attachRelay: (server) => relay.attach(server),
+    close: () => {
+      relay.close()
+      db.close()
+    }
   }
 }
 
@@ -224,7 +263,7 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; h
       if (upload) {
         const version = text(headers["x-tcgaio-version"])
         const versionCode = Number(headers["x-tcgaio-version-code"])
-        const result = api.storeAdminApk({ version, versionCode, bytes: Buffer.concat(chunks), authorization: headers["x-tcgaio-upload-token"] || headers.authorization || "" })
+        const result = api.storeAdminApk({ version, versionCode, bytes: Buffer.concat(chunks), authorization: headers["x-tcgaio-upload-token"] || headers.authorization || "", notes: text(headers["x-tcgaio-notes"]) })
         res.writeHead(result.status, { "content-type": "application/json" })
         res.end(result.body)
         return
@@ -237,6 +276,7 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; h
       res.end(result.body)
     })
   })
+  api.attachRelay(server)
   return new Promise((resolve, reject) => {
     server.once("error", reject)
     server.listen(options.port ?? 0, bindHost, () => {
@@ -657,13 +697,22 @@ function publicUser(row: UserListRow) {
   }
 }
 
-function adminRelease(db: DatabaseSync): { version: string; versionCode: number; size: number; available: boolean; file?: string } {
+function adminRelease(db: DatabaseSync): { version: string; versionCode: number; size: number; available: boolean; notes: string; file?: string } {
   const version = meta(db, "adminApkVersion")
   const versionCode = Number(meta(db, "adminApkVersionCode") || "0")
   const file = meta(db, "adminApkFile")
   const size = Number(meta(db, "adminApkSize") || "0")
   const available = Boolean(version && file && existsSync(file))
-  return { version, versionCode: Number.isFinite(versionCode) ? versionCode : 0, size: available ? size : 0, available, file: available ? file : undefined }
+  return { version, versionCode: Number.isFinite(versionCode) ? versionCode : 0, size: available ? size : 0, available, notes: meta(db, "adminApkNotes"), file: available ? file : undefined }
+}
+
+function relayUser(db: DatabaseSync, headers: Record<string, string | undefined>, body: Record<string, unknown>, at: number): string | null {
+  const header = headers.authorization ?? headers.Authorization ?? ""
+  const match = /^Bearer\s+(\S+)$/.exec(header)
+  const token = match?.[1] || text(body.token)
+  const session = sessionByToken(db, token, at)
+  if (!session || session.kind !== "user") return null
+  return session.user_id
 }
 
 function setMeta(db: DatabaseSync, key: string, value: string): void {

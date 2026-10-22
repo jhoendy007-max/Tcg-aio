@@ -87,16 +87,19 @@ async function runCrunchyroll(ctx: StoreRunContext): Promise<StoreRunResult> {
   const sku = parseSku(ctx.task.sku)
   if (!sku) return fail("Enter a Crunchyroll product ID or a store.crunchyroll.com product URL.")
   if (ctx.profile.shipping.country !== "US") return fail("v1 places US ship-to-home orders only.")
-  if (ctx.account.store !== "crunchyroll") return fail("Choose a Crunchyroll account.")
-  if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(SESSION_PAUSE)
-  const bearer = bearerFromSession(ctx.account.session.accessToken, ctx.account.session.cookie)
-  if (bearer && isGuestToken(bearer)) return pause(GUEST_PAUSE)
-
   const jar = new CookieJar()
-  jar.load(ctx.account.session)
-  attachSession(ctx, (cookies) => jar.load(cookies))
-  ctx.log("info", "Using the saved Crunchyroll session. store.crunchyroll.com now redirects to www.crunchyroll.com.")
-  note(ctx, "session", "pass", "Saved Crunchyroll session loaded.")
+  if (!ctx.monitorOnly) {
+    if (ctx.account.store !== "crunchyroll") return fail("Choose a Crunchyroll account.")
+    if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(SESSION_PAUSE)
+    const bearer = bearerFromSession(ctx.account.session.accessToken, ctx.account.session.cookie)
+    if (bearer && isGuestToken(bearer)) return pause(GUEST_PAUSE)
+    jar.load(ctx.account.session)
+    attachSession(ctx, (cookies) => jar.load(cookies))
+    ctx.log("info", "Using the saved Crunchyroll session. store.crunchyroll.com now redirects to www.crunchyroll.com.")
+    note(ctx, "session", "pass", "Saved Crunchyroll session loaded.")
+  } else {
+    note(ctx, "session", "skip", "Monitors check stock without a store account.")
+  }
   ctx.phase("monitoring")
   ctx.log("info", `Watching product ${sku} for Crunchyroll store availability.`)
   let waits = 0

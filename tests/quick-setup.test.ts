@@ -116,8 +116,8 @@ describe("quick setup", () => {
 describe("session warm targets", () => {
   const now = 1_000_000
 
-  it("warms a stale checkout account when its monitor starts, and skips a fresh one", () => {
-    const monitor = { id: "mon", accountId: "", kind: "monitor" as const, linkedCheckoutIds: ["co-1"] }
+  it("leaves accounts alone while a monitor runs and warms a stale account when checkout starts", () => {
+    const monitor = { id: "mon", accountId: "acct-1", kind: "monitor" as const, monitorOnly: true, linkedCheckoutIds: ["co-1"] }
     const tasks = [
       { id: "co-1", accountId: "acct-1", linkedMonitorId: "mon" },
       { id: "co-2", accountId: "acct-2", linkedMonitorId: "mon" }
@@ -126,7 +126,8 @@ describe("session warm targets", () => {
       { id: "acct-1", lastWarmAt: null },
       { id: "acct-2", lastWarmAt: now - 60_000 }
     ]
-    expect(accountsToWarm(monitor, tasks, accounts, now, 30)).toEqual(["acct-1"])
+    expect(accountsToWarm(monitor, tasks, accounts, now, 30)).toEqual([])
+    expect(accountsToWarm({ id: "co-1", accountId: "acct-1", kind: "checkout" }, tasks, accounts, now, 30)).toEqual(["acct-1"])
     expect(accountsToWarm({ id: "co-2", accountId: "acct-2", kind: "checkout" }, tasks, accounts, now, 30)).toEqual([])
   })
 })

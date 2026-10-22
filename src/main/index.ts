@@ -18,6 +18,7 @@ import { projectTask } from "../phone/protocol"
 import { PhoneServer } from "../phone/server"
 import { createRegistry, moduleAddressCaps } from "../stores/registry"
 import { warmupDue } from "../engine/session-care"
+import { UPDATE_CHECK_MS } from "../shared/update-prompt"
 import { moduleScope, resolveModule } from "../shared/module-settings"
 import { chooseWindowFrame, type Frame } from "../shared/window-frame"
 import { storeName } from "../shared/stores"
@@ -53,6 +54,7 @@ let sessionTimer: ReturnType<typeof setInterval> | null = null
 let dropTimer: ReturnType<typeof setInterval> | null = null
 let handsTimer: ReturnType<typeof setInterval> | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+let updateTimer: ReturnType<typeof setInterval> | null = null
 let hands: HandsFree | null = null
 let dropBusy = false
 
@@ -269,7 +271,10 @@ if (gotLock) void app.whenReady().then(async () => {
   dropTimer = setInterval(() => {
     void tickDrops(db, publish, desktop)
   }, 15_000)
-  if (db.hasUpdateToken()) void updates.check()
+  void updates.check()
+  updateTimer = setInterval(() => {
+    void updates.check()
+  }, UPDATE_CHECK_MS)
   heartbeatTimer = setInterval(() => {
     void heartbeatAccount(db, machineFingerprint()).catch(() => undefined)
   }, HEARTBEAT_MS)
@@ -290,6 +295,7 @@ app.on("before-quit", () => {
   if (dropTimer) clearInterval(dropTimer)
   if (handsTimer) clearInterval(handsTimer)
   if (heartbeatTimer) clearInterval(heartbeatTimer)
+  if (updateTimer) clearInterval(updateTimer)
   clearCrashFlag()
   void sessions?.close()
   alerts?.stop()

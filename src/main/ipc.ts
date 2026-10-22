@@ -173,6 +173,7 @@ export function registerIpc(
   handle(channels.storesList, () => listStores(registry))
   handle(channels.phoneStatus, () => phone.status())
   handle(channels.phoneInvite, async () => {
+    await phone.prepareRelay()
     const payload = phone.createInvite()
     const text = encodePairingPayload(payload)
     const qrDataUrl = await QRCode.toDataURL(text, { margin: 1, width: 320, errorCorrectionLevel: "M", color: { dark: "#14161b", light: "#ffffff" } })

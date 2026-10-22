@@ -78,12 +78,14 @@ export function StoreDefaults({ settings, onSaved }: { settings: Settings; onSav
         <MarkField label={deskText(lang, "fieldAddressCap")} mark={saved.addressOrderLimit == null ? "default" : "custom"} lang={lang}>
           <TextInput inputMode="numeric" value={String(values.addressOrderLimit)} onChange={(event) => setField("addressOrderLimit", Number(event.target.value))} />
         </MarkField>
-        <MarkField label={deskText(lang, "fieldWarm")} mark={saved.warmOnStart == null ? "default" : "custom"} lang={lang}>
-          <Select value={values.warmOnStart ? "yes" : "no"} onChange={(event) => setField("warmOnStart", event.target.value === "yes")}>
-            <option value="yes">{deskText(lang, "yes")}</option>
-            <option value="no">{deskText(lang, "no")}</option>
-          </Select>
-        </MarkField>
+        {role === "checkout" ? (
+          <MarkField label={deskText(lang, "fieldWarm")} mark={saved.warmOnStart == null ? "default" : "custom"} lang={lang}>
+            <Select value={values.warmOnStart ? "yes" : "no"} onChange={(event) => setField("warmOnStart", event.target.value === "yes")}>
+              <option value="yes">{deskText(lang, "yes")}</option>
+              <option value="no">{deskText(lang, "no")}</option>
+            </Select>
+          </MarkField>
+        ) : <p className="hint span-2">Monitors check stock without a store account, so they do not warm a session.</p>}
       </div>
     </section>
   )

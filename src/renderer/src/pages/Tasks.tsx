@@ -914,6 +914,13 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
 }
 
 function BindingNote({ form, accounts, groups, lang }: { form: TaskInput; accounts: PublicAccount[]; groups: ProxyGroup[]; lang: "en" | "es" }) {
+  if (form.kind === "monitor") {
+    return (
+      <div className="span-2">
+        <p className="hint">{taskText(lang, "monitorAnonymous")}</p>
+      </div>
+    )
+  }
   const account = accounts.find((item) => item.id === form.accountId) ?? null
   const binding = effectiveBinding({
     accountId: form.accountId,

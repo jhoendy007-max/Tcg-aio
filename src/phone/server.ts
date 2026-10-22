@@ -31,6 +31,9 @@ export interface PhoneHost {
   pcId: string
   pcName: string
   relayUrl(): string
+  provisionRelay?(): Promise<{ url: string; channel: string; pcToken: string; inviteToken: string }>
+  issueRelayDevice?(deviceId: string): Promise<string | undefined>
+  revokeRelayDevice?(deviceId: string): Promise<void> | void
   snapshot(): PhoneSnapshot
   saveTask(draft: PhoneTaskDraft): PhoneTask
   deleteTask(id: string): void
@@ -105,6 +108,7 @@ interface Conn {
   deviceId: string | null
   connId: string | null
   fails: number
+  via?: "hosted" | "legacy"
 }
 
 interface Invite {
@@ -124,6 +128,9 @@ export class PhoneServer {
   private relayConns = new Map<string, Conn>()
   private relaySocket: WebSocket | null = null
   private relayTimer: ReturnType<typeof setTimeout> | null = null
+  private hosted: { url: string; channel: string; pcToken: string; inviteToken: string } | null = null
+  private hostedSocket: WebSocket | null = null
+  private hostedTimer: ReturnType<typeof setTimeout> | null = null
   private readonly bindHost: string
   private readonly advertiseHost: string
   private readonly now: () => number
@@ -181,11 +188,21 @@ export class PhoneServer {
     })
   }
 
+  async prepareRelay(): Promise<void> {
+    if (!this.host.provisionRelay) return
+    this.hosted = await this.host.provisionRelay()
+    this.reconnectHosted()
+  }
+
   async stop(): Promise<void> {
     if (this.relayTimer) clearTimeout(this.relayTimer)
     this.relayTimer = null
     this.relaySocket?.close()
     this.relaySocket = null
+    if (this.hostedTimer) clearTimeout(this.hostedTimer)
+    this.hostedTimer = null
+    this.hostedSocket?.close()
+    this.hostedSocket = null
     for (const conn of this.conns) conn.ws?.close()
     this.conns.clear()
     this.relayConns.clear()
@@ -202,7 +219,8 @@ export class PhoneServer {
     if (!this.http) throw new Error("The phone listener is not running.")
     const secret = randomSecret()
     this.invite = { secret, key: pairKey(secret), expiresAt: this.now() + INVITE_TTL_MS }
-    const relay = this.host.relayUrl()
+    const hosted = this.hosted
+    const relay = hosted?.url || this.host.relayUrl()
     return {
       v: 1,
       pcId: this.host.pcId,
@@ -210,7 +228,8 @@ export class PhoneServer {
       host: this.advertiseHost,
       port: this.port,
       secret,
-      ...(relay ? { relay } : {})
+      ...(relay ? { relay } : {}),
+      ...(hosted ? { relayChannel: hosted.channel, relayToken: hosted.inviteToken } : {})
     }
   }
 
@@ -237,7 +256,7 @@ export class PhoneServer {
       listening: Boolean(this.http),
       host: this.advertiseHost,
       port: this.port,
-      relay: this.host.relayUrl(),
+      relay: this.hosted?.url || this.host.relayUrl(),
       pcName: this.host.pcName,
       devices: this.host.devices(),
       inviteExpiresAt
@@ -246,6 +265,7 @@ export class PhoneServer {
 
   revoke(id: string): void {
     this.host.revokeDevice(id)
+    void this.host.revokeRelayDevice?.(id)
     this.refreshKeys()
     for (const conn of [...this.conns]) {
       if (conn.deviceId === id) this.fail(conn, 4003)
@@ -265,12 +285,34 @@ export class PhoneServer {
     socket.on("open", () => {
       socket.send(JSON.stringify({ op: "join", role: "pc", pc: this.host.pcId }))
     })
-    socket.on("message", (data) => this.onRelay(data.toString()))
+    socket.on("message", (data) => this.onRelay(data.toString(), "legacy"))
     socket.on("close", () => {
       if (this.relaySocket !== socket) return
       this.relaySocket = null
       if (!this.host.relayUrl() || !this.http) return
       this.relayTimer = setTimeout(() => this.reconnectRelay(), 3000)
+    })
+    socket.on("error", () => socket.close())
+  }
+
+  private reconnectHosted(): void {
+    this.hostedSocket?.close()
+    this.hostedSocket = null
+    if (this.hostedTimer) clearTimeout(this.hostedTimer)
+    this.hostedTimer = null
+    const hosted = this.hosted
+    if (!hosted || !this.http) return
+    const socket = new WebSocket(hosted.url)
+    this.hostedSocket = socket
+    socket.on("open", () => {
+      socket.send(JSON.stringify({ op: "join", role: "pc", channel: hosted.channel, token: hosted.pcToken, pc: this.host.pcId }))
+    })
+    socket.on("message", (data) => this.onRelay(data.toString(), "hosted"))
+    socket.on("close", () => {
+      if (this.hostedSocket !== socket) return
+      this.hostedSocket = null
+      if (!this.hosted || !this.http) return
+      this.hostedTimer = setTimeout(() => this.reconnectHosted(), 3000)
     })
     socket.on("error", () => socket.close())
   }
@@ -306,7 +348,7 @@ export class PhoneServer {
     return { ws, rid, key: null, deviceId: null, connId: null, fails: 0 }
   }
 
-  private onRelay(text: string): void {
+  private onRelay(text: string, via: "hosted" | "legacy"): void {
     let value: { op?: string; from?: string; body?: string; id?: string; authorization?: string; token?: string }
     try {
       value = JSON.parse(text) as typeof value
@@ -321,6 +363,7 @@ export class PhoneServer {
     let conn = this.relayConns.get(value.from)
     if (!conn) {
       conn = this.blank(null, value.from)
+      conn.via = via
       this.relayConns.set(value.from, conn)
       this.conns.add(conn)
     }
@@ -341,7 +384,7 @@ export class PhoneServer {
     }
     if (frame.rid && !conn.rid) conn.rid = frame.rid
     try {
-      if (frame.mode === "pair") this.onPair(conn, frame)
+      if (frame.mode === "pair") void this.onPair(conn, frame)
       else this.onSession(conn, frame)
     } catch (err) {
       const message = safeError(err)
@@ -350,7 +393,7 @@ export class PhoneServer {
     }
   }
 
-  private onPair(conn: Conn, frame: ReturnType<typeof parseFrame>): void {
+  private async onPair(conn: Conn, frame: ReturnType<typeof parseFrame>): Promise<void> {
     if (!this.invite || this.invite.expiresAt <= this.now()) {
       this.invite = null
       this.fail(conn, 4001)
@@ -365,7 +408,21 @@ export class PhoneServer {
     this.host.saveDevice({ id: deviceId, name, token })
     this.invite = null
     this.refreshKeys()
-    this.send(conn, key, "pair", { type: "paired", token, deviceId, pcName: this.host.pcName })
+    let relayToken = ""
+    if (this.hosted && this.host.issueRelayDevice) {
+      try {
+        relayToken = (await this.host.issueRelayDevice(deviceId)) ?? ""
+      } catch {
+        relayToken = ""
+      }
+    }
+    this.send(conn, key, "pair", {
+      type: "paired",
+      token,
+      deviceId,
+      pcName: this.host.pcName,
+      ...(relayToken && this.hosted ? { relayToken, relay: this.hosted.url, relayChannel: this.hosted.channel } : {})
+    })
     this.onDevices?.()
   }
 
@@ -733,8 +790,9 @@ export class PhoneServer {
       conn.ws.send(frame)
       return
     }
-    if (conn.rid && this.relaySocket && this.relaySocket.readyState === WebSocket.OPEN) {
-      this.relaySocket.send(JSON.stringify({ op: "send", pc: this.host.pcId, to: conn.rid, body: frame }))
+    const outbound = conn.via === "hosted" ? this.hostedSocket : conn.via === "legacy" ? this.relaySocket : this.hostedSocket ?? this.relaySocket
+    if (conn.rid && outbound && outbound.readyState === WebSocket.OPEN) {
+      outbound.send(JSON.stringify({ op: "send", pc: this.host.pcId, to: conn.rid, body: frame }))
     }
   }
 

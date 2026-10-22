@@ -74,14 +74,14 @@
 :root[data-theme="light"][data-accent="rose"] { --accent: #a33b52; --accent-ink: #fff6f8; }
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; max-width: 100%; overflow-x: clip; }
+html, body, #root { height: 100%; margin: 0; max-width: 100%; overflow: hidden; }
 body { background: var(--bg); color: var(--text); }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.shell { display: grid; grid-template-columns: 72px minmax(0, 1fr); width: 100%; max-width: 100%; min-width: 0; min-height: 100%; overflow-x: clip; }
+.shell { display: grid; grid-template-columns: 72px minmax(0, 1fr); width: 100%; max-width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; }
 .sidebar {
   background: var(--sidebar);
   border-right: 1px solid var(--line);
@@ -90,7 +90,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   padding: 18px 12px 14px;
   gap: 4px;
   width: 100%;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
   max-width: 100%;
   overflow-x: hidden;
   overflow-y: auto;
@@ -101,7 +103,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .mark { width: 32px; height: 32px; }
 .mark rect { fill: var(--mark-bg); stroke: var(--accent); }
 .mark path { fill: var(--accent); }
-.sidebar nav { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 0 auto; }
 .nav-label { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 12px 12px 4px; }
 .sidebar a {
   color: var(--muted);
@@ -134,7 +136,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   flex-direction: column;
   gap: 2px;
 }
-main { padding: 28px 32px 40px; min-width: 0; max-width: 100%; overflow-x: hidden; }
+main { padding: 28px 32px 40px; min-width: 0; max-width: 100%; height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 .page { display: flex; flex-direction: column; gap: 16px; animation: rise 180ms ease; min-width: 0; max-width: 100%; }
 .page-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .page-head > div { min-width: 0; max-width: 100%; }
@@ -271,6 +273,11 @@ button.pick.selected { color: var(--accent); }
 .update-banner { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .update-banner > div { min-width: 0; max-width: 100%; }
 .update-banner p { color: var(--muted); margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: break-word; }
+.update-scrim { position: fixed; inset: 0; background: rgba(8, 9, 12, 0.62); display: grid; place-items: center; z-index: 40; padding: 24px; }
+.update-modal { width: min(440px, 100%); background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
+.update-modal h2 { font-size: 20px; letter-spacing: -0.02em; }
+.update-notes { margin: 0; color: var(--muted); white-space: pre-wrap; max-height: 180px; overflow: auto; }
+.update-warn { margin: 0; color: var(--warn); }
 .phone-grid { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
 .qr-wrap { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .qr { width: 280px; height: 280px; background: #fff; border-radius: 12px; padding: 10px; }

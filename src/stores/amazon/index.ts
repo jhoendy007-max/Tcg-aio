@@ -86,14 +86,17 @@ async function runAmazon(ctx: StoreRunContext): Promise<StoreRunResult> {
   const asin = parseAsin(ctx.task.sku)
   if (!asin) return fail("Enter an Amazon ASIN or an amazon.com product URL.")
   if (ctx.profile.shipping.country !== "US") return fail("v1 places US ship-to-home orders only.")
-  if (ctx.account.store !== "amazon") return fail("Choose an Amazon account.")
-  if (!isSignedInCookie(ctx.account.session?.cookie)) return pause(SESSION_PAUSE)
-
   const jar = new CookieJar()
-  jar.load(ctx.account.session)
-  attachSession(ctx, (cookies) => jar.load(cookies))
-  ctx.log("info", "Using the saved Amazon session. Checkout uses the address and payment already saved on the account.")
-  note(ctx, "session", "pass", "Saved Amazon session loaded.")
+  if (!ctx.monitorOnly) {
+    if (ctx.account.store !== "amazon") return fail("Choose an Amazon account.")
+    if (!isSignedInCookie(ctx.account.session?.cookie)) return pause(SESSION_PAUSE)
+    jar.load(ctx.account.session)
+    attachSession(ctx, (cookies) => jar.load(cookies))
+    ctx.log("info", "Using the saved Amazon session. Checkout uses the address and payment already saved on the account.")
+    note(ctx, "session", "pass", "Saved Amazon session loaded.")
+  } else {
+    note(ctx, "session", "skip", "Monitors check stock without a store account.")
+  }
   ctx.phase("monitoring")
   const soldBy = ctx.module?.soldBy === "any" ? "any" : "retailer"
   ctx.log("info", soldBy === "any" ? `Watching ${asin} for any buyable offer.` : `Watching ${asin} for an offer sold and shipped by Amazon.com.`)

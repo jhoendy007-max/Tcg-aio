@@ -77,18 +77,21 @@ async function runBestBuy(ctx: StoreRunContext): Promise<StoreRunResult> {
   const sku = parseSku(ctx.task.sku)
   if (!sku) return fail("Enter a Best Buy SKU or a product URL that contains /sku/.")
   if (ctx.profile.shipping.country !== "US") return fail("v1 places US ship-to-home orders only.")
-  if (ctx.account.store !== "bestbuy") return fail("Choose a Best Buy account.")
-  if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(SESSION_PAUSE)
-
   const jar = new CookieJar()
-  jar.load(ctx.account.session)
-  attachSession(ctx, (cookies) => jar.load(cookies))
-  ctx.log("info", "Using the saved Best Buy session.")
-  note(ctx, "session", "pass", "Saved Best Buy session loaded.")
-  const probe = await probeCart(ctx, jar)
-  if (probe.kind === "paused") return { outcome: "paused", reason: probe.reason }
-  if (probe.kind === "unauthorized") return pause(EXPIRED_PAUSE)
-  if (probe.kind !== "ok") return asResult(probe)
+  if (!ctx.monitorOnly) {
+    if (ctx.account.store !== "bestbuy") return fail("Choose a Best Buy account.")
+    if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(SESSION_PAUSE)
+    jar.load(ctx.account.session)
+    attachSession(ctx, (cookies) => jar.load(cookies))
+    ctx.log("info", "Using the saved Best Buy session.")
+    note(ctx, "session", "pass", "Saved Best Buy session loaded.")
+    const probe = await probeCart(ctx, jar)
+    if (probe.kind === "paused") return { outcome: "paused", reason: probe.reason }
+    if (probe.kind === "unauthorized") return pause(EXPIRED_PAUSE)
+    if (probe.kind !== "ok") return asResult(probe)
+  } else {
+    note(ctx, "session", "skip", "Monitors check stock without a store account.")
+  }
 
   const pageUrl = monitorUrl(ctx.task.sku, sku)
   ctx.phase("monitoring")

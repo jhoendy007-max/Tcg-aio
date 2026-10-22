@@ -87,7 +87,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
   const tcin = parseTcin(ctx.task.sku)
   if (!tcin) return fail("Enter a Target TCIN or a product URL that contains /A-########.")
   if (ctx.profile.shipping.country !== "US") return fail("v1 places US ship-to-home orders only.")
-  if (ctx.account.store !== "target") return fail("Choose a Target account.")
+  if (!ctx.monitorOnly && ctx.account.store !== "target") return fail("Choose a Target account.")
 
   const key = ctx.settings.targetApiKey.trim() || DEFAULT_KEY
   const location = {
@@ -96,13 +96,17 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     state: ctx.settings.targetState.trim().toUpperCase() || "NY"
   }
   const jar = new CookieJar()
-  attachSession(ctx, (cookies) => jar.load(cookies))
-  const sessionResult = await ensureSession(ctx, jar, key)
-  if (sessionResult) {
-    note(ctx, "session", "fail", "reason" in sessionResult ? sessionResult.reason : "Session check failed.")
-    return sessionResult
+  if (!ctx.monitorOnly) {
+    attachSession(ctx, (cookies) => jar.load(cookies))
+    const sessionResult = await ensureSession(ctx, jar, key)
+    if (sessionResult) {
+      note(ctx, "session", "fail", "reason" in sessionResult ? sessionResult.reason : "Session check failed.")
+      return sessionResult
+    }
+    note(ctx, "session", "pass", "Session is ready.")
+  } else {
+    note(ctx, "session", "skip", "Monitors check stock without a store account.")
   }
-  note(ctx, "session", "pass", "Session is ready.")
 
   ctx.phase("monitoring")
   ctx.log("info", `Watching TCIN ${tcin} for ship-to-home stock (store ${location.storeId}, ZIP ${location.zip}).`)

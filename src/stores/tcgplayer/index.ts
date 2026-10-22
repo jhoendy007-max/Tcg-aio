@@ -59,7 +59,7 @@ async function runTcgplayer(ctx: StoreRunContext): Promise<StoreRunResult> {
   const id = parseProductId(ctx.task.sku)
   if (!id) return fail("Enter a TCGplayer product id or a tcgplayer.com/product/ URL.")
   if (ctx.profile.shipping.country !== "US") return fail("v1 places US ship-to-home orders only.")
-  if (ctx.account.store !== "tcgplayer") return fail("Choose a TCGplayer account.")
+  if (!ctx.monitorOnly && ctx.account.store !== "tcgplayer") return fail("Choose a TCGplayer account.")
   const page = productPageUrl(id)
   ctx.phase("monitoring")
   ctx.log("info", `Watching TCGplayer product ${id}.`)

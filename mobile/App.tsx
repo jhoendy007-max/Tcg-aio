@@ -21,6 +21,7 @@ import { colors, isActive, palette, STATUS_LABEL } from "./src/theme"
 import { ThemeContext, useTheme } from "./src/theme-context"
 import { DeskPanel, LogsPanel, PhoneSettingsForm } from "./src/Desk"
 import { PhoneUpdateCard } from "./src/PhoneUpdateCard"
+import { PhoneUpdatePrompt } from "./src/UpdatePrompt"
 import { countdown } from "../src/shared/clock"
 import { isNewer, PHONE_VERSION } from "./src/version"
 import { asList, draftFromPhoneTask, emptyPhoneDraft, phoneTaskStatus, textField, withStoreDefaults } from "../src/phone/task-draft"
@@ -411,6 +412,7 @@ export default function App() {
           ))}
         </View>
       ) : null}
+      <PhoneUpdatePrompt tasks={snap?.tasks ?? []} />
     </View>
     </ThemeContext.Provider>
   )
@@ -464,6 +466,7 @@ function TaskEditor({ draft, snap, setDraft, session, run, onSaved, onCancel }: 
       <TextInput style={styles.input} value={textField(draft.keywords)} onChangeText={(keywords) => setDraft({ ...draft, keywords })} autoCapitalize="none" placeholderTextColor={theme.muted} />
       {monitor ? (
         <>
+          <Text style={styles.p}>{taskText(lang, "monitorAnonymous")}</Text>
           <Text style={styles.label}>{taskText(lang, "monitorDelay")}</Text>
           <TextInput style={styles.input} value={draft.overrides?.monitorDelayMs == null ? "" : String(draft.overrides.monitorDelayMs)} keyboardType="number-pad" onChangeText={(value) => {
             const overrides = { ...draft.overrides }

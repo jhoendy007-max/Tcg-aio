@@ -25,6 +25,8 @@ export interface PairingPayload {
   port: number
   secret: string
   relay?: string
+  relayChannel?: string
+  relayToken?: string
 }
 
 export interface PhoneProfile {
@@ -376,7 +378,7 @@ export type ClientMessage =
   | DeskMessage
 
 export type ServerMessage =
-  | { type: "paired"; token: string; deviceId: string; pcName: string }
+  | { type: "paired"; token: string; deviceId: string; pcName: string; relayToken?: string; relay?: string; relayChannel?: string }
   | { type: "presence"; online: true; pcName: string }
   | { type: "snapshot"; conn: string; snapshot: PhoneSnapshot }
   | { type: "task"; task: PhoneTask }
@@ -484,6 +486,8 @@ export function parsePairingPayload(text: string): PairingPayload {
     if (!/^wss?:\/\/[^\s]+$/i.test(relay)) throw new Error("Pairing code has an invalid relay.")
     payload.relay = relay
   }
+  if (typeof value.relayChannel === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(value.relayChannel)) payload.relayChannel = value.relayChannel
+  if (typeof value.relayToken === "string" && /^[A-Za-z0-9_-]{20,200}$/.test(value.relayToken)) payload.relayToken = value.relayToken
   return payload
 }
 

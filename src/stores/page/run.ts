@@ -55,15 +55,16 @@ async function runPage(ctx: StoreRunContext, spec: PageSpec): Promise<StoreRunRe
   const target = parsePageTarget(spec, ctx.task.sku)
   if (!target) return fail(`Enter a ${spec.name} product URL or product id.`)
   if (ctx.profile.shipping.country !== "US") return fail("v1 places US ship-to-home orders only.")
-  if (ctx.account.store !== spec.id) return fail(`Choose a ${spec.name} account.`)
-  if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(pageSessionPause(spec.name, spec.host))
-
   const jar = new PageCookies()
-  jar.load(ctx.account.session)
+  if (!ctx.monitorOnly) {
+    if (ctx.account.store !== spec.id) return fail(`Choose a ${spec.name} account.`)
+    if (!ctx.account.session?.cookie && !ctx.account.session?.accessToken) return pause(pageSessionPause(spec.name, spec.host))
+    jar.load(ctx.account.session)
+  }
   const challenge = pageChallengePause(spec.name, ctx.settings.language)
   ctx.phase("monitoring")
   ctx.log("info", `Watching ${target.sku} on ${spec.name}.`)
-  note(ctx, "session", "pass", `Saved ${spec.name} session loaded.`)
+  note(ctx, "session", ctx.monitorOnly ? "skip" : "pass", ctx.monitorOnly ? "Monitors check stock without a store account." : `Saved ${spec.name} session loaded.`)
   let waits = 0
 
   while (!ctx.signal.aborted) {

@@ -8,6 +8,8 @@ import * as LocalAuthentication from "expo-local-authentication"
 import * as Notifications from "expo-notifications"
 import * as SecureStore from "expo-secure-store"
 
+import { AdminUpdatePrompt } from "./UpdatePrompt"
+
 const ALERTS = ["signup", "claimed", "foreign_pc", "failed_logins", "expiring", "revoked", "suspended", "server_error", "checkout"] as const
 const DEFAULT_SERVER = "https://license.jokerzzztcg.com"
 const TABS = ["pending", "active", "suspended", "gifts", "alerts"] as const
@@ -578,6 +580,7 @@ export default function App() {
           </View>
         ) : null}
       </ScrollView>
+      {phase === "desk" && token ? <AdminUpdatePrompt base={base} token={token} versionCode={versionCode} /> : null}
     </View>
   )
 }

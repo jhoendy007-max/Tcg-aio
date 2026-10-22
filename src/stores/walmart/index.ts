@@ -97,17 +97,20 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
   const itemId = parseItemId(ctx.task.sku)
   if (!itemId) return fail("Enter a Walmart item ID or a product URL that contains /ip/.")
   if (ctx.profile.shipping.country !== "US") return fail("v1 places US ship-to-home orders only.")
-  if (ctx.account.store !== "walmart") return fail("Choose a Walmart account.")
-  if (!ctx.account.session?.accessToken) return pause(SESSION_PAUSE)
-
   const jar = new CookieJar()
-  jar.load(ctx.account.session)
-  attachSession(ctx, (cookies) => jar.load(cookies))
-  ctx.log("info", "Using the saved Walmart session.")
-  note(ctx, "session", "pass", "Saved Walmart session loaded.")
-  const probe = await probeCart(ctx, jar)
-  if (probe.kind === "paused") return { outcome: "paused", reason: probe.reason }
-  if (probe.kind === "unauthorized") return pause(EXPIRED_PAUSE)
+  if (!ctx.monitorOnly) {
+    if (ctx.account.store !== "walmart") return fail("Choose a Walmart account.")
+    if (!ctx.account.session?.accessToken) return pause(SESSION_PAUSE)
+    jar.load(ctx.account.session)
+    attachSession(ctx, (cookies) => jar.load(cookies))
+    ctx.log("info", "Using the saved Walmart session.")
+    note(ctx, "session", "pass", "Saved Walmart session loaded.")
+    const probe = await probeCart(ctx, jar)
+    if (probe.kind === "paused") return { outcome: "paused", reason: probe.reason }
+    if (probe.kind === "unauthorized") return pause(EXPIRED_PAUSE)
+  } else {
+    note(ctx, "session", "skip", "Monitors check stock without a store account.")
+  }
 
   ctx.phase("monitoring")
   ctx.log("info", `Watching item ${itemId} for Walmart.com ship-to-home stock at MSRP.`)

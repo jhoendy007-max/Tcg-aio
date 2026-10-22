@@ -22,6 +22,7 @@ import { Wizard } from "./pages/Wizard"
 import { deskText } from "../../shared/desk-ui"
 import { parseRoute, routeHash, type SectionId } from "../../shared/nav"
 import { SuccessScreen, type WinCard } from "./components/Success"
+import { UpdatePrompt } from "./components/UpdatePrompt"
 import { updateStatusText } from "../../shared/update-status"
 import { APP_VERSION } from "../../shared/version"
 import { DEFAULT_SETTINGS, type AccountView, type Settings, type UpdateStatus } from "../../shared/types"
@@ -201,6 +202,7 @@ export function App() {
         {!booting && signedIn && !wizard && page === "settings" ? <SettingsTabs tab={tab || "general"} lang={lang} onSettings={setSettings} /> : null}
       </main>
       {win ? <SuccessScreen win={win} sound={settings.successSound} onSound={(on) => void setSound(on)} onClose={() => setWin(null)} /> : null}
+      <UpdatePrompt update={update} onUpdate={setUpdate} />
     </div>
   )
 }

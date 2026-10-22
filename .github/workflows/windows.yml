@@ -248,6 +248,7 @@ jobs:
         env:
           TCGAIO_LICENSE_URL: ${{ secrets.TCGAIO_LICENSE_URL }}
           TCGAIO_ADMIN_UPLOAD_TOKEN: ${{ secrets.TCGAIO_ADMIN_UPLOAD_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p release
           cp artifacts/TCGAIO-Admin-APK/TCGAIO-Admin-*.apk release/

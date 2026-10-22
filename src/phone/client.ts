@@ -26,6 +26,8 @@ export interface SavedPhoneLink {
   host: string
   port: number
   relay?: string
+  relayChannel?: string
+  relayToken?: string
 }
 
 export interface PhoneCommandResult {
@@ -155,7 +157,9 @@ export class PhoneSession {
       pcName: paired.pcName,
       host: payload.host,
       port: payload.port,
-      relay: payload.relay
+      relay: paired.relay || payload.relay,
+      relayChannel: paired.relayChannel || payload.relayChannel,
+      relayToken: paired.relayToken || payload.relayToken
     }
     this.link = link
     this.mode = "session"
@@ -179,7 +183,9 @@ export class PhoneSession {
       host: this.link.host,
       port: this.link.port,
       secret: this.link.token,
-      relay: this.link.relay
+      relay: this.link.relay,
+      relayChannel: this.link.relayChannel,
+      relayToken: this.link.relayToken
     }
     await this.openTransport(payload, options)
     this.mode = "session"
@@ -447,7 +453,13 @@ export class PhoneSession {
     if (!payload.relay) throw new Error("No relay is configured on the PC.")
     this.relay = true
     await this.openSocket(payload.relay, timeoutMs)
-    this.socket?.send(JSON.stringify({ op: "join", role: "phone", pc: payload.pcId }))
+    this.socket?.send(JSON.stringify({
+      op: "join",
+      role: "phone",
+      pc: payload.pcId,
+      ...(payload.relayChannel ? { channel: payload.relayChannel } : {}),
+      ...(payload.relayToken ? { token: payload.relayToken } : {})
+    }))
     const joined = await this.waitRaw(timeoutMs)
     const parsed = JSON.parse(joined) as { op?: string; id?: string }
     if (parsed.op !== "joined" || !parsed.id) throw new Error("The relay did not accept this phone.")
