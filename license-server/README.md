@@ -15,7 +15,7 @@ This stays a small program you run yourself. It does not need Cloudflare, Supaba
 | Name | Where | What it is |
 | --- | --- | --- |
 | `TCGAIO_LICENSE_PRIVATE_KEY` | Server only | PKCS8 Ed25519 private key, base64. From `keygen`. Never put this in the app or in GitHub. |
-| `TCGAIO_LICENSE_PUBLIC_KEY` | Desktop build secret | The matching public key. GitHub Actions secret for the Windows build. |
+| `TCGAIO_LICENSE_PUBLIC_KEY` | Desktop, phone, and admin build secret | The matching public key. GitHub Actions secret. Release builds compare it with `GET /v1/public-key`. |
 | `TCGAIO_LICENSE_URL` | Desktop build secret | `https://your-server` with no path and no token. |
 | `TCGAIO_LICENSE_DB` | Server | Path to the SQLite file, for example `/var/tcgaio/license.sqlite`. |
 | `PORT` | Server | Defaults to `8787`. |
@@ -59,7 +59,9 @@ While you are signed in at `/admin` or in the admin app, Change password asks fo
 
 Checkout alerts are off until you turn them on. Other alerts default to on: new signup, claimed, foreign PC, failed logins, expiring, revoked, suspended, and server errors.
 
-A customer can create an account with email and password and no license key. The account stays pending, and the desktop app shows a waiting screen that checks itself. The PC is bound on the first sign-in after a license is linked. Gift keys are still created on their own, then redeemed in the account. The owner can also generate a key and link it to a pending account in one step.
+A customer can create an account with email and password and no license key. The account stays pending, and the desktop app shows a waiting screen that checks itself. The first sign-in after a license is linked records the PC. That PC keeps the only seat once the app confirms the grant or sends a heartbeat. A sign-in that never confirms can be replaced from the same PC or another PC. Licenses that were already bound stay bound when this server updates. Reset clears the PC. Moving a license to a new PC keeps that PC immediately. Gift keys are still created on their own, then redeemed in the account. The owner can also generate a key and link it to a pending account in one step.
+
+`GET /v1/public-key` needs no sign-in. It returns the Ed25519 public key derived from the server private key. Release builds for the desktop app, the phone app, and the admin app compare the baked key with that response. A 404 means this process has not been updated yet: the build still checks that the secret is an Ed25519 SPKI key and continues. A different key on HTTP 200 stops the build. Pull this code and restart the process before that compare can succeed. The new device column is added on startup. Existing owner, password, licenses, and signed-in sessions stay in place. This does not sign anyone out.
 
 The admin Android app checks `GET /v1/admin/app` with the owner session and downloads `GET /v1/admin/app/download` when a newer versionCode is on the server. The APK is uploaded with `POST /v1/admin/app` and `Authorization: Bearer $TCGAIO_ADMIN_UPLOAD_TOKEN`. It is not attached to the public GitHub release.
 

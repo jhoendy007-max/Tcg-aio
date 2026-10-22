@@ -80,6 +80,7 @@ describe("pending accounts and admin updates", () => {
     const grant = readGrant(String(first.envelope), server.publicKey)
     expect(grant?.fingerprint).toBe(fingerprintA)
     expect(grant?.role).toBe("user")
+    expect(post(server, "/v1/session/confirm", { token: first.token }).status).toBe(200)
     const second = post(server, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintB })
     expect(second.status).toBe(403)
     expect(second.body).toContain("This license is already active on another PC")

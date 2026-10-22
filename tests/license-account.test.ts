@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { DatabaseSync } from "node:sqlite"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -26,6 +27,16 @@ function post(api: LicenseApi, path: string, body: unknown, token = "", ip = "12
 
 function body(result: { body: string }): Record<string, unknown> {
   return JSON.parse(result.body) as Record<string, unknown>
+}
+
+function devices(dir: string, note: string): { devices: string[]; confirmed: number } {
+  const db = new DatabaseSync(join(dir, "license.sqlite"), { readOnly: true })
+  try {
+    const row = db.prepare("SELECT devices, fingerprint_confirmed FROM licenses WHERE note = ?").get(note) as { devices: string; fingerprint_confirmed: number }
+    return { devices: JSON.parse(row.devices) as string[], confirmed: row.fingerprint_confirmed }
+  } finally {
+    db.close()
+  }
 }
 
 describe("hardware-bound accounts", () => {
@@ -60,6 +71,7 @@ describe("hardware-bound accounts", () => {
     expect(accessAllowed(grant!, fingerprintA, grant!.serverTime + 1000)).toBe(true)
     const again = post(server, "/v1/account/claim", { email: "bea@example.com", password: "password1", key: created.key, fingerprint: fingerprintB })
     expect(again.status).toBe(400)
+    expect(post(server, "/v1/session/confirm", { token: claimed.token }).status).toBe(200)
     const otherPc = post(server, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintB })
     expect(otherPc.status).toBe(403)
     expect(body(otherPc).error).toBe("This license is already active on another PC")
@@ -179,5 +191,78 @@ describe("hardware-bound accounts", () => {
     const stored = JSON.parse(readFileSync(file, "utf8")) as { accountGateMigration?: string; tasks: unknown[] }
     expect(stored.accountGateMigration).toBe("accounts-1")
     expect(stored.tasks).toEqual([])
+  })
+
+  it("publishes the Ed25519 public key and does not keep a PC until the client confirms", () => {
+    const { api: server, dir } = api()
+    open.push(server)
+    const published = body(server.handle("GET", "/v1/public-key", {}, ""))
+    expect(published.ok).toBe(true)
+    expect(published.publicKey).toBe(server.publicKey)
+    const admin = body(post(server, "/v1/admin/login", { email: OWNER_EMAIL, password: "owner-password" }))
+    const created = body(post(server, "/v1/admin/licenses", { note: "Shop" }, String(admin.token)))
+    post(server, `/v1/admin/licenses/${created.id}/access`, {}, String(admin.token))
+    const claimed = body(post(server, "/v1/account/claim", { email: "ada@example.com", password: "password1", key: created.key, fingerprint: fingerprintA }))
+    expect(devices(dir, "Shop").confirmed).toBe(0)
+    const replaced = body(post(server, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintB }))
+    expect(readGrant(String(replaced.envelope), server.publicKey)?.fingerprint).toBe(fingerprintB)
+    expect(devices(dir, "Shop").devices).toEqual([fingerprintB])
+    expect(post(server, "/v1/session/confirm", { token: claimed.token }).status).toBe(401)
+    expect(post(server, "/v1/session/confirm", { token: replaced.token }).status).toBe(200)
+    expect(devices(dir, "Shop").confirmed).toBe(1)
+    const back = post(server, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintA })
+    expect(back.status).toBe(403)
+    expect(body(back).error).toBe("This license is already active on another PC")
+    const again = body(post(server, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintB }))
+    expect(devices(dir, "Shop").devices).toEqual([fingerprintB])
+    expect(readGrant(String(again.envelope), server.publicKey)?.fingerprint).toBe(fingerprintB)
+    const beat = post(server, "/v1/session/heartbeat", { token: again.token, fingerprint: fingerprintB })
+    expect(beat.status).toBe(200)
+    expect(post(server, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintA }).status).toBe(403)
+  })
+
+  it("keeps an already bound PC locked when the confirm column is added", () => {
+    const { api: server, dir } = api()
+    const admin = body(post(server, "/v1/admin/login", { email: OWNER_EMAIL, password: "owner-password" }))
+    const created = body(post(server, "/v1/admin/licenses", { note: "Shop" }, String(admin.token)))
+    post(server, `/v1/admin/licenses/${created.id}/access`, {}, String(admin.token))
+    post(server, "/v1/account/claim", { email: "ada@example.com", password: "password1", key: created.key, fingerprint: fingerprintA })
+    server.close()
+    const raw = new DatabaseSync(join(dir, "license.sqlite"))
+    raw.exec("ALTER TABLE licenses DROP COLUMN fingerprint_confirmed")
+    raw.close()
+    const reopened = openLicenseApi({
+      dbPath: join(dir, "license.sqlite"),
+      ownerSetupToken: "setup-token-value",
+      ownerPassword: "owner-password"
+    })
+    open.push(reopened)
+    const other = post(reopened, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintB })
+    expect(other.status).toBe(403)
+    expect(body(other).error).toBe("This license is already active on another PC")
+    expect(post(reopened, "/v1/account/login", { email: "ada@example.com", password: "password1", fingerprint: fingerprintA }).status).toBe(200)
+  })
+
+  it("does not use an owner seat until that PC confirms", () => {
+    const { api: server, dir } = api()
+    open.push(server)
+    const pcs = Array.from({ length: 9 }, (_, index) => fingerprintHash([`owner-pc-${index}`]))
+    for (let index = 0; index < pcs.length; index += 1) {
+      const signed = post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[index] }, "", `198.51.100.${index + 1}`)
+      expect(signed.status).toBe(200)
+    }
+    expect(devices(dir, "Owner").devices).toEqual([])
+    for (let index = 0; index < 8; index += 1) {
+      const signed = body(post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[index] }, "", `203.0.113.${index + 1}`))
+      expect(post(server, "/v1/session/confirm", { token: signed.token }).status).toBe(200)
+    }
+    expect(devices(dir, "Owner").devices).toHaveLength(8)
+    const ninth = body(post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[8] }, "", "203.0.113.30"))
+    const rejected = post(server, "/v1/session/confirm", { token: ninth.token })
+    expect(rejected.status).toBe(403)
+    expect(body(rejected).error).toMatch(/allowed PCs/)
+    expect(devices(dir, "Owner").devices).toHaveLength(8)
+    expect(post(server, "/v1/account/login", { email: OWNER_EMAIL, password: "owner-password", fingerprint: pcs[0] }, "", "203.0.113.40").status).toBe(200)
+    expect(devices(dir, "Owner").devices).toHaveLength(8)
   })
 })

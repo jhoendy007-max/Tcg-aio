@@ -32,7 +32,28 @@ export async function syncAccount(db: Database, fingerprint: string, path: strin
   }
   const envelope = typeof parsed.envelope === "string" ? parsed.envelope : ""
   if (!token || !readGrant(envelope, licensePublicKey())) throw new AppError("The license server response could not be verified.")
-  return db.saveAccountSession({ token, envelope, fingerprint })
+  const view = db.saveAccountSession({ token, envelope, fingerprint })
+  if (path === "/v1/account/login" || path === "/v1/account/claim" || path === "/v1/account/redeem") await confirmDevice(db, base, token)
+  return view
+}
+
+async function confirmDevice(db: Database, base: string, token: string): Promise<void> {
+  let response: Response
+  try {
+    response = await fetch(`${base}/v1/session/confirm`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token })
+    })
+  } catch {
+    return
+  }
+  if (response.status === 404) return
+  if (response.ok) return
+  db.clearAccountSession()
+  const parsed = await response.json().catch(() => ({})) as Record<string, unknown>
+  const message = typeof parsed.error === "string" ? parsed.error : "This PC could not be confirmed."
+  throw new AppError(message)
 }
 
 export async function heartbeatAccount(db: Database, fingerprint: string): Promise<AccountView> {

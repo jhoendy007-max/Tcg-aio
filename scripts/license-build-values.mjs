@@ -40,10 +40,12 @@ export function normalizeLicenseKey(raw) {
   if (text.length % 4 !== 0) text += "=".repeat(4 - (text.length % 4))
   const der = Buffer.from(text, "base64")
   if (der.length !== 44) throw keyProblem(raw, `decoded ${der.length} bytes, expected 44`)
+  let parsed
   try {
-    createPublicKey({ key: der, format: "der", type: "spki" })
+    parsed = createPublicKey({ key: der, format: "der", type: "spki" })
   } catch {
     throw keyProblem(raw, "SPKI parse failed")
   }
+  if (parsed.asymmetricKeyType !== "ed25519") throw keyProblem(raw, `type ${parsed.asymmetricKeyType ?? "unknown"}`)
   return der.toString("base64")
 }

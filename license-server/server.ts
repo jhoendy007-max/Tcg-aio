@@ -76,7 +76,8 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       user_id TEXT,
       last_transfer_at INTEGER,
       device_limit INTEGER NOT NULL,
-      last_expiry_alert INTEGER
+      last_expiry_alert INTEGER,
+      fingerprint_confirmed INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
@@ -106,6 +107,7 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       const route = url.pathname.replace(/\/$/, "") || "/"
       if (method === "GET" && route === "/admin") return { status: 200, body: "" }
       if (method === "GET" && route === "/health") return json(200, { ok: true })
+      if (method === "GET" && route === "/v1/public-key") return json(200, { ok: true, publicKey: identity.publicKey })
       const body = raw ? parseObject(raw) : {}
       if (requestHasSecret(body)) return json(400, { ok: false, error: "License data cannot include card, cookie, or session fields." })
       if (method === "POST" && route === "/v1/owner/setup") return setupOwner(db, body, now)
@@ -118,6 +120,7 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       if (method === "POST" && route === "/v1/account/redeem") return redeem(db, identity.privateKey, body, now, options.push)
       if (method === "POST" && route === "/v1/account/login") return login(db, identity.privateKey, body, ip, now, options.push)
       if (method === "POST" && route === "/v1/session/heartbeat") return heartbeat(db, identity.privateKey, body, now, options.push)
+      if (method === "POST" && route === "/v1/session/confirm") return confirmSession(db, body, now, options.push)
       if (method === "POST" && route === "/v1/session/transfer") return transfer(db, identity.privateKey, body, now)
       if (method === "POST" && route === "/v1/session/checkout") return checkout(db, body, now, options.push)
       const admin = adminUser(db, headers, now())
@@ -304,6 +307,7 @@ function migrateUsers(db: DatabaseSync): void {
   ensureColumn(db, "users", "account_status", "account_status TEXT NOT NULL DEFAULT 'active'")
   ensureColumn(db, "users", "payment_method", "payment_method TEXT NOT NULL DEFAULT 'Not configured'")
   ensureColumn(db, "users", "paid", "paid INTEGER NOT NULL DEFAULT 0")
+  ensureColumn(db, "licenses", "fingerprint_confirmed", "fingerprint_confirmed INTEGER NOT NULL DEFAULT 1")
   db.prepare("UPDATE users SET account_status = 'pending' WHERE license_id IS NULL AND role != 'owner' AND account_status = 'active'").run()
 }
 
@@ -404,7 +408,7 @@ function claim(db: DatabaseSync, privateKey: string, body: Record<string, unknow
   if (license.expires_at !== null && license.expires_at <= now()) return json(400, { ok: false, error: "This license key has expired." })
   const userId = randomId()
   db.prepare("INSERT INTO users (id, email, password_hash, role, verified, license_id, setup_hash, created_at, account_status, payment_method, paid) VALUES (?, ?, ?, 'user', 1, ?, NULL, ?, 'active', 'Not configured', 0)").run(userId, email, hashPassword(password), license.id, now())
-  db.prepare("UPDATE licenses SET user_id = ?, fingerprint = ?, devices = ?, last_seen = ?, status = 'active' WHERE id = ?").run(userId, fingerprint, JSON.stringify([fingerprint]), now(), license.id)
+  db.prepare("UPDATE licenses SET user_id = ?, fingerprint = ?, devices = ?, last_seen = ?, status = 'active', fingerprint_confirmed = 0 WHERE id = ?").run(userId, fingerprint, JSON.stringify([fingerprint]), now(), license.id)
   onClaim()
   return issueSession(db, privateKey, userId, fingerprint, now)
 }
@@ -455,7 +459,7 @@ function heartbeat(db: DatabaseSync, privateKey: string, body: Record<string, un
     return issuePending(db, user.id, now, text(body.token))
   }
   sweepExpiry(db, now, push)
-  return bindAndIssue(db, privateKey, user, fingerprint, now, push, Boolean(license?.fingerprint))
+  return bindAndIssue(db, privateKey, user, fingerprint, now, push, "heartbeat")
 }
 
 function redeem(db: DatabaseSync, privateKey: string, body: Record<string, unknown>, now: () => number, push?: LicenseApiOptions["push"]): { status: number; body: string } {
@@ -487,7 +491,7 @@ function transfer(db: DatabaseSync, privateKey: string, body: Record<string, unk
   const session = sessionByToken(db, text(body.token), now())
   if (!session || session.kind !== "user") return json(401, { ok: false, error: "Sign in again." })
   const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id) as unknown as UserRow
-  if (user.role === "owner") return bindAndIssue(db, privateKey, user, text(body.fingerprint), now)
+  if (user.role === "owner") return bindAndIssue(db, privateKey, user, text(body.fingerprint), now, undefined, "heartbeat")
   const license = licenseFor(db, user)
   if (!license) return json(400, { ok: false, error: "This account has no license." })
   if (license.last_transfer_at && now() - license.last_transfer_at < TRANSFER_MS) {
@@ -495,7 +499,7 @@ function transfer(db: DatabaseSync, privateKey: string, body: Record<string, unk
   }
   const fingerprint = text(body.fingerprint)
   if (!/^[0-9a-f]{64}$/.test(fingerprint)) return json(400, { ok: false, error: "This PC could not be recognized." })
-  db.prepare("UPDATE licenses SET fingerprint = ?, devices = ?, last_transfer_at = ?, last_seen = ? WHERE id = ?").run(fingerprint, JSON.stringify([fingerprint]), now(), now(), license.id)
+  db.prepare("UPDATE licenses SET fingerprint = ?, devices = ?, last_transfer_at = ?, last_seen = ?, fingerprint_confirmed = 1 WHERE id = ?").run(fingerprint, JSON.stringify([fingerprint]), now(), now(), license.id)
   db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user'").run(user.id)
   return issueSession(db, privateKey, user.id, fingerprint, now)
 }
@@ -550,7 +554,7 @@ function licenseAction(db: DatabaseSync, id: string, action: string, push?: Lice
     if (license.status === "revoked") return json(400, { ok: false, error: "A revoked license stays revoked." })
     db.prepare("UPDATE licenses SET status = 'active' WHERE id = ?").run(id)
   } else if (action === "reset") {
-    db.prepare("UPDATE licenses SET fingerprint = NULL, devices = '[]' WHERE id = ?").run(id)
+    db.prepare("UPDATE licenses SET fingerprint = NULL, devices = '[]', fingerprint_confirmed = 0 WHERE id = ?").run(id)
     if (license.user_id) db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user'").run(license.user_id)
   } else if (action === "suspend") {
     db.prepare("UPDATE licenses SET status = 'suspended' WHERE id = ?").run(id)
@@ -690,31 +694,69 @@ function overview(db: DatabaseSync, query: string, now: () => number): { license
   return { licenses, users: listed.users, pendingCount: listed.pendingCount, activeCount: listed.activeCount, suspendedCount: listed.suspendedCount, giftCount: listed.giftCount }
 }
 
-function bindAndIssue(db: DatabaseSync, privateKey: string, user: UserRow, fingerprint: string, now: () => number, push?: LicenseApiOptions["push"], sameDevice = false): { status: number; body: string } {
-  if (!/^[0-9a-f]{64}$/.test(fingerprint)) return json(400, { ok: false, error: "This PC could not be recognized." })
+function confirmSession(db: DatabaseSync, body: Record<string, unknown>, now: () => number, push?: LicenseApiOptions["push"]): { status: number; body: string } {
+  const session = sessionByToken(db, text(body.token), now())
+  if (!session || session.kind !== "user") return json(401, { ok: false, error: "Sign in again." })
+  if (!/^[0-9a-f]{64}$/.test(session.fingerprint)) return json(400, { ok: false, error: "This PC could not be recognized." })
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(session.user_id) as UserRow | undefined
+  if (!user) return json(401, { ok: false, error: "Sign in again." })
   const license = licenseFor(db, user)
+  const blocked = licenseBlock(license, now())
+  if (blocked) return blocked
+  const rejected = lockDevice(db, user, license as LicenseRow, session.fingerprint, now(), push)
+  if (rejected) return rejected
+  return json(200, { ok: true })
+}
+
+function licenseBlock(license: LicenseRow | undefined, at: number): { status: number; body: string } | null {
   if (!license) return json(400, { ok: false, error: "This account has no license." })
   if (license.status === "suspended") return json(403, { ok: false, error: "This license is suspended." })
   if (license.status === "revoked") return json(403, { ok: false, error: "This license was revoked." })
   if (license.status !== "active") return json(403, { ok: false, error: "Give access to this license before it can be used." })
-  if (license.expires_at !== null && license.expires_at <= now()) return json(403, { ok: false, error: "This license key has expired." })
-  const devices = parseDevices(license.devices)
+  if (license.expires_at !== null && license.expires_at <= at) return json(403, { ok: false, error: "This license key has expired." })
+  return null
+}
+
+function lockDevice(db: DatabaseSync, user: UserRow, license: LicenseRow, fingerprint: string, at: number, push?: LicenseApiOptions["push"]): { status: number; body: string } | null {
   if (user.role === "owner") {
+    const devices = parseDevices(license.devices)
     if (!devices.includes(fingerprint)) {
       if (devices.length >= OWNER_DEVICE_LIMIT) return json(403, { ok: false, error: "This owner account is already active on its allowed PCs." })
       devices.push(fingerprint)
     }
-  } else if (!sameDevice) {
-    if (license.fingerprint && license.fingerprint !== fingerprint) {
+    db.prepare("UPDATE licenses SET fingerprint = ?, devices = ?, fingerprint_confirmed = 1, last_seen = ? WHERE id = ?").run(fingerprint, JSON.stringify(devices), at, license.id)
+    return null
+  }
+  if (license.fingerprint && license.fingerprint !== fingerprint) {
+    notify(db, push, "foreign_pc", "Different PC", "Someone tried to use a license from a different PC.")
+    return json(403, { ok: false, error: "This license is already active on another PC" })
+  }
+  db.prepare("UPDATE licenses SET fingerprint = ?, devices = ?, fingerprint_confirmed = 1, last_seen = ? WHERE id = ?").run(fingerprint, JSON.stringify([fingerprint]), at, license.id)
+  return null
+}
+
+function bindAndIssue(db: DatabaseSync, privateKey: string, user: UserRow, fingerprint: string, now: () => number, push?: LicenseApiOptions["push"], mode: "login" | "heartbeat" = "login"): { status: number; body: string } {
+  if (!/^[0-9a-f]{64}$/.test(fingerprint)) return json(400, { ok: false, error: "This PC could not be recognized." })
+  const license = licenseFor(db, user)
+  const blocked = licenseBlock(license, now())
+  if (blocked) return blocked
+  const row = license as LicenseRow
+  if (mode === "heartbeat") {
+    const rejected = lockDevice(db, user, row, fingerprint, now(), push)
+    if (rejected) return rejected
+  } else if (user.role === "owner") {
+    const devices = parseDevices(row.devices)
+    if (devices.includes(fingerprint)) db.prepare("UPDATE licenses SET fingerprint = ?, last_seen = ? WHERE id = ?").run(fingerprint, now(), row.id)
+    else db.prepare("UPDATE licenses SET last_seen = ? WHERE id = ?").run(now(), row.id)
+  } else {
+    const confirmed = Number(row.fingerprint_confirmed ?? 1) === 1
+    if (row.fingerprint && row.fingerprint !== fingerprint && confirmed) {
       notify(db, push, "foreign_pc", "Different PC", "Someone tried to use a license from a different PC.")
       return json(403, { ok: false, error: "This license is already active on another PC" })
     }
-    devices.splice(0, devices.length, fingerprint)
-  } else if (license.fingerprint !== fingerprint) {
-    notify(db, push, "foreign_pc", "Different PC", "A heartbeat arrived from a different PC.")
-    return json(403, { ok: false, error: "This license is already active on another PC" })
+    const keep = row.fingerprint === fingerprint && confirmed ? 1 : 0
+    db.prepare("UPDATE licenses SET fingerprint = ?, devices = ?, fingerprint_confirmed = ?, last_seen = ? WHERE id = ?").run(fingerprint, JSON.stringify([fingerprint]), keep, now(), row.id)
   }
-  db.prepare("UPDATE licenses SET fingerprint = ?, devices = ?, last_seen = ? WHERE id = ?").run(fingerprint, JSON.stringify(devices), now(), license.id)
   db.prepare("DELETE FROM sessions WHERE user_id = ? AND kind = 'user' AND fingerprint != ?").run(user.id, fingerprint)
   return issueSession(db, privateKey, user.id, fingerprint, now)
 }
@@ -967,4 +1009,5 @@ interface LicenseRow {
   user_id: string | null
   last_transfer_at: number | null
   device_limit: number
+  fingerprint_confirmed: number
 }
