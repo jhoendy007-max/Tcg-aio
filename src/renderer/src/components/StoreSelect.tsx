@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { Popover } from "./Popover"
 import { StoreLogo } from "./StoreLogo"
 
 export interface StoreChoice {
@@ -12,17 +13,13 @@ export function StoreSelect({ value, stores, disabled, onChange, label = "Store"
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const root = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+  const close = useCallback(() => setOpen(false), [])
   const list = useRef<HTMLUListElement>(null)
   const id = useId()
   const current = stores.find((store) => store.id === value)
   const selectedIndex = Math.max(0, stores.findIndex((store) => store.id === value))
 
-  useEffect(() => {
-    if (!open) return
-    const close = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
-    document.addEventListener("mousedown", close)
-    return () => document.removeEventListener("mousedown", close)
-  }, [open])
 
   useEffect(() => {
     if (open) list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" })
@@ -64,6 +61,7 @@ export function StoreSelect({ value, stores, disabled, onChange, label = "Store"
     <div className={open ? "store-select open" : "store-select"} ref={root}>
       <button
         type="button"
+        ref={button}
         className="store-select-button"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -77,7 +75,7 @@ export function StoreSelect({ value, stores, disabled, onChange, label = "Store"
         <StoreLogo store={value} size={26} withName />
         <span className="store-select-caret" aria-hidden="true">▾</span>
       </button>
-      {open ? (
+      <Popover anchor={button} open={open} onClose={close} matchWidth className="store-select-pop">
         <ul className="store-select-list" role="listbox" id={`${id}-list`} ref={list} aria-label={label}>
           {stores.map((store, index) => (
             <li
@@ -95,7 +93,7 @@ export function StoreSelect({ value, stores, disabled, onChange, label = "Store"
             </li>
           ))}
         </ul>
-      ) : null}
+      </Popover>
     </div>
   )
 }
