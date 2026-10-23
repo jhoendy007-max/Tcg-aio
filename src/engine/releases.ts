@@ -59,7 +59,7 @@ export async function fetchLatestRelease(http: HttpClient, token: string): Promi
   const trimmed = token.trim()
   const headers: Record<string, string> = {
     accept: "application/vnd.github+json",
-    "user-agent": "TCGAIO"
+    "user-agent": "Zzz AIO"
   }
   if (trimmed) headers.authorization = `Bearer ${trimmed}`
   const response = await http.request({

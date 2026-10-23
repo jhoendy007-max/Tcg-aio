@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
+import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
 import Constants from "expo-constants"
 import { StatusBar } from "expo-status-bar"
 import * as LocalAuthentication from "expo-local-authentication"
@@ -70,6 +70,20 @@ function emptyCopy(tab: DeskTab, query: string): string {
   return "No gift keys"
 }
 
+const PLAN_CHOICES: Array<[string, string]> = [["standard", "Standard (no ACO)"], ["aco", "ACO"]]
+
+function PlanPicker({ value, onChange }: { value: string; onChange: (plan: string) => void }) {
+  return (
+    <View style={styles.row}>
+      {PLAN_CHOICES.map(([id, label]) => (
+        <Pressable key={id} style={[styles.pill, value === id && styles.pillOn]} onPress={() => onChange(id)} accessibilityRole="radio" accessibilityState={{ selected: value === id }}>
+          <Text style={[styles.pillText, value === id && styles.pillTextOn]}>{label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  )
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("boot")
   const [tab, setTab] = useState<DeskTab>("pending")
@@ -79,6 +93,7 @@ export default function App() {
   const [token, setToken] = useState("")
   const [note, setNote] = useState("")
   const [plan, setPlan] = useState("standard")
+  const [linkPlan, setLinkPlan] = useState("aco")
   const [days, setDays] = useState("365")
   const [createdKey, setCreatedKey] = useState("")
   const [createdId, setCreatedId] = useState("")
@@ -225,7 +240,7 @@ export default function App() {
   }
 
   async function unlock() {
-    const result = await LocalAuthentication.authenticateAsync({ promptMessage: "Unlock TCGAIO Admin" })
+    const result = await LocalAuthentication.authenticateAsync({ promptMessage: "Unlock Zzz AP" })
     if (!result.success) {
       setError("Unlock was cancelled.")
       return
@@ -343,6 +358,41 @@ export default function App() {
     }
   }
 
+  async function setLicensePlan(id: string, next: string) {
+    setError("")
+    try {
+      await call(base, `/v1/admin/licenses/${id}/plan`, token, "POST", { plan: next })
+      await refresh(base, token, query, tab, false)
+    } catch (err) {
+      report(err)
+    }
+  }
+
+  function deleteKey(id: string, label: string) {
+    Alert.alert(
+      "Delete this key?",
+      `Delete the key for ${label}? They lose access right away. Their account stays, back in Pending. This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete key",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setError("")
+              try {
+                await call(base, `/v1/admin/licenses/${id}`, token, "DELETE")
+                await refresh(base, token, query, tab, false)
+              } catch (err) {
+                report(err)
+              }
+            })()
+          }
+        }
+      ]
+    )
+  }
+
   async function act(id: string, action: string) {
     setError("")
     try {
@@ -374,11 +424,12 @@ export default function App() {
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        refreshControl={phase === "desk" ? <RefreshControl refreshing={refreshing} onRefresh={() => void pull()} tintColor="#e0b15a" colors={["#e0b15a"]} progressBackgroundColor="#171b22" /> : undefined}
+        refreshControl={phase === "desk" ? <RefreshControl refreshing={refreshing} onRefresh={() => void pull()} tintColor="#8b5cf6" colors={["#8b5cf6"]} progressBackgroundColor="rgba(255,255,255,0.06)" /> : undefined}
       >
         <View style={styles.header}>
+          <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginRight: 10 }} accessibilityLabel="Zzz logo" />
           <View style={styles.headerCopy}>
-            <Text style={styles.mark}>TCGAIO</Text>
+            <Text style={styles.mark}>Zzz AP</Text>
             <Text style={styles.title}>Admin</Text>
             {appVersion ? <Text style={styles.version}>v{appVersion}</Text> : null}
           </View>
@@ -475,7 +526,8 @@ export default function App() {
                       <View style={[styles.box, row.paid && styles.boxOn]}>{row.paid ? <Text style={styles.boxMark}>✓</Text> : null}</View>
                       <Text style={styles.checkLabel}>Paid</Text>
                     </Pressable>
-                    {!row.licenseId ? <Pressable style={styles.primary} onPress={() => void userAct(row.id, "license")}><Text style={styles.primaryText}>Generate and link license</Text></Pressable> : <Text style={styles.hint}>{row.plan || "standard"} license linked</Text>}
+                    {!row.licenseId ? <PlanPicker value={linkPlan} onChange={setLinkPlan} /> : <PlanPicker value={row.plan || "standard"} onChange={(next) => void setLicensePlan(row.licenseId, next)} />}
+                    {!row.licenseId ? <Pressable style={styles.primary} onPress={() => void userAct(row.id, "license", { plan: linkPlan })}><Text style={styles.primaryText}>Generate and link license</Text></Pressable> : <Pressable style={styles.danger} onPress={() => deleteKey(row.licenseId, row.email)}><Text style={styles.dangerText}>Delete key</Text></Pressable>}
                     <View style={styles.rowActions}>
                       {row.licenseId ? <Pressable style={styles.ghost} onPress={() => void userAct(row.id, "reset")}><Text style={styles.ghostText}>Reset PC</Text></Pressable> : null}
                       <Pressable style={styles.ghost} onPress={() => void userAct(row.id, row.status === "suspended" ? "unsuspend" : "suspend")}><Text style={styles.ghostText}>{row.status === "suspended" ? "Unsuspend" : "Suspend"}</Text></Pressable>
@@ -491,7 +543,7 @@ export default function App() {
                   <Text style={styles.label}>Note</Text>
                   <TextInput style={styles.input} value={note} onChangeText={setNote} placeholder="Gift" placeholderTextColor="#6d7585" />
                   <Text style={styles.label}>Plan</Text>
-                  <TextInput style={styles.input} value={plan} onChangeText={setPlan} />
+                  <PlanPicker value={plan} onChange={setPlan} />
                   <Text style={styles.label}>Expires in days</Text>
                   <TextInput style={styles.input} keyboardType="number-pad" value={days} onChangeText={setDays} />
                   <Pressable style={styles.primary} onPress={() => void createLicense()} disabled={busy}><Text style={styles.primaryText}>{busy ? "Creating…" : "Create gift key"}</Text></Pressable>
@@ -505,12 +557,14 @@ export default function App() {
                         <Text style={styles.statusText}>{titleCase(row.status)}</Text>
                       </View>
                     </View>
-                    <Text style={styles.hint}>{row.plan} · PC {row.fingerprint || "not bound"}</Text>
+                    <Text style={styles.hint}>PC {row.fingerprint || "not bound"}</Text>
+                    <PlanPicker value={row.plan || "standard"} onChange={(next) => void setLicensePlan(row.id, next)} />
                     <View style={styles.rowActions}>
                       {row.status === "draft" || row.status === "suspended" ? <Pressable style={styles.ghost} onPress={() => void act(row.id, "access")}><Text style={styles.ghostText}>Give access</Text></Pressable> : null}
                       <Pressable style={styles.ghost} onPress={() => void act(row.id, "reset")}><Text style={styles.ghostText}>Reset PC</Text></Pressable>
                       <Pressable style={styles.ghost} onPress={() => void act(row.id, "suspend")}><Text style={styles.ghostText}>Suspend</Text></Pressable>
                       <Pressable style={styles.ghost} onPress={() => void act(row.id, "revoke")}><Text style={styles.ghostText}>Revoke</Text></Pressable>
+                      <Pressable style={styles.danger} onPress={() => deleteKey(row.id, row.note || "this gift key")}><Text style={styles.dangerText}>Delete key</Text></Pressable>
                     </View>
                   </View>
                 ))}
@@ -536,11 +590,11 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#0e1116" },
+  page: { flex: 1, backgroundColor: "#070a1f" },
   content: { padding: 16, paddingTop: 54, paddingBottom: 32, gap: 12 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   headerCopy: { flexDirection: "row", alignItems: "baseline", gap: 8, flexShrink: 1 },
-  mark: { color: "#e0b15a", fontSize: 13, fontWeight: "800", letterSpacing: 1.2 },
+  mark: { color: "#8b5cf6", fontSize: 13, fontWeight: "800", letterSpacing: 1.2 },
   title: { color: "#f2f5f8", fontSize: 28, fontWeight: "700" },
   version: { color: "#6d7585", fontSize: 12 },
   signOut: { borderWidth: 1, borderColor: "#3c4658", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
@@ -548,15 +602,15 @@ const styles = StyleSheet.create({
   desk: { gap: 10 },
   toolbar: { flexDirection: "row", justifyContent: "flex-start", gap: 8, flexWrap: "wrap" },
   pills: { gap: 8, paddingVertical: 2 },
-  pill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#171b22", borderColor: "#2a3140", borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  pillOn: { backgroundColor: "#e0b15a", borderColor: "#e0b15a" },
+  pill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(167,139,250,0.22)", borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  pillOn: { backgroundColor: "#8b5cf6", borderColor: "#8b5cf6" },
   pillText: { color: "#d5dbe3", fontSize: 13, fontWeight: "700" },
-  pillTextOn: { color: "#1c1508" },
-  count: { minWidth: 18, height: 18, borderRadius: 9, backgroundColor: "#2a3140", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
-  countOn: { backgroundColor: "#1c1508" },
-  countText: { color: "#e0b15a", fontSize: 11, fontWeight: "800" },
-  countTextOn: { color: "#e0b15a" },
-  card: { backgroundColor: "#171b22", borderRadius: 16, borderWidth: 1, borderColor: "#2a3140", padding: 14, gap: 8 },
+  pillTextOn: { color: "#ffffff" },
+  count: { minWidth: 18, height: 18, borderRadius: 9, backgroundColor: "rgba(167,139,250,0.22)", alignItems: "center", justifyContent: "center", paddingHorizontal: 5 },
+  countOn: { backgroundColor: "#ffffff" },
+  countText: { color: "#8b5cf6", fontSize: 11, fontWeight: "800" },
+  countTextOn: { color: "#8b5cf6" },
+  card: { backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 16, borderWidth: 1, borderColor: "rgba(167,139,250,0.22)", padding: 14, gap: 8 },
   keyCard: { backgroundColor: "#221c12", borderRadius: 16, borderWidth: 1, borderColor: "#6d5424", padding: 14, gap: 8 },
   cardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   cardTitle: { color: "#f2f5f8", fontSize: 16, fontWeight: "700" },
@@ -565,12 +619,15 @@ const styles = StyleSheet.create({
   label: { color: "#93a0b5", fontSize: 12, fontWeight: "600" },
   hint: { color: "#93a0b5", fontSize: 13, lineHeight: 18 },
   error: { color: "#ffd0d0", backgroundColor: "#3a1d1d", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, overflow: "hidden" },
-  input: { backgroundColor: "#10141b", color: "#f2f5f8", borderRadius: 12, borderWidth: 1, borderColor: "#2a3140", paddingHorizontal: 12, paddingVertical: 10 },
-  primary: { backgroundColor: "#e0b15a", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, alignItems: "center" },
-  primaryText: { color: "#1c1508", fontWeight: "800", fontSize: 15 },
+  input: { backgroundColor: "#10141b", color: "#f2f5f8", borderRadius: 12, borderWidth: 1, borderColor: "rgba(167,139,250,0.22)", paddingHorizontal: 12, paddingVertical: 10 },
+  primary: { backgroundColor: "#8b5cf6", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, alignItems: "center" },
+  primaryText: { color: "#ffffff", fontWeight: "800", fontSize: 15 },
   ghost: { borderWidth: 1, borderColor: "#3c4658", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  ghostText: { color: "#e0b15a", fontSize: 13, fontWeight: "700" },
-  link: { color: "#e0b15a", fontWeight: "700", paddingVertical: 4 },
+  ghostText: { color: "#8b5cf6", fontSize: 13, fontWeight: "700" },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginVertical: 6 },
+  danger: { backgroundColor: "#b4232c", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  dangerText: { color: "#ffffff", fontSize: 13, fontWeight: "700" },
+  link: { color: "#8b5cf6", fontWeight: "700", paddingVertical: 4 },
   key: { color: "#f2f5f8", fontSize: 15 },
   rowActions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   status: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
@@ -581,15 +638,15 @@ const styles = StyleSheet.create({
   statusText: { color: "#f2f5f8", fontSize: 11, fontWeight: "800" },
   check: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 },
   box: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: "#6d7585", alignItems: "center", justifyContent: "center" },
-  boxOn: { backgroundColor: "#e0b15a", borderColor: "#e0b15a" },
-  boxMark: { color: "#1c1508", fontSize: 14, fontWeight: "800" },
+  boxOn: { backgroundColor: "#8b5cf6", borderColor: "#8b5cf6" },
+  boxMark: { color: "#ffffff", fontSize: 14, fontWeight: "800" },
   checkLabel: { color: "#f2f5f8", fontSize: 14, fontWeight: "700" },
-  empty: { borderWidth: 1, borderColor: "#2a3140", borderStyle: "dashed", borderRadius: 16, paddingVertical: 28, paddingHorizontal: 16, alignItems: "center" },
+  empty: { borderWidth: 1, borderColor: "rgba(167,139,250,0.22)", borderStyle: "dashed", borderRadius: 16, paddingVertical: 28, paddingHorizontal: 16, alignItems: "center" },
   emptyTitle: { color: "#93a0b5", fontSize: 15, fontWeight: "700" },
-  alertRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "#2a3140" },
+  alertRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "rgba(167,139,250,0.22)" },
   alertName: { color: "#f2f5f8", fontSize: 14 },
   switchPill: { borderRadius: 999, backgroundColor: "#10141b", paddingHorizontal: 10, paddingVertical: 4 },
-  switchOn: { backgroundColor: "#e0b15a" },
+  switchOn: { backgroundColor: "#8b5cf6" },
   switchText: { color: "#93a0b5", fontSize: 12, fontWeight: "800" },
-  switchTextOn: { color: "#1c1508" }
+  switchTextOn: { color: "#ffffff" }
 })

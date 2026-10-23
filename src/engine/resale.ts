@@ -57,7 +57,7 @@ export function draftListing(input: { title: string; quantity: number; price: nu
     `Quantity: ${input.quantity}`
   ]
   if (input.source) lines.push(`Price source: ${input.source}`)
-  lines.push("", "Draft only. TCGAIO did not post this listing.")
+  lines.push("", "Draft only. Zzz AIO did not post this listing.")
   return lines.join("\n")
 }
 
@@ -91,7 +91,7 @@ export async function lookupResale(http: HttpClient, query: ResaleQuery): Promis
     const sold = await readOnly(http, soldUrl, "https://www.ebay.com/")
     const parsed = readEbaySold(sold.body)
     if (parsed.challenge || sold.status === 403 || sold.status === 412) {
-      ebayNote = "eBay presented a challenge. Sold prices were not read. TCGAIO does not solve challenges."
+      ebayNote = "eBay presented a challenge. Sold prices were not read. Zzz AIO does not solve challenges."
     } else {
       ebayMedian = median(parsed.prices)
       ebayCount = parsed.prices.length

@@ -1,8 +1,7 @@
-export const SECTIONS = ["home", "tasks", "people", "clients", "settings"] as const
+export const SECTIONS = ["home", "tasks", "profiles", "proxies", "accounts", "aco", "settings"] as const
 export type SectionId = (typeof SECTIONS)[number]
 
-export type PeopleTab = "profiles" | "accounts" | "proxies"
-export type SettingsTab = "general" | "logs" | "stores" | "phone" | "alerts" | "drops" | "stats" | "ship" | "autopilot" | "keeper" | "vault"
+export type SettingsTab = "general" | "advanced" | "logs" | "stores" | "phone" | "alerts" | "drops" | "stats" | "ship" | "autopilot" | "keeper" | "vault"
 export type TaskTab = "" | "monitor" | "checkout"
 
 export interface AppRoute {
@@ -12,9 +11,11 @@ export interface AppRoute {
 
 const LEGACY: Record<string, AppRoute> = {
   monitors: { section: "tasks", tab: "monitor" },
-  profiles: { section: "people", tab: "profiles" },
-  accounts: { section: "people", tab: "accounts" },
-  proxies: { section: "people", tab: "proxies" },
+  profiles: { section: "profiles", tab: "" },
+  accounts: { section: "accounts", tab: "" },
+  proxies: { section: "proxies", tab: "" },
+  clients: { section: "aco", tab: "" },
+  people: { section: "profiles", tab: "" },
   logs: { section: "settings", tab: "logs" },
   keeper: { section: "settings", tab: "keeper" },
   vault: { section: "settings", tab: "vault" },
@@ -27,19 +28,31 @@ const LEGACY: Record<string, AppRoute> = {
   stores: { section: "settings", tab: "stores" }
 }
 
+const SETTINGS_TABS = new Set(["general", "advanced", "logs", "stores", "phone", "alerts", "drops", "stats", "ship", "autopilot", "keeper", "vault"])
+
 export function parseRoute(hash: string): AppRoute {
   const clean = hash.replace(/^#/, "").split("?")[0]
   const [head, rest] = clean.split("/")
+  if (head === "people") {
+    if (rest === "accounts") return { section: "accounts", tab: "" }
+    if (rest === "proxies") return { section: "proxies", tab: "" }
+    return { section: "profiles", tab: "" }
+  }
   if (LEGACY[head]) return LEGACY[head]
   if (head === "home" || head === "") return { section: "home", tab: "" }
   if (head === "tasks") return { section: "tasks", tab: rest === "monitor" || rest === "checkout" ? rest : "" }
-  if (head === "people") return { section: "people", tab: rest === "accounts" || rest === "proxies" ? rest : "profiles" }
-  if (head === "clients") return { section: "clients", tab: "" }
-  if (head === "settings") return { section: "settings", tab: rest || "general" }
+  if (head === "profiles") return { section: "profiles", tab: "" }
+  if (head === "proxies") return { section: "proxies", tab: "" }
+  if (head === "accounts") return { section: "accounts", tab: "" }
+  if (head === "aco") return { section: "aco", tab: rest === "advanced" ? "advanced" : "" }
+  if (head === "settings") return { section: "settings", tab: SETTINGS_TABS.has(rest) ? rest : "general" }
   return { section: "home", tab: "" }
 }
 
 export function routeHash(section: SectionId, tab = ""): string {
-  if (!tab || (section === "people" && tab === "profiles") || (section === "settings" && tab === "general")) return section === "home" ? "home" : section
+  if (section === "home") return "home"
+  if (section === "settings" && (!tab || tab === "general")) return "settings"
+  if (section === "aco" && tab === "advanced") return "aco/advanced"
+  if (!tab) return section
   return `${section}/${tab}`
 }

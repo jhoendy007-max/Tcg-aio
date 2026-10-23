@@ -10,7 +10,10 @@ const routes = [
   "Dashboard",
   "Tasks",
   "Profiles",
-  "Clients",
+  "Proxies",
+  "Accounts",
+  "ACO",
+  "ACO locked",
   "Settings",
   "Settings · General",
   "Settings · Activity",
@@ -85,8 +88,10 @@ function fixture(expanded: boolean): string {
       <nav>
         <a href="#home" aria-current="page">Dashboard</a>
         <a href="#tasks">Tasks</a>
-        <a href="#people">Profiles</a>
-        <a href="#clients">Clients</a>
+        <a href="#profiles">Profiles</a>
+        <a href="#proxies">Proxies</a>
+        <a href="#accounts">Accounts</a>
+        <a href="#aco">ACO</a>
         <a href="#settings">Settings</a>
       </nav>
       <footer><button type="button" class="icon-btn">«</button></footer>
@@ -139,8 +144,10 @@ describe("desktop shell scroll", () => {
         expect(row.moved, `${size.name} ${row.name}`).toBe(true)
         expect(Number(row.scrollTop), `${size.name} ${row.name}`).toBeGreaterThan(0)
         expect(Number(row.clientHeight), `${size.name} ${row.name}`).toBeLessThanOrEqual(Number(row.innerHeight) + 1)
-        expect(Number(row.sidebarTop), `${size.name} ${row.name}`).toBe(0)
-        expect(Math.abs(Number(row.sidebarHeight) - Number(row.innerHeight)), `${size.name} ${row.name}`).toBeLessThanOrEqual(1)
+        // Floating glass sidebar: inset by a small margin, pinned, full height minus that margin.
+        expect(Number(row.sidebarTop), `${size.name} ${row.name}`).toBeGreaterThanOrEqual(0)
+        expect(Number(row.sidebarTop), `${size.name} ${row.name}`).toBeLessThanOrEqual(16)
+        expect(Math.abs(Number(row.sidebarHeight) + 2 * Number(row.sidebarTop) - Number(row.innerHeight)), `${size.name} ${row.name}`).toBeLessThanOrEqual(1)
         expect(Number(row.bodyScroll), `${size.name} ${row.name}`).toBe(0)
         expect(row.shellDisplay, `${size.name} ${row.name}`).toBe("flex")
         expect(String(row.mainOverflow), `${size.name} ${row.name}`).toMatch(/auto|scroll/)

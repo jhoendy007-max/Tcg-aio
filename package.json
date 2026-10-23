@@ -1,6 +1,6 @@
 {
   "name": "tcgaio",
-  "version": "0.2.33",
+  "version": "0.2.34",
   "private": true,
   "description": "Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops.",
   "main": "./out/main/index.js",
@@ -57,13 +57,17 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "TCGAIO"
+      "shortcutName": "Zzz AIO",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "publish": {
       "provider": "github",

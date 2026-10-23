@@ -104,14 +104,14 @@ export function openBackup(file: string, passphrase: string): BackupDocument {
   try {
     envelope = JSON.parse(file) as Envelope
   } catch {
-    throw new AppError("That file is not a TCGAIO backup.")
+    throw new AppError("That file is not a Zzz AIO backup.")
   }
   if (!envelope || envelope.v !== 1 || envelope.kdf !== "pbkdf2-sha256") {
-    throw new AppError("This backup was written by a newer TCGAIO version.")
+    throw new AppError("This backup was written by a newer Zzz AIO version.")
   }
   const iter = Math.round(Number(envelope.iter))
   if (!Number.isInteger(iter) || iter < 100_000 || iter > 1_000_000) {
-    throw new AppError("This backup was written by a newer TCGAIO version.")
+    throw new AppError("This backup was written by a newer Zzz AIO version.")
   }
   try {
     const salt = Buffer.from(envelope.salt, "base64")
@@ -159,7 +159,7 @@ export async function putBackup(http: HttpClient, url: string, token: string, bo
     redirect: "manual",
     timeoutMs: 20000
   })
-  if (response.status >= 300 && response.status < 400) throw new AppError("The backup URL redirected. TCGAIO did not follow it.")
+  if (response.status >= 300 && response.status < 400) throw new AppError("The backup URL redirected. Zzz AIO did not follow it.")
   if (response.status < 200 || response.status >= 300) throw new AppError(`The backup host returned ${response.status}.`)
 }
 
@@ -173,7 +173,7 @@ export async function getBackup(http: HttpClient, url: string, token: string): P
     redirect: "manual",
     timeoutMs: 20000
   })
-  if (response.status >= 300 && response.status < 400) throw new AppError("The backup URL redirected. TCGAIO did not follow it.")
+  if (response.status >= 300 && response.status < 400) throw new AppError("The backup URL redirected. Zzz AIO did not follow it.")
   if (response.status < 200 || response.status >= 300) throw new AppError(`The backup host returned ${response.status}.`)
   if (!response.body.includes("\"ct\"")) throw new AppError("That host did not return an encrypted backup.")
   return response.body

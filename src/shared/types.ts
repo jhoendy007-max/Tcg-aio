@@ -384,6 +384,18 @@ export interface Settings {
   alertNewOffer: boolean
   alertAvailable: boolean
   alertRetailer: boolean
+  /** Discord: a monitor sees the item come in stock (deduped per item). */
+  notifyInStock: boolean
+  /** Discord: an in-stock item goes back out of stock. Off by default. */
+  notifyOutOfStock: boolean
+  notifySuccess: boolean
+  notifyFailed: boolean
+  /** Discord: a proxy or store block. Off by default. */
+  notifyBlocked: boolean
+  /** Minutes before the same item can send another in-stock alert. */
+  notifyCooldownMin: number
+  /** Look for new versions on start and every few hours. The popup still asks before installing. */
+  autoUpdateCheck: boolean
   /** When on, templates can create and start tasks from alerts, keywords, and learned restock hours. */
   autopilot: boolean
   /** Extra price cap for autopilot. 0 means the template cap is the only cap. */
@@ -478,6 +490,13 @@ export const DEFAULT_SETTINGS: Settings = {
   alertNewOffer: true,
   alertAvailable: true,
   alertRetailer: true,
+  notifyInStock: true,
+  notifyOutOfStock: false,
+  notifySuccess: true,
+  notifyFailed: true,
+  notifyBlocked: false,
+  notifyCooldownMin: 10,
+  autoUpdateCheck: true,
   autopilot: false,
   autopilotPriceCap: 0,
   stuckMinutes: 15,
@@ -500,7 +519,7 @@ export const DEFAULT_SETTINGS: Settings = {
   healthReportZone: "",
   theme: "dark",
   accent: "gold",
-  appName: "TCGAIO",
+  appName: "Zzz AIO",
   logoDataUrl: "",
   successSound: false,
   taskView: "detailed",
@@ -535,6 +554,8 @@ export interface AccountView {
   role: "owner" | "user" | ""
   holder: string
   plan: string
+  /** Features this license unlocks, from the signed grant. Locked features stay visible. */
+  features: string[]
   expiresAt: number | null
   fingerprint: string
 }
@@ -584,7 +605,13 @@ export interface PublicChallenge {
 }
 
 export interface Notice {
-  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop" | "health"
+  kind: "success" | "failure" | "paused" | "tested" | "alert" | "challenge" | "session" | "drop" | "health" | "instock" | "oos" | "blocked"
+  /** Store id, for the store logo in the embed. */
+  store?: string
+  /** Product name when the store reported one. */
+  title?: string
+  /** When it happened (ms). */
+  at?: number
   storeName: string
   sku: string
   profileName: string

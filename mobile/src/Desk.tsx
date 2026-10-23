@@ -58,11 +58,11 @@ export function PhoneSettingsForm({ snap, session, run }: { snap: PhoneSnapshot 
   const desk = snap?.desk
   const [limits, setLimits] = useState(desk?.addressOrderLimits ?? "")
   const [webhook, setWebhook] = useState("")
-  const [name, setName] = useState(desk?.appName ?? "TCGAIO")
+  const [name, setName] = useState(desk?.appName ?? "Zzz AIO")
   useEffect(() => {
     if (!desk) return
     setLimits(desk.addressOrderLimits ?? "")
-    setName(desk.appName ?? "TCGAIO")
+    setName(desk.appName ?? "Zzz AIO")
   }, [desk?.addressOrderLimits, desk?.appName])
   return (
     <View style={styles.card}>

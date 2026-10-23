@@ -130,7 +130,7 @@ export function listenForOAuthCode(state: string, timeoutMs = 180_000): Promise<
         finish(new Error(error === "access_denied" ? "The sign-in was cancelled." : "The sign-in was not completed."))
         return
       }
-      res.end("<p>Signed in. You can close this window and return to TCGAIO.</p>")
+      res.end("<p>Signed in. You can close this window and return to Zzz AIO.</p>")
       finish(null, code)
     })
     const timer = setTimeout(() => finish(new Error("The sign-in timed out.")), timeoutMs)

@@ -1,13 +1,13 @@
 export const colors = {
-  bg: "#0e1116",
+  bg: "#070a1f",
   sidebar: "#090b10",
-  card: "#171b22",
+  card: "rgba(255,255,255,0.06)",
   card2: "#10141b",
-  line: "#2a3140",
+  line: "rgba(167,139,250,0.22)",
   text: "#f2f5f8",
-  muted: "#93a0b5",
-  accent: "#7aa2ff",
-  accentInk: "#07111f",
+  muted: "#a3a8c9",
+  accent: "#8b5cf6",
+  accentInk: "#ffffff",
   ok: "#3cba8b",
   warn: "#e0a045",
   danger: "#e25b5b",
@@ -16,8 +16,8 @@ export const colors = {
 
 const ACCENT: Record<"dark" | "light", Record<string, [string, string]>> = {
   dark: {
-    gold: ["#e0b15a", "#1c1508"],
-    blue: ["#7aa2ff", "#07111f"],
+    gold: ["#8b5cf6", "#ffffff"],
+    blue: ["#8b5cf6", "#ffffff"],
     green: ["#3cba8b", "#062018"],
     rose: ["#e07a8a", "#2a1014"]
   },

@@ -70,7 +70,7 @@ function render(state) {
   }
   if (paired && !(state.accounts || []).length) {
     const empty = document.createElement("li")
-    empty.textContent = "No accounts on this PC yet. Add one in TCGAIO, then refresh."
+    empty.textContent = "No accounts on this PC yet. Add one in Zzz AIO, then refresh."
     list.append(empty)
   }
   } catch (err) {

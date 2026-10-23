@@ -35,7 +35,7 @@ export function ChallengeCard({
       <Text style={styles.h2}>Solve the challenge</Text>
       <Text style={styles.p}>{challenge.storeName} · {challenge.sku} · {challenge.proxyLabel} · {left}s left</Text>
       <Text style={styles.p}>{challenge.reason}</Text>
-      <Text style={styles.p}>A person solves this. TCGAIO does not send it to a solving service. Open on PC uses the task proxy and saves every cookie, including ones JavaScript cannot see. Solving on this phone uses the phone network and only sends cookies JavaScript can see.</Text>
+      <Text style={styles.p}>A person solves this. Zzz AIO does not send it to a solving service. Open on PC uses the task proxy and saves every cookie, including ones JavaScript cannot see. Solving on this phone uses the phone network and only sends cookies JavaScript can see.</Text>
       <View style={styles.row}>
         <Pressable style={styles.primary} onPress={() => void onRun(() => session!.openChallenge())}><Text style={styles.primaryText}>Open on PC</Text></Pressable>
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.completeChallenge())}><Text style={styles.secondaryText}>I solved it on PC</Text></Pressable>

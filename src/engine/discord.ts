@@ -19,14 +19,60 @@ export function assertDiscordWebhook(url: string): void {
   }
 }
 
+/** Public copy of the Zzz logo (docs/brand/zzz-logo.png on main) so Discord can show it. */
+export const BRAND_ICON_URL = "https://raw.githubusercontent.com/jhoendy007-max/Tcg-aio/main/docs/brand/zzz-logo.png"
+const BRAND_AUTHOR = { name: "Zzz AIO", icon_url: BRAND_ICON_URL }
+const BRAND_FOOTER = { text: "Zzz AIO · Cop while you sleep", icon_url: BRAND_ICON_URL }
+
+const STORE_ICON_BASE = "https://raw.githubusercontent.com/jhoendy007-max/Tcg-aio/main/docs/brand/stores/"
+const STORE_ICONS = new Set(["amazon", "bandai", "barnes-noble", "bestbuy", "costco", "crunchyroll", "gamestop", "pokemon-center", "sams", "target", "tcgplayer", "walmart"])
+
+export function storeIconUrl(store: string | undefined): string | undefined {
+  return store && STORE_ICONS.has(store) ? `${STORE_ICON_BASE}${store}.png` : undefined
+}
+
+function productLink(notice: Notice): string | undefined {
+  if (notice.url && /^https:\/\//.test(notice.url)) return notice.url
+  if (/^https:\/\//.test(notice.sku)) return notice.sku
+  return undefined
+}
+
+/** In-stock / out-of-stock embed: product, image, store, price, SKU, link, time. */
+export function buildStockBody(notice: Notice): { embeds: Array<Record<string, unknown>> } {
+  const inStock = notice.kind === "instock"
+  const link = productLink(notice)
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: "Store", value: notice.storeName || "—", inline: true },
+    { name: "Price", value: notice.price != null ? `$${notice.price.toFixed(2)}` : "—", inline: true },
+    { name: "SKU", value: (notice.sku || "—").slice(0, 200), inline: true }
+  ]
+  if (link) fields.push({ name: "Link", value: `[Open product page](${link})` })
+  return {
+    embeds: [
+      {
+        title: `${inStock ? "🟢 In stock" : "🔴 Out of stock"} · ${(notice.title || notice.sku).slice(0, 200)}`,
+        url: link,
+        color: inStock ? 0x39ff88 : 0xff4d6d,
+        description: redact(notice.detail || "").slice(0, 600) || undefined,
+        fields,
+        thumbnail: notice.imageUrl && /^https:\/\//.test(notice.imageUrl) ? { url: notice.imageUrl } : storeIconUrl(notice.store) ? { url: storeIconUrl(notice.store) } : undefined,
+        author: { name: `Zzz AIO · ${notice.storeName}`, icon_url: storeIconUrl(notice.store) ?? BRAND_ICON_URL },
+        footer: BRAND_FOOTER,
+        timestamp: new Date(notice.at ?? Date.now()).toISOString()
+      }
+    ]
+  }
+}
+
 export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string, unknown>> } {
+  if (notice.kind === "instock" || notice.kind === "oos") return buildStockBody(notice)
   const color = notice.kind === "success"
     ? 0x3cba8b
     : notice.kind === "tested" || notice.kind === "alert"
       ? 0x6aa6ff
       : notice.kind === "drop" || notice.kind === "health"
         ? 0x6aa6ff
-        : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session"
+        : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session" || notice.kind === "blocked"
           ? 0xe0a045
           : 0xe25b5b
   const title =
@@ -44,6 +90,8 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
                 ? `${notice.sku} drop`
                 : notice.kind === "health"
                   ? "Daily health report"
+                  : notice.kind === "blocked"
+                  ? `${notice.storeName} blocked`
                   : notice.kind === "paused"
                   ? `${notice.storeName} needs attention`
                   : `${notice.storeName} checkout failed`
@@ -57,13 +105,13 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
   if (notice.url) lines.push(notice.url)
   if (notice.orderId) lines.push(`Order: ${notice.orderId}`)
   if (notice.kind === "paused" && notice.profileName !== "Alerts") {
-    lines.push("Update the account session in TCGAIO, then resume the task.")
+    lines.push("Update the account session in Zzz AIO, then resume the task.")
   }
   if (notice.kind === "challenge") {
-    lines.push("A person solves this in TCGAIO. It is not sent to a solving service.")
+    lines.push("A person solves this in Zzz AIO. It is not sent to a solving service.")
   }
   if (notice.kind === "session") {
-    lines.push("Open the account browser and sign in again. TCGAIO does not create a session for you.")
+    lines.push("Open the account browser and sign in again. Zzz AIO does not create a session for you.")
   }
   if (notice.kind === "drop") {
     lines.push("Times are Atlantic Time (Puerto Rico, UTC−4).")
@@ -78,7 +126,9 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
         description: lines.join("\n").slice(0, 1800),
         color,
         url: notice.url || undefined,
-        thumbnail: notice.imageUrl ? { url: notice.imageUrl } : undefined
+        thumbnail: notice.imageUrl ? { url: notice.imageUrl } : undefined,
+        author: BRAND_AUTHOR,
+        footer: BRAND_FOOTER
       }
     ]
   }
@@ -128,7 +178,9 @@ export function buildGroupBody(notice: Notice): { embeds: Array<Record<string, u
         description: lines.filter(Boolean).join("\n").slice(0, 1800),
         color: safe.kind === "success" ? 0x3cba8b : 0x6aa6ff,
         url: safe.url,
-        thumbnail: safe.imageUrl ? { url: safe.imageUrl } : undefined
+        thumbnail: safe.imageUrl ? { url: safe.imageUrl } : undefined,
+        author: BRAND_AUTHOR,
+        footer: BRAND_FOOTER
       }
     ]
   }

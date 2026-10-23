@@ -34,10 +34,10 @@ const STORE_HOSTS = new Set(["www.crunchyroll.com", "store.crunchyroll.com"])
 const STRIPE_HOST = "api.stripe.com"
 
 export const CRUNCHYROLL_PAUSE =
-  "Crunchyroll presented a challenge (Cloudflare or a captcha). Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges."
+  "Crunchyroll presented a challenge (Cloudflare or a captcha). Finish it in your own browser, paste a fresh session if needed, then resume. Zzz AIO does not solve challenges."
 
 const SESSION_PAUSE =
-  "Paste a signed-in Crunchyroll Store session (the www.crunchyroll.com cookie header or the shopper access token). Password sign-in is blocked by Cloudflare, and TCGAIO does not solve challenges."
+  "Paste a signed-in Crunchyroll Store session (the www.crunchyroll.com cookie header or the shopper access token). Password sign-in is blocked by Cloudflare, and Zzz AIO does not solve challenges."
 const EXPIRED_PAUSE = "The Crunchyroll session expired. Paste a fresh cookie header or access token, then resume."
 const GUEST_PAUSE = "The Crunchyroll session is a guest token. Paste the cookie header from a signed-in browser, then resume."
 

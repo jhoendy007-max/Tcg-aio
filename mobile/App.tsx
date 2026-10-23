@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar"
+import { stockOfLine, stockOfTask, type StockState } from "../src/shared/stock"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
@@ -37,7 +38,7 @@ export default function App() {
   const session = useRef<PhoneSession | null>(null)
   const [screen, setScreen] = useState<Screen>("boot")
   const [online, setOnline] = useState(false)
-  const [pcName, setPcName] = useState("TCGAIO")
+  const [pcName, setPcName] = useState("Zzz AIO")
   const [snap, setSnap] = useState<PhoneSnapshot | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [draft, setDraft] = useState<PhoneTaskDraft | null>(null)
@@ -60,7 +61,7 @@ export default function App() {
   function applySnapshot(next: PhoneSnapshot) {
     const tasks = asList<PhoneTask>(next?.tasks)
     setSnap({ ...next, tasks })
-    setPcName(next?.brand?.appName || next?.pcName || "TCGAIO")
+    setPcName(next?.brand?.appName || next?.pcName || "Zzz AIO")
     const active = tasks.filter((task) => isActive(task.status)).length
     updateWidget(next?.analytics?.success ?? 0, active)
   }
@@ -237,7 +238,8 @@ export default function App() {
       {screen === "boot" ? <ActivityIndicator color={theme.accent} style={styles.boot} /> : null}
       {screen === "pair" ? (
         <ScrollView contentContainerStyle={styles.pad}>
-          <Text style={styles.brand}>TCGAIO</Text>
+          <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginBottom: 8 }} accessibilityLabel="Zzz logo" />
+          <Text style={styles.brand}>Zzz APP</Text>
           <Text style={styles.h1}>Pair this phone</Text>
           <Text style={styles.p}>On the PC, open Phone and choose Pair device. Scan that QR code. The PC keeps the card and passwords.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
@@ -273,8 +275,9 @@ export default function App() {
       {screen === "dash" || screen === "edit" || screen === "alerts" || screen === "drops" || screen === "stats" || screen === "mail" || screen === "stores" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <View style={styles.row}>
-            <View>
-              <Text style={styles.brand}>{snap?.brand?.appName || "TCGAIO"}</Text>
+            <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginRight: 10 }} accessibilityLabel="Zzz logo" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.brand}>{snap?.brand?.appName || "Zzz APP"}</Text>
               <Text style={styles.h1}>{pcName}</Text>
             </View>
             <Text style={[styles.pill, online ? styles.pillOn : styles.pillOff]}>{online ? "PC online" : "PC offline"}</Text>
@@ -353,7 +356,7 @@ export default function App() {
               )) : null}
               </> : null}
               {tab === "accounts" ? <><Text style={styles.h1}>Accounts</Text><DeskPanel snap={snap} session={session.current} run={run} focus="people" /></> : null}
-              {tab === "clients" ? <><Text style={styles.h1}>Clients</Text><DeskPanel snap={snap} session={session.current} run={run} focus="clients" /></> : null}
+              {tab === "clients" ? <><Text style={styles.h1}>ACO</Text><DeskPanel snap={snap} session={session.current} run={run} focus="clients" /></> : null}
               {tab === "settings" ? <><Text style={styles.h1}>Settings</Text><PhoneSettingsForm snap={snap} session={session.current} run={run} /><PhoneUpdateCard /><LogsPanel snap={snap} />
                 <View style={styles.row}>
                   <Pressable style={styles.secondary} onPress={() => setScreen("mail")}><Text style={styles.secondaryText}>{mailText(snap?.language === "es" ? "es" : "en", "phoneTitle")}</Text></Pressable>
@@ -375,7 +378,7 @@ export default function App() {
                     <Text style={styles.h2}>{item.storeName}</Text>
                     <Text style={styles.pill}>{taskText(snap?.language === "es" ? "es" : "en", item.kind === "monitor" || item.monitorOnly ? "roleBadgeMonitor" : "roleBadgeCheckout")}</Text>
                     {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
-                    <Text style={[styles.pill, { color: statusColor(item.status) }]}>{STATUS_LABEL[item.status] ?? item.status}</Text>
+                    <Text style={[styles.pill, { color: stockColor(stockOfTask(item)) ?? statusColor(item.status) }, stockOfTask(item) ? { textShadowColor: stockColor(stockOfTask(item)), textShadowRadius: 8 } : null]}>{stockOfTask(item) === "in" ? "In stock" : stockOfTask(item) === "out" ? "Out of stock" : STATUS_LABEL[item.status] ?? item.status}</Text>
                   </View>
                   <Text style={styles.sku}>{item.sku}</Text>
                   <Text style={styles.p}>Qty {item.quantity} · {item.profileName} · {item.accountLabel} · {item.proxyGroupName ?? "Direct"}</Text>
@@ -403,7 +406,7 @@ export default function App() {
           {([
             ["tasks", "Tasks"],
             ["accounts", "Accounts"],
-            ["clients", "Clients"],
+            ["clients", "ACO"],
             ["settings", "Settings"]
           ] as const).map(([id, label]) => (
             <Pressable key={id} style={styles.tab} onPress={() => { setTab(id); if (screen !== "dash" && screen !== "edit") setScreen("dash") }}>
@@ -707,7 +710,7 @@ function TaskDetail({ task, onRun, session, onEdit }: {
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.deleteTask(task.id))}><Text style={styles.secondaryText}>Delete</Text></Pressable>
       </View>
       {asList<PhoneTask["logs"][number]>(task.logs).map((line, index) => (
-        <Text key={`${line.ts}-${index}`} style={styles.log}>{line.message}</Text>
+        <Text key={`${line.ts}-${index}`} style={[styles.log, stockOfLine(line.message) ? { color: stockColor(stockOfLine(line.message)) } : null]}>{line.message}</Text>
       ))}
     </View>
   )
@@ -837,13 +840,19 @@ function AlertsPanel({ snap, onRun, session, onBack }: {
   )
 }
 
+/** Neon green and red mean stock only. Blocked is amber; idle and watching stay neutral. */
+function stockColor(stock: StockState): string | undefined {
+  if (stock === "in") return "#39ff88"
+  if (stock === "out") return "#ff4d6d"
+  return undefined
+}
+
 function statusColor(status: string): string {
-  if (status === "success" || status === "tested") return "#3cba8b"
-  if (status === "failed") return "#ff8d8d"
-  if (status === "adding_to_cart" || status === "checking_out") return "#c4b5fd"
-  if (status === "monitoring" || status === "in_stock") return "#8eb4ff"
-  if (status === "in_queue" || status === "paused" || status === "challenge" || status === "idle") return "#e0b15a"
-  return "#a8b3c7"
+  if (status === "success" || status === "tested") return "#c4b5fd"
+  if (status === "failed") return "#f472b6"
+  if (status === "adding_to_cart" || status === "checking_out") return "#22d3ee"
+  if (status === "paused" || status === "challenge") return "#fbbf24"
+  return "#a3a8c9"
 }
 
 function upsert(tasks: PhoneTask[], task: PhoneTask): PhoneTask[] {

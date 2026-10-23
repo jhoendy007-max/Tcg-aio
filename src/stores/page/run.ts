@@ -23,7 +23,7 @@ export function pageChallengePause(name: string, language?: string): string {
 }
 
 export function pageSessionPause(name: string, host: string): string {
-  return `Paste a signed-in ${name} session (the ${host} cookie header) or use Sign in on the Session Keeper page. TCGAIO does not solve challenges.`
+  return `Paste a signed-in ${name} session (the ${host} cookie header) or use Sign in on the Session Keeper page. Zzz AIO does not solve challenges.`
 }
 
 interface StepOk<T> {
@@ -162,7 +162,7 @@ async function checkoutRequest(
 }
 
 async function store(ctx: StoreRunContext, spec: PageSpec, jar: PageCookies, request: HttpRequest): Promise<Step<HttpResponse>> {
-  if (request.method !== "GET" && request.method !== "POST") return { kind: "failed", reason: `${spec.name} checkout is not sent from TCGAIO.` }
+  if (request.method !== "GET" && request.method !== "POST") return { kind: "failed", reason: `${spec.name} checkout is not sent from Zzz AIO.` }
   let host = ""
   try {
     host = new URL(request.url).hostname.toLowerCase()

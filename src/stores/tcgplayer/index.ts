@@ -25,7 +25,7 @@ const HOST = "mp-search-api.tcgplayer.com"
 const SHOP = "www.tcgplayer.com"
 
 export const TCGPLAYER_PAUSE =
-  "TCGplayer presented a challenge. Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges."
+  "TCGplayer presented a challenge. Finish it in your own browser, paste a fresh session if needed, then resume. Zzz AIO does not solve challenges."
 
 interface Offer {
   product: TcgProduct
@@ -185,7 +185,7 @@ async function readOffer(ctx: StoreRunContext, id: string, page: string): Promis
 }
 
 async function catalog(ctx: StoreRunContext, request: HttpRequest): Promise<Step<HttpResponse>> {
-  if (request.method !== "GET" && request.method !== "POST") return { kind: "failed", reason: "TCGplayer checkout is not sent from TCGAIO." }
+  if (request.method !== "GET" && request.method !== "POST") return { kind: "failed", reason: "TCGplayer checkout is not sent from Zzz AIO." }
   let host = ""
   let path = ""
   try {
@@ -196,14 +196,14 @@ async function catalog(ctx: StoreRunContext, request: HttpRequest): Promise<Step
     return { kind: "failed", reason: "The TCGplayer request URL is invalid." }
   }
   if (host !== HOST) return { kind: "failed", reason: `Refusing to contact ${host}.` }
-  if (request.method === "POST" && !/\/listings$/.test(path)) return { kind: "failed", reason: "TCGplayer checkout is not sent from TCGAIO." }
-  if (/cart|checkout|place-order/i.test(path)) return { kind: "failed", reason: "TCGplayer checkout is not sent from TCGAIO." }
+  if (request.method === "POST" && !/\/listings$/.test(path)) return { kind: "failed", reason: "TCGplayer checkout is not sent from Zzz AIO." }
+  if (/cart|checkout|place-order/i.test(path)) return { kind: "failed", reason: "TCGplayer checkout is not sent from Zzz AIO." }
   const response = await ctx.http.request({ ...request, proxy: ctx.proxy, signal: ctx.signal })
   return { kind: "ok", value: response }
 }
 
 async function shop(ctx: StoreRunContext, jar: PageCookies, request: HttpRequest): Promise<Step<HttpResponse>> {
-  if (request.method !== "GET" && request.method !== "POST") return { kind: "failed", reason: "TCGplayer checkout is not sent from TCGAIO." }
+  if (request.method !== "GET" && request.method !== "POST") return { kind: "failed", reason: "TCGplayer checkout is not sent from Zzz AIO." }
   let host = ""
   try {
     host = new URL(request.url).hostname.toLowerCase()

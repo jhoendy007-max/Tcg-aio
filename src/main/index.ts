@@ -9,6 +9,7 @@ import { defaultHttp } from "../engine/http"
 import { chromiumHttp } from "./chromium-http"
 import { refreshStoreSession } from "../engine/store-browser"
 import { postDiscord, postGroupDiscord } from "../engine/discord"
+import { migrateTaskWebhook, noticeAllowed } from "../engine/stock-alerts"
 import { ChallengeGate } from "../engine/challenge-gate"
 import { TaskService } from "../engine/task-runner"
 import { channels } from "../shared/ipc"
@@ -38,6 +39,7 @@ import { registerIpc } from "./ipc"
 import { heartbeatAccount, reportCheckout } from "../engine/account-client"
 import { machineFingerprint } from "./machine-fingerprint"
 import { HEARTBEAT_MS } from "../shared/license-proof"
+import appIcon from "../../resources/icon.png?asset"
 import type { Settings } from "../shared/types"
 
 const gotLock = app.requestSingleInstanceLock()
@@ -92,7 +94,8 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     backgroundColor: "#0b0d12",
-    title: "TCGAIO",
+    title: "Zzz AIO",
+    icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -136,6 +139,13 @@ if (gotLock) void app.whenReady().then(async () => {
     })
   }
   const db = new Database(join(app.getPath("userData"), "tcgaio.json"), createCipher())
+  try {
+    // 0.2.34: Discord lives in Settings > Notifications. Keep an old per-task webhook working.
+    const moved = migrateTaskWebhook(db.getSettings(), db.listTasks())
+    if (moved) db.saveSettings(moved)
+  } catch {
+    /* a bad old webhook stays where it was */
+  }
   db.load()
   db.refreshAccess(machineFingerprint())
   const registry = createRegistry()
@@ -165,7 +175,7 @@ if (gotLock) void app.whenReady().then(async () => {
   })
   const publish = async (notice: Notice) => {
     desktop.publishNotice({
-      kind: notice.kind,
+      kind: notice.kind === "instock" || notice.kind === "oos" ? "alert" : notice.kind === "blocked" ? "paused" : notice.kind,
       storeName: notice.storeName,
       sku: notice.sku,
       profileName: notice.profileName,
@@ -179,6 +189,7 @@ if (gotLock) void app.whenReady().then(async () => {
     })
     const settings = db.getSettings()
     let delivered = false
+    if (!noticeAllowed(settings, notice)) return false
     if (settings.discordWebhook) {
       await postDiscord(settings.discordWebhook, notice)
       delivered = true
@@ -271,9 +282,9 @@ if (gotLock) void app.whenReady().then(async () => {
   dropTimer = setInterval(() => {
     void tickDrops(db, publish, desktop)
   }, 15_000)
-  void updates.check()
+  if (db.getSettings().autoUpdateCheck !== false) void updates.check()
   updateTimer = setInterval(() => {
-    void updates.check()
+    if (db.getSettings().autoUpdateCheck !== false) void updates.check()
   }, UPDATE_CHECK_MS)
   heartbeatTimer = setInterval(() => {
     void heartbeatAccount(db, machineFingerprint()).catch(() => undefined)

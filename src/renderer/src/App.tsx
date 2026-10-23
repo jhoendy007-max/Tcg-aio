@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
+import { BrandLockup, ZzzLogo } from "./Logo"
 import { AccountsPage } from "./pages/Accounts"
-import { ClientsPage } from "./pages/Clients"
 import { ProfilesPage } from "./pages/Profiles"
 import { ProxiesPage } from "./pages/Proxies"
 import { PhonePage } from "./pages/Phone"
@@ -18,8 +18,10 @@ import { ModulesPage } from "./pages/Modules"
 import { ShipmentsPage } from "./pages/Shipments"
 import { StoreDefaults } from "./pages/StoreDefaults"
 import { AccountGate, WaitingAccount } from "./pages/AccountGate"
+import { AcoPage } from "./pages/Aco"
 import { Wizard } from "./pages/Wizard"
 import { deskText } from "../../shared/desk-ui"
+import { grantFeatures } from "../../shared/entitlements"
 import { parseRoute, routeHash, type SectionId } from "../../shared/nav"
 import { SuccessScreen, type WinCard } from "./components/Success"
 import { UpdatePrompt } from "./components/UpdatePrompt"
@@ -30,16 +32,18 @@ import { errorText, unwrap } from "./lib"
 import { applyTheme } from "./theme"
 import { playSuccessChime } from "./sound"
 
-const NAV: Array<{ id: SectionId; icon: string }> = [
-  { id: "home", icon: "home" },
-  { id: "tasks", icon: "tasks" },
-  { id: "people", icon: "profiles" },
-  { id: "clients", icon: "clients" },
-  { id: "settings", icon: "settings" }
+const NAV: Array<{ id: SectionId; icon: string; label: "navHome" | "navTasks" | "navProfiles" | "navProxies" | "navAccounts" | "navAco" | "navSettings" }> = [
+  { id: "home", icon: "home", label: "navHome" },
+  { id: "tasks", icon: "tasks", label: "navTasks" },
+  { id: "profiles", icon: "profiles", label: "navProfiles" },
+  { id: "proxies", icon: "proxies", label: "navProxies" },
+  { id: "accounts", icon: "accounts", label: "navAccounts" },
+  { id: "aco", icon: "clients", label: "navAco" },
+  { id: "settings", icon: "settings", label: "navSettings" }
 ]
 
 function readRail(): boolean {
-  try { return localStorage.getItem("tcgaio-rail") !== "open" } catch { return true }
+  try { return localStorage.getItem("tcgaio-rail") === "icons" } catch { return false }
 }
 
 export function App() {
@@ -70,7 +74,7 @@ export function App() {
       if (cancel) return
       setSettings(payload.settings)
       applyTheme(payload.settings)
-      document.title = payload.settings.appName || "TCGAIO"
+      document.title = brandName(payload.settings.appName)
       setWizard(!payload.settings.wizardDone && profiles.length === 0 && accounts.length === 0)
       try {
         const nextAccount = await unwrap(window.aio.account.status())
@@ -90,7 +94,7 @@ export function App() {
       if (!next) return
       setSettings(next)
       applyTheme(next)
-      document.title = next.appName || "TCGAIO"
+      document.title = brandName(next.appName)
     }
     window.addEventListener("tcgaio-settings", onSettings)
     const onSignOut = () => setAccount(null)
@@ -145,6 +149,7 @@ export function App() {
 
   const lang = settings.language === "es" ? "es" : "en"
   const signedIn = Boolean(account?.signedIn && !account.pending)
+  const features = grantFeatures({ role: account?.role, email: account?.email, features: account?.features })
   const pending = Boolean(account?.pending)
   const page = route.section
   const tab = route.tab
@@ -152,31 +157,39 @@ export function App() {
   return (
     <div className={rail ? "shell rail" : "shell expanded"}>
       <aside className="sidebar">
-        <div className="brand" title={settings.appName || "TCGAIO"}>
-          {settings.logoDataUrl ? <img className="brand-logo" src={settings.logoDataUrl} alt="" /> : <Mark />}
+        <div className="brand" title={brandName(settings.appName)}>
+          {settings.logoDataUrl ? <img className="brand-logo" src={settings.logoDataUrl} alt="" /> : <ZzzLogo size={40} />}
           <div className="brand-copy">
-            <strong>{settings.appName || "TCGAIO"}</strong>
-            <span>v{APP_VERSION}</span>
+            <strong>{brandName(settings.appName)}</strong>
+            <span>Cop while you sleep · v{APP_VERSION}</span>
           </div>
         </div>
         <nav aria-label="Sections">
           {NAV.map((item) => {
-            const label = deskText(lang, item.id === "home" ? "navHome" : item.id === "tasks" ? "navTasks" : item.id === "people" ? "navPeople" : item.id === "clients" ? "navClients" : "navSettings")
+            const label = deskText(lang, item.label)
+            const locked = item.id === "aco" && signedIn && !features.includes("aco")
             return (
-              <a key={item.id} href={`#${item.id}`} aria-current={page === item.id ? "page" : undefined} aria-label={label} title={label}>
+              <a key={item.id} href={`#${item.id}`} className={locked ? "locked" : undefined} aria-current={page === item.id ? "page" : undefined} aria-label={locked ? `${label} (locked)` : label} title={locked ? `${label} · locked on this license` : label}>
                 <NavIcon name={item.icon} />
                 <span className="nav-text">{label}</span>
+                {locked ? <span className="nav-lock" aria-hidden="true">🔒</span> : null}
               </a>
             )
           })}
         </nav>
         <footer>
+          <div className="bot-status" title="Bot status">
+            <span className="status-dot" aria-hidden="true" />
+            <span className="nav-text"><span className="bot-status-label">Bot Status</span><strong>{signedIn ? "Running" : "Signed out"}</strong></span>
+          </div>
+          <TopClock />
           <button type="button" className="icon-btn" title={rail ? deskText(lang, "showNames") : deskText(lang, "iconsOnly")} onClick={() => { const next = !rail; setRail(next); try { localStorage.setItem("tcgaio-rail", next ? "icons" : "open") } catch { /* keep the choice for this session */ } }}>{rail ? "»" : "«"}</button>
         </footer>
       </aside>
       <main>
         {update && update.status !== "idle" && update.status !== "current" ? (
           <div className="card update-banner">
+            <ZzzLogo size={40} />
             <div>
               <strong>{update.status === "available" || update.status === "downloading" || update.status === "downloaded" ? `Update ${update.version ?? ""}` : "Updates"}</strong>
               <p>{updateStatusText(update)}</p>
@@ -191,14 +204,16 @@ export function App() {
             </div>
           </div>
         ) : null}
-        {booting ? <section className="page" aria-busy="true" aria-label="Loading"><div className="skeleton sk-title" /><div className="skeleton sk-card" /></section> : null}
+        {booting ? <section className="page splash" aria-busy="true" aria-label="Loading"><BrandLockup size={72} /><div className="skeleton sk-title" /><div className="skeleton sk-card" /></section> : null}
         {!booting && !signedIn && !pending ? <AccountGate lang={lang} settings={settings} onSettings={(next) => { setSettings(next); applyTheme(next) }} onDone={setAccount} /> : null}
         {!booting && pending && account ? <WaitingAccount lang={lang} account={account} onReady={setAccount} onSignedOut={() => setAccount(null)} /> : null}
-        {!booting && signedIn && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = next.appName || "TCGAIO"; setWizard(false); go("home") }} /> : null}
+        {!booting && signedIn && wizard ? <Wizard lang={lang} onDone={(next) => { setSettings(next); applyTheme(next); document.title = brandName(next.appName); setWizard(false); go("home") }} /> : null}
         {!booting && signedIn && !wizard && page === "home" ? <DashboardPage lang={lang} onTasks={() => go("tasks")} /> : null}
         {!booting && signedIn && !wizard && page === "tasks" ? <TasksPage lockedKind={tab === "monitor" || tab === "checkout" ? tab : ""} /> : null}
-        {!booting && signedIn && !wizard && page === "clients" ? <ClientsPage /> : null}
-        {!booting && signedIn && !wizard && page === "people" ? <PeopleTabs tab={tab === "accounts" || tab === "proxies" ? tab : "profiles"} lang={lang} /> : null}
+        {!booting && signedIn && !wizard && page === "profiles" ? <section className="page"><ProfilesPage /></section> : null}
+        {!booting && signedIn && !wizard && page === "proxies" ? <section className="page"><ProxiesPage /></section> : null}
+        {!booting && signedIn && !wizard && page === "accounts" ? <section className="page"><AccountsPage /></section> : null}
+        {!booting && signedIn && !wizard && page === "aco" ? <AcoPage unlocked={features.includes("aco")} advanced={tab === "advanced"} /> : null}
         {!booting && signedIn && !wizard && page === "settings" ? <SettingsTabs tab={tab || "general"} lang={lang} onSettings={setSettings} /> : null}
       </main>
       {win ? <SuccessScreen win={win} sound={settings.successSound} onSound={(on) => void setSound(on)} onClose={() => setWin(null)} /> : null}
@@ -228,19 +243,6 @@ const NAV_PATH: Record<string, string> = {
   stores: "M3 6.2 8 3l5 3.2V13H3zM6.5 13V8.5h3V13"
 }
 
-function PeopleTabs({ tab, lang }: { tab: "profiles" | "accounts" | "proxies"; lang: "en" | "es" }) {
-  return (
-    <section className="page">
-      <div className="segments" role="tablist">
-        <a href="#people/profiles" aria-current={tab === "profiles" ? "page" : undefined}>{deskText(lang, "tabProfiles")}</a>
-        <a href="#people/accounts" aria-current={tab === "accounts" ? "page" : undefined}>{deskText(lang, "tabAccounts")}</a>
-        <a href="#people/proxies" aria-current={tab === "proxies" ? "page" : undefined}>{deskText(lang, "tabProxies")}</a>
-      </div>
-      {tab === "accounts" ? <AccountsPage /> : tab === "proxies" ? <ProxiesPage /> : <ProfilesPage />}
-    </section>
-  )
-}
-
 function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es"; onSettings: (next: Settings) => void }) {
   const items = [
     ["general", deskText(lang, "setGeneral")],
@@ -255,11 +257,20 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
     ["keeper", deskText(lang, "setKeeper")],
     ["vault", deskText(lang, "setVault")]
   ] as const
+  const advanced = items.filter(([id]) => id !== "general")
+  const inAdvanced = tab !== "general" && tab !== "advanced"
+  const tools = (
+    <details className="advanced" open={inAdvanced}>
+      <summary>More tools: logs, store defaults, phone, alerts, drops, stats</summary>
+      <div className="segments scroll-x" role="tablist">
+        {advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`} aria-current={tab === id ? "page" : undefined}>{label}</a>)}
+      </div>
+    </details>
+  )
   return (
     <section className="page">
-      <div className="segments scroll-x" role="tablist">
-        {items.map(([id, label]) => <a key={id} href={id === "general" ? "#settings" : `#settings/${id}`} aria-current={tab === id ? "page" : undefined}>{label}</a>)}
-      </div>
+      {inAdvanced ? <div className="segments" role="tablist"><a href="#settings">← {deskText(lang, "setGeneral")}</a></div> : null}
+      {inAdvanced ? tools : null}
       {tab === "logs" ? <LogsPage /> : null}
       {tab === "stores" ? <StoresTab onSettings={onSettings} /> : null}
       {tab === "phone" ? <PhonePage /> : null}
@@ -270,7 +281,7 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
       {tab === "autopilot" ? <AutopilotPage /> : null}
       {tab === "keeper" ? <KeeperPage /> : null}
       {tab === "vault" ? <VaultPage /> : null}
-      {tab === "general" || !items.some(([id]) => id === tab) ? <SettingsPage /> : null}
+      {tab === "general" || tab === "advanced" || !items.some(([id]) => id === tab) ? <SettingsPage tools={<div className="segments scroll-x" role="tablist" aria-label="More tools">{advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`}>{label}</a>)}</div>} /> : null}
     </section>
   )
 }
@@ -297,11 +308,17 @@ function NavIcon({ name }: { name: string }) {
   )
 }
 
-function Mark() {
-  return (
-    <svg className="mark" viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="1" y="1" width="30" height="30" rx="7" />
-      <path d="M9 22.5 16 8l7 14.5H9z" />
-    </svg>
-  )
+
+function brandName(saved: string | undefined): string {
+  const name = (saved ?? "").trim()
+  return !name || name === "TCGAIO" ? "Zzz AIO" : name
+}
+
+function TopClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return <span className="top-clock">{now.toLocaleTimeString()}</span>
 }

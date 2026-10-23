@@ -67,7 +67,7 @@ export async function checkoutFromPage(
     if (!cartDone) {
       const cart = forms.find((form) => form.kind === "cart")
       if (!cart) {
-        note(ctx, "cart", "skip", "TCGAIO did not add it to the cart.")
+        note(ctx, "cart", "skip", "Zzz AIO did not add it to the cart.")
         note(ctx, "address", "skip", copy.addressSkip)
         note(ctx, "shipping", "skip", copy.shippingSkip)
         note(ctx, "payment", "skip", "The card number was not sent.")

@@ -30,9 +30,9 @@ import {
 const HOST = "www.amazon.com"
 
 export const AMAZON_PAUSE =
-  "Amazon presented a robot check or captcha. Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges."
-const TWO_FA_PAUSE = "Amazon asked for a two-step verification code. Approve it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges."
-const CVV_PAUSE = "Amazon asked for the card security code. Finish checkout in your browser. TCGAIO does not send card numbers or CVVs."
+  "Amazon presented a robot check or captcha. Finish it in your own browser, paste a fresh session if needed, then resume. Zzz AIO does not solve challenges."
+const TWO_FA_PAUSE = "Amazon asked for a two-step verification code. Approve it in your own browser, paste a fresh session if needed, then resume. Zzz AIO does not solve challenges."
+const CVV_PAUSE = "Amazon asked for the card security code. Finish checkout in your browser. Zzz AIO does not send card numbers or CVVs."
 const SESSION_PAUSE = "Paste a signed-in Amazon cookie header from www.amazon.com, including at-main. Password sign-in is not attempted."
 const EXPIRED_PAUSE = "The Amazon session expired. Paste a fresh www.amazon.com cookie header, then resume."
 
@@ -231,7 +231,7 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar): Promise<Step<st
   }
   if (asksForCvv(checkout.value.body)) return { kind: "paused", reason: CVV_PAUSE }
   if (asksForCard(checkout.value.body)) {
-    return { kind: "failed", reason: "Amazon has no saved payment method on this account. Add one in your browser. TCGAIO does not send card numbers." }
+    return { kind: "failed", reason: "Amazon has no saved payment method on this account. Add one in your browser. Zzz AIO does not send card numbers." }
   }
   const form = readPlaceOrder(checkout.value.body)
   if (!form) return { kind: "failed", reason: `Amazon did not return a place-order form (${checkout.value.status}).` }

@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "TCGAIO",
+    "name": "Zzz APP",
     "slug": "tcgaio",
-    "version": "0.2.33",
+    "version": "0.2.34",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -11,14 +11,14 @@
       "bundleIdentifier": "com.tcgaio.phone",
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "TCGAIO scans the pairing QR code shown on your PC.",
-        "NSLocalNetworkUsageDescription": "TCGAIO connects to the desktop app on your Wi-Fi.",
+        "NSCameraUsageDescription": "Zzz APP scans the pairing QR code shown on your PC.",
+        "NSLocalNetworkUsageDescription": "Zzz APP connects to the desktop app on your Wi-Fi.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.tcgaio.phone",
-      "versionCode": 233,
+      "versionCode": 234,
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.CAMERA",
@@ -38,13 +38,14 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "TCGAIO scans the pairing QR code shown on your PC."
+          "cameraPermission": "Zzz APP scans the pairing QR code shown on your PC."
         }
       ],
       [
         "expo-notifications",
         {
-          "color": "#e0b15a"
+          "color": "#8b5cf6",
+          "icon": "./assets/android-icon-monochrome.png"
         }
       ],
       "./plugins/withWidgets"
@@ -53,6 +54,11 @@
       "eas": {
         "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
       }
+    },
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#050e2b"
     }
   }
 }

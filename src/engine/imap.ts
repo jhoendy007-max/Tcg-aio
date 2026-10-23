@@ -43,7 +43,7 @@ export function assertReadOnly(line: string): void {
   if (!line.trim()) return
   const parts = line.trim().split(/\s+/)
   const verb = (parts[1] ?? parts[0] ?? "").toUpperCase()
-  if (WRITERS.has(verb)) throw new Error("TCGAIO only reads mail. It does not change the mailbox.")
+  if (WRITERS.has(verb)) throw new Error("Zzz AIO only reads mail. It does not change the mailbox.")
 }
 
 /** SASL XOAUTH2 initial client response. The access token is not written to a log by this function. */

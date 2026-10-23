@@ -46,6 +46,7 @@ export function registerIpc(
   updates: UpdateController,
   onSettings?: (settings: Settings) => void
 ): void {
+  const aco = acoGuard(db)
   const publishAlerts = () => {
     const status = phone.status()
     alerts.setUrls({
@@ -108,7 +109,7 @@ export function registerIpc(
   })
   handle(channels.clientsList, () => db.listClients())
   handle(channels.clientsSummaries, () => db.summarizeClients())
-  handle(channels.clientsSave, (input) => db.saveClient(input))
+  handle(channels.clientsSave, (input) => aco() && db.saveClient(input))
   handle(channels.clientsDelete, async (id: string) => {
     const removed = db.deleteClient(id)
     for (const accountId of removed.accountIds) {
@@ -120,10 +121,10 @@ export function registerIpc(
     }
     return removed
   })
-  handle(channels.clientsExport, (id: string) => db.exportClient(id))
-  handle(channels.clientsLedger, (clientId?: string) => db.listLedger(clientId))
-  handle(channels.clientsMarkPaid, (input: { clientId: string; ids: string[]; paid: boolean }) => db.markLedgerPaid(input.clientId, input.ids ?? [], input.paid === true))
-  handle(channels.clientsCsv, (clientId?: string) => ({ csv: db.ledgerExport(clientId) }))
+  handle(channels.clientsExport, (id: string) => aco() && db.exportClient(id))
+  handle(channels.clientsLedger, (clientId?: string) => aco() && db.listLedger(clientId))
+  handle(channels.clientsMarkPaid, (input: { clientId: string; ids: string[]; paid: boolean }) => aco() && db.markLedgerPaid(input.clientId, input.ids ?? [], input.paid === true))
+  handle(channels.clientsCsv, (clientId?: string) => aco() && ({ csv: db.ledgerExport(clientId) }))
   handle(channels.checkoutHealthPreview, (input) => db.previewCheckoutHealth(input))
   handle(channels.checkoutHealthClient, (clientId: string) => db.clientCheckoutHealth(clientId))
   handle(channels.checkoutHealthTasks, () => db.listTaskHealth())
@@ -164,7 +165,7 @@ export function registerIpc(
     if (!webhook) throw new Error("Save a Discord webhook first.")
     await postDiscord(webhook, {
       kind: "success",
-      storeName: "TCGAIO",
+      storeName: "Zzz AIO",
       sku: "Webhook test",
       profileName: "Settings",
       detail: "Discord notifications are connected."
@@ -403,6 +404,14 @@ export function registerIpc(
     db.setVaultTwoWay(deviceId, accountId, twoWay)
     return db.listVault()
   })
+}
+
+/** ACO tools need the "aco" feature in the signed license. The owner always has it. */
+function acoGuard(db: { requireFeature: (feature: "aco") => void }): () => true {
+  return () => {
+    db.requireFeature("aco")
+    return true
+  }
 }
 
 function handle<T>(channel: string, fn: (...args: never[]) => T | Promise<T>): void {

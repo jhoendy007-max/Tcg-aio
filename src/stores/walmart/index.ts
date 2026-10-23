@@ -40,9 +40,9 @@ const BUY_NOW_HASH = "06b9e81cc3226546598a05bd9c72341f924b85136489f589c25a603420
 const PLACE_ORDER_HASH = "adcc04b8125ca24a076fe09d4a9580834bb9a04df022a36bbb4658f76bc888ac"
 
 export const WALMART_PAUSE =
-  "Walmart presented a PerimeterX or press-and-hold challenge. Sign in with your own browser, paste the auth and CID cookies on the account, then resume. TCGAIO does not solve challenges."
+  "Walmart presented a PerimeterX or press-and-hold challenge. Sign in with your own browser, paste the auth and CID cookies on the account, then resume. Zzz AIO does not solve challenges."
 
-const SESSION_PAUSE = "Paste a Walmart browser session (auth and CID cookies) on the account. Password sign-in is blocked by PerimeterX, and TCGAIO does not solve challenges."
+const SESSION_PAUSE = "Paste a Walmart browser session (auth and CID cookies) on the account. Password sign-in is blocked by PerimeterX, and Zzz AIO does not solve challenges."
 const EXPIRED_PAUSE = "The Walmart session expired. Paste a fresh auth and CID cookie, then resume."
 
 class CookieJar {
@@ -444,7 +444,7 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar, contractId: stri
   const response = await gql(ctx, jar, "cartxo", "placeOrder", PLACE_ORDER_HASH, "mutation", placeVariables(ctx, contractId))
   if (response.kind !== "ok") return response
   if (needsCvv(response.value.body) && (response.value.status >= 400 || !findOrderId(response.value.body))) {
-    return { kind: "paused", reason: "Walmart requested CVV verification after the order request. Check your Walmart account for an order before resuming; TCGAIO did not retry the place-order request." }
+    return { kind: "paused", reason: "Walmart requested CVV verification after the order request. Check your Walmart account for an order before resuming; Zzz AIO did not retry the place-order request." }
   }
   if (outOfStock(response.value)) return { kind: "failed", reason: "Walmart reported unavailable stock after the order request. The request was not retried; verify your account before starting again." }
   if (bodyHas(response.value.body, "PAYMENT_DECLINED") || bodyHas(response.value.body, "payment_declined")) {

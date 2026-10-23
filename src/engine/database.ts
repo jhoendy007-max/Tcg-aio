@@ -1,3 +1,4 @@
+import { grantFeatures, type FeatureId } from "../shared/entitlements"
 import { randomUUID } from "node:crypto"
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
@@ -250,7 +251,7 @@ export class Database {
       return
     }
     const parsed = JSON.parse(readFileSync(this.file, "utf8")) as Partial<DbFile>
-    if (parsed.version !== 1) throw new AppError("This data file was written by a newer TCGAIO version.")
+    if (parsed.version !== 1) throw new AppError("This data file was written by a newer Zzz AIO version.")
     const pcId = typeof parsed.pcId === "string" && /^[0-9a-f-]{36}$/i.test(parsed.pcId) ? parsed.pcId : randomUUID()
     this.data = {
       version: 1,
@@ -1658,11 +1659,19 @@ export class Database {
     return this.accessOk
   }
 
+  /** Server-signed feature check. Throws a plain error when this license does not include it. */
+  requireFeature(feature: FeatureId): void {
+    const view = this.accountView()
+    if (view.signedIn && !view.pending && !view.features.includes(feature)) {
+      throw new AppError("ACO is not included in this license. Ask for an ACO key to unlock it.")
+    }
+  }
+
   accountView(now = Date.now()): AccountView {
-    const empty: AccountView = { signedIn: false, pending: false, email: "", role: "", holder: "", plan: "", expiresAt: null, fingerprint: "" }
+    const empty: AccountView = { signedIn: false, pending: false, email: "", role: "", holder: "", plan: "", features: [], expiresAt: null, fingerprint: "" }
     const session = this.data.accountSession
     if (session?.pending) {
-      return { signedIn: true, pending: true, email: session.email ?? "", role: "user", holder: "", plan: "", expiresAt: null, fingerprint: "" }
+      return { signedIn: true, pending: true, email: session.email ?? "", role: "user", holder: "", plan: "", features: [], expiresAt: null, fingerprint: "" }
     }
     if (!this.accessOk) return empty
     const grant = readGrant(session?.envelope ?? "", licensePublicKey())
@@ -1674,6 +1683,7 @@ export class Database {
       role: grant.role,
       holder: grant.holder,
       plan: grant.plan,
+      features: grantFeatures(grant),
       expiresAt: grant.expiresAt,
       fingerprint: grant.fingerprint.slice(0, 12)
     }
@@ -1829,7 +1839,7 @@ export class Database {
   }
 
   restoreBackup(doc: BackupDocument): void {
-    if (!doc || doc.v !== 1) throw new AppError("This backup was written by a newer TCGAIO version.")
+    if (!doc || doc.v !== 1) throw new AppError("This backup was written by a newer Zzz AIO version.")
     const snapshot = structuredClone(this.data)
     try {
       const keptPc = this.data.pcId

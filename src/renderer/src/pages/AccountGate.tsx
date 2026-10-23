@@ -1,3 +1,4 @@
+import { BrandLockup } from "../Logo"
 import { useEffect, useState } from "react"
 import { deskText } from "../../../shared/desk-ui"
 import type { MailLang } from "../../../shared/mail"
@@ -50,6 +51,7 @@ export function AccountGate({ lang, settings, onSettings, onDone }: {
     <section className="page wizard">
       <header className="page-head">
         <div>
+          <BrandLockup />
           <h1>{deskText(lang, mode === "create" ? "createTitle" : "signInTitle")}</h1>
           <p>{deskText(lang, mode === "create" ? "createHint" : "signInHint")}</p>
         </div>
@@ -113,6 +115,7 @@ export function WaitingAccount({ lang, account, onReady, onSignedOut }: {
     <section className="page wizard">
       <header className="page-head">
         <div>
+          <BrandLockup />
           <h1>{deskText(lang, "waitingTitle")}</h1>
           <p>{deskText(lang, "waitingHint")}</p>
         </div>

@@ -15,7 +15,7 @@ export interface SessionBrowser {
 }
 
 /**
- * A normal Chromium window per account. The person signs in. TCGAIO reads the
+ * A normal Chromium window per account. The person signs in. Zzz AIO reads the
  * cookies that browser stored. It does not generate sensor data or a fingerprint.
  */
 export function createSessionBrowser(db: Database, getParent: () => BrowserWindow | null, queue?: SessionWindowQueue): SessionBrowser {

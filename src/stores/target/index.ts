@@ -26,7 +26,7 @@ const ALLOWED_HOSTS = new Set(["carts.target.com", "redsky.target.com", "gsp.tar
 const FIELD_GROUPS = "ADDRESSES,CART,CART_ITEMS,SUMMARY,PAYMENT_INSTRUCTIONS,PROMOTION_CODES"
 
 export const TARGET_PAUSE =
-  "Target presented a challenge or block. Sign in with your own browser, paste accessToken, visitorId, and refreshToken on the account, then resume. TCGAIO does not send challenges to a solving service."
+  "Target presented a challenge or block. Sign in with your own browser, paste accessToken, visitorId, and refreshToken on the account, then resume. Zzz AIO does not send challenges to a solving service."
 
 class CookieJar {
   accessToken = ""
@@ -117,7 +117,7 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (stock.kind === "paused") return { outcome: "paused", reason: stock.reason }
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
-      ctx.log("warn", stock.reason)
+      if (stock.reason !== MONITOR_WAIT) ctx.log("warn", stock.reason)
       await ctx.sleep(retryWait(ctx))
       continue
     }
@@ -310,14 +310,17 @@ async function readStock(
   return secondaryStep
 }
 
+/** The block itself is already logged once in plain words by the monitor's request path. */
+const MONITOR_WAIT = "Waiting before the next stock check."
+
 function interpretMonitor(response: HttpResponse, hasProxy: boolean, monitorOnly = false): Step<StockReading> {
   if (isChallenge(response.status, response.body)) {
     // A monitor has no account browser, so a block is never a checkout challenge. Wait and check again.
-    if (monitorOnly) return { kind: "retry", reason: monitorStatusReason(response.status, hasProxy) ?? `Monitor request returned HTTP ${response.status}. Retrying.` }
+    if (monitorOnly) return { kind: "retry", reason: MONITOR_WAIT }
     return { kind: "paused", reason: TARGET_PAUSE }
   }
   const blocked = monitorStatusReason(response.status, hasProxy)
-  if (blocked) return { kind: "retry", reason: blocked }
+  if (blocked) return { kind: "retry", reason: monitorOnly && [403, 412, 429, 435].includes(response.status) ? MONITOR_WAIT : blocked }
   const reading = parseStock(response.body)
   if (reading) reading.imageUrl = productImage(response.body) || undefined
   const problem = stockProblem(response.body)
@@ -501,7 +504,7 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar, key: string, car
     )
     if (isChallenge(cvv.status, cvv.body)) return { kind: "paused", reason: TARGET_PAUSE }
     if (cvv.status < 200 || cvv.status >= 300) return { kind: "failed", reason: `CVV resubmit failed (${cvv.status}).` }
-    return { kind: "paused", reason: "Target requested CVV verification after the order request. Check your Target account for an order before resuming; TCGAIO did not retry the place-order request." }
+    return { kind: "paused", reason: "Target requested CVV verification after the order request. Check your Target account for an order before resuming; Zzz AIO did not retry the place-order request." }
   }
   if (isChallenge(response.status, response.body)) return { kind: "paused", reason: TARGET_PAUSE }
   if (bodyHas(response.body, "PAYMENT_DECLINED")) return { kind: "failed", reason: "Target declined the card." }

@@ -30,16 +30,16 @@ export interface CheckoutCopy {
 export function checkoutCopy(lang: CheckoutLang): CheckoutCopy {
   if (lang === "es") {
     return {
-      handoff: (title) => `${title} está disponible. La página no tiene un formulario de carrito en esta tienda. Añádelo en el navegador de la cuenta. TCGAIO no lo añadió al carrito ni hizo el pedido.`,
+      handoff: (title) => `${title} está disponible. La página no tiene un formulario de carrito en esta tienda. Añádelo en el navegador de la cuenta. Zzz AIO no lo añadió al carrito ni hizo el pedido.`,
       overCap: (cap) => `El precio supera el máximo de $${cap.toFixed(2)} de esta compra. No se añadió al carrito.`,
       noPayment: (name) => `${name} no muestra una tarjeta guardada de este perfil ni un formulario de pago en la tienda. El número de tarjeta no se envió.`,
       noPlace: (name) => `${name} no mostró un formulario de pedido en la tienda. El pedido no se envió.`,
       pickup: "Esta compra solo ofrece recogida en tienda. La v1 solo hace pedidos a domicilio en EE. UU.",
       notSignedIn: (name) => `The ${name} session is not signed in. La sesión de ${name} no ha iniciado sesión. Inicia sesión en Session Keeper y reanuda.`,
-      needSession: (name) => `${name} tiene stock. Pega una sesión iniciada para comprar. TCGAIO no lo añadió al carrito ni hizo el pedido.`,
-      challenge: (name) => `${name} presented a challenge. Termínalo en tu navegador, pega una sesión nueva si hace falta y reanuda. TCGAIO no resuelve desafíos.`,
+      needSession: (name) => `${name} tiene stock. Pega una sesión iniciada para comprar. Zzz AIO no lo añadió al carrito ni hizo el pedido.`,
+      challenge: (name) => `${name} presented a challenge. Termínalo en tu navegador, pega una sesión nueva si hace falta y reanuda. Zzz AIO no resuelve desafíos.`,
       repeated: "El formulario de compra se repitió, así que el pedido no se envió.",
-      offHost: "La tienda redirigió fuera de su sitio. TCGAIO no siguió esa redirección.",
+      offHost: "La tienda redirigió fuera de su sitio. Zzz AIO no siguió esa redirección.",
       stepFailed: (status) => `La compra devolvió HTTP ${status}. El pedido no se envió.`,
       soldOut: "La tienda dijo que no hay stock. Se vuelve al monitor.",
       cartPass: "Añadido al carrito.",
@@ -53,16 +53,16 @@ export function checkoutCopy(lang: CheckoutLang): CheckoutCopy {
     }
   }
   return {
-    handoff: (title) => `${title} is in stock. The page has no add-to-cart form on this store, so add it in the account browser. TCGAIO did not add it to the cart or place an order.`,
+    handoff: (title) => `${title} is in stock. The page has no add-to-cart form on this store, so add it in the account browser. Zzz AIO did not add it to the cart or place an order.`,
     overCap: (cap) => `The price is above this checkout's max of $${cap.toFixed(2)}. The item was not added to the cart.`,
     noPayment: (name) => `${name} checkout has no saved card matching this profile and no payment form on the store. The card number was not sent.`,
     noPlace: (name) => `${name} did not show a place-order form on the store. The order was not sent.`,
     pickup: "This checkout is offering pickup only. v1 places US ship-to-home orders only.",
     notSignedIn: (name) => `The ${name} session is not signed in. Sign in on the Session Keeper page, then resume.`,
-    needSession: (name) => `${name} is in stock. Paste a signed-in session to check out. TCGAIO did not add it to the cart or place an order.`,
-    challenge: (name) => `${name} presented a challenge. Finish it in your own browser, paste a fresh session if needed, then resume. TCGAIO does not solve challenges.`,
+    needSession: (name) => `${name} is in stock. Paste a signed-in session to check out. Zzz AIO did not add it to the cart or place an order.`,
+    challenge: (name) => `${name} presented a challenge. Finish it in your own browser, paste a fresh session if needed, then resume. Zzz AIO does not solve challenges.`,
     repeated: "The checkout form repeated, so the order was not sent.",
-    offHost: "The store redirected away from its own site. TCGAIO did not follow that redirect.",
+    offHost: "The store redirected away from its own site. Zzz AIO did not follow that redirect.",
     stepFailed: (status) => `Checkout returned HTTP ${status}. The order was not sent.`,
     soldOut: "The store said the item is out of stock. Returning to the monitor.",
     cartPass: "Added the item to the cart.",
