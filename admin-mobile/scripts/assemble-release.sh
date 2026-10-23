@@ -66,8 +66,21 @@ if [[ -n "$APKSIGNER" ]]; then
     TARGET="$("$AAPT" dump badging "$APK" | grep -o "targetSdkVersion:'[0-9]*'" || true)"
     echo "APK $TARGET"
     [[ "$TARGET" == "targetSdkVersion:'36'" ]] || { echo "Release APK targetSdk is not 36." >&2; exit 1; }
+    if "$AAPT" dump badging "$APK" | grep -q "application-debuggable"; then
+      echo "Release APK is debuggable." >&2
+      exit 1
+    fi
   fi
   printf '%s\n' "$CERT" | head -n 20
+  # Same key as every APK already installed (0.2.x). A different cert means updates would fail.
+  EXPECTED_CERT="${TCGAIO_EXPECTED_CERT_SHA256:-9cd58f8d1d3ec57c1ab164eb0f7b8069394fe4dce73ccd211187a69e81e00afd}"
+  if ! printf '%s\n' "$CERT" | grep -q "certificate SHA-256 digest: $EXPECTED_CERT"; then
+    if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+      echo "Release APK signing certificate does not match the published key ($EXPECTED_CERT)." >&2
+      exit 1
+    fi
+    echo "::warning::APK signing certificate differs from the published key (not a tag build)."
+  fi
   if printf '%s\n' "$CERT" | grep -qi "CN=Android Debug"; then
     echo "Release APK is still signed with the Android debug certificate." >&2
     exit 1

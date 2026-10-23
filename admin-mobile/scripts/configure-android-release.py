@@ -37,13 +37,11 @@ gradle_properties.write_text(properties)
 
 manifest_path = mobile / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
 manifest = manifest_path.read_text()
+# The admin app only talks HTTPS to the license server: no cleartext, ever.
+manifest = re.sub(r'android:usesCleartextTraffic="true"', 'android:usesCleartextTraffic="false"', manifest)
 if "usesCleartextTraffic" not in manifest:
-    manifest = manifest.replace(
-        "<application ",
-        '<application android:usesCleartextTraffic="true" ',
-        1,
-    )
-    manifest_path.write_text(manifest)
+    manifest = manifest.replace("<application ", '<application android:usesCleartextTraffic="false" ', 1)
+manifest_path.write_text(manifest)
 
 gradle = app_gradle.read_text()
 if "TCGAIO_RELEASE_SIGNING" not in gradle:
