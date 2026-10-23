@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
+import { Alert, AppState, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native"
 import Constants from "expo-constants"
 import { StatusBar } from "expo-status-bar"
 import * as LocalAuthentication from "expo-local-authentication"
@@ -111,12 +111,23 @@ export default function App() {
   const [nextPassword, setNextPassword] = useState("")
   const seenPending = useRef<number | null>(null)
   const sessionGen = useRef(0)
+  // 0.2.39: short access token + rotating refresh token kept in SecureStore (Android Keystore-encrypted).
+  const tokenRef = useRef("")
+  const expRef = useRef(0)
+  const renewing = useRef<Promise<string | null> | null>(null)
 
   useEffect(() => { void restore() }, [])
 
   useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active" && tokenRef.current) void renewSoon(base).catch(() => undefined)
+    })
+    return () => sub.remove()
+  }, [base])
+
+  useEffect(() => {
     if (phase !== "desk" || !token) return
-    const timer = setInterval(() => { void refresh(base, token, query, tab, false).catch(report) }, 15000)
+    const timer = setInterval(() => { void renewSoon(base).catch(() => undefined).then(() => refresh(base, token, query, tab, false)).catch(report) }, 15000)
     return () => clearInterval(timer)
   }, [phase, token, base, query, tab])
 
@@ -126,11 +137,14 @@ export default function App() {
       const savedEmail = await SecureStore.getItemAsync("tcgaio-admin-email")
       const savedToken = await SecureStore.getItemAsync("tcgaio-admin-token")
       const savedExp = Number(await SecureStore.getItemAsync("tcgaio-admin-exp") ?? "0")
+      const savedRefresh = await SecureStore.getItemAsync("tcgaio-admin-refresh")
       const server = (savedUrl || bakedUrl).replace(/\/$/, "")
       setBase(server)
       if (savedEmail) setEmail(savedEmail)
-      if (savedToken && savedExp > Date.now()) {
+      if (savedToken && (savedExp > Date.now() || savedRefresh)) {
         setToken(savedToken)
+        tokenRef.current = savedToken
+        expRef.current = savedExp
         const hardware = await LocalAuthentication.hasHardwareAsync().catch(() => false)
         const enrolled = hardware ? await LocalAuthentication.isEnrolledAsync().catch(() => false) : false
         if (enrolled) {
@@ -157,6 +171,70 @@ export default function App() {
   async function clearStoredSession() {
     await SecureStore.deleteItemAsync("tcgaio-admin-token").catch(() => undefined)
     await SecureStore.deleteItemAsync("tcgaio-admin-exp").catch(() => undefined)
+    await SecureStore.deleteItemAsync("tcgaio-admin-refresh").catch(() => undefined)
+    tokenRef.current = ""
+    expRef.current = 0
+  }
+
+  async function deviceId(): Promise<string> {
+    const saved = await SecureStore.getItemAsync("tcgaio-admin-device")
+    if (saved && /^[A-Za-z0-9_-]{16,128}$/.test(saved)) return saved
+    const bytes = Array.from({ length: 24 }, () => Math.floor(Math.random() * 256))
+    const crypto = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto
+    const random = crypto?.getRandomValues ? Array.from(crypto.getRandomValues(new Uint8Array(24))) : bytes
+    const id = random.map((b) => b.toString(16).padStart(2, "0")).join("")
+    await SecureStore.setItemAsync("tcgaio-admin-device", id)
+    return id
+  }
+
+  async function storeSession(payload: Record<string, unknown>): Promise<string> {
+    const next = String(payload.token ?? "")
+    const exp = Number(payload.expiresAt ?? 0)
+    if (!next) throw new Error("The server did not return a sign-in token.")
+    await SecureStore.setItemAsync("tcgaio-admin-token", next)
+    await SecureStore.setItemAsync("tcgaio-admin-exp", String(exp))
+    if (typeof payload.refreshToken === "string" && payload.refreshToken) await SecureStore.setItemAsync("tcgaio-admin-refresh", payload.refreshToken)
+    tokenRef.current = next
+    expRef.current = exp
+    setToken(next)
+    return next
+  }
+
+  /** Swaps the refresh token for a new pair. null = the server says sign in again; throws on network trouble. */
+  function renewAccess(server: string): Promise<string | null> {
+    if (renewing.current) return renewing.current
+    const run = (async () => {
+      const refreshToken = await SecureStore.getItemAsync("tcgaio-admin-refresh")
+      if (!refreshToken) return null
+      const response = await fetch(`${server}/v1/admin/refresh`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken, deviceId: await deviceId() })
+      })
+      const payload = await response.json().catch(() => ({})) as Record<string, unknown>
+      if (response.status === 401) return null
+      if (!response.ok || payload.ok === false) throw new Error(typeof payload.error === "string" ? payload.error : "Could not refresh the admin sign-in.")
+      return storeSession(payload)
+    })()
+    renewing.current = run
+    void run.finally(() => { renewing.current = null }).catch(() => undefined)
+    return run
+  }
+
+  async function renewSoon(server: string) {
+    if (!tokenRef.current) return
+    if (expRef.current - Date.now() > 5 * 60 * 1000) return
+    const next = await renewAccess(server)
+    if (next === null && expRef.current <= Date.now()) await endSession("Sign in to the admin desk again.")
+  }
+
+  async function handleAuthError(message: string) {
+    try {
+      if (await renewAccess(base)) return
+    } catch {
+      return
+    }
+    await endSession(message)
   }
 
   async function endSession(message: string) {
@@ -172,13 +250,14 @@ export default function App() {
 
   function report(err: unknown) {
     if (err instanceof DeskAuthError) {
-      void endSession(err.message || "Sign in to the admin desk again.")
+      void handleAuthError(err.message || "Sign in to the admin desk again.")
       return
     }
     setError(err instanceof Error ? err.message : "Request failed.")
   }
 
-  async function call(server: string, path: string, auth: string, method = "GET", body?: unknown, login = false): Promise<Record<string, unknown>> {
+  async function call(server: string, path: string, auth: string, method = "GET", body?: unknown, login = false, retried = false): Promise<Record<string, unknown>> {
+    if (auth && tokenRef.current) auth = tokenRef.current
     const response = await fetch(`${server}${path}`, {
       method,
       headers: {
@@ -189,6 +268,10 @@ export default function App() {
     })
     const payload = await response.json().catch(() => ({})) as Record<string, unknown>
     const message = typeof payload.error === "string" ? payload.error : "Request failed."
+    if (response.status === 401 && !login && !retried && auth) {
+      const renewed = await renewAccess(server).catch(() => null)
+      if (renewed) return call(server, path, renewed, method, body, login, true)
+    }
     if (response.status === 401 && !login) throw new DeskAuthError(message || "Sign in to the admin desk again.")
     if (!response.ok || payload.ok === false) throw new Error(message)
     return payload
@@ -258,18 +341,14 @@ export default function App() {
     setError("")
     try {
       const server = (base.trim() || DEFAULT_SERVER).replace(/\/$/, "")
-      const payload = await call(server, "/v1/admin/login", "", "POST", { email: email.trim(), password }, true)
-      const next = String(payload.token ?? "")
-      const exp = Number(payload.expiresAt ?? 0)
-      if (!next) throw new Error("The server did not return a sign-in token.")
+      const payload = await call(server, "/v1/admin/login", "", "POST", { email: email.trim(), password, deviceId: await deviceId() }, true)
       const savedEmail = email.trim()
+      await SecureStore.deleteItemAsync("tcgaio-admin-refresh").catch(() => undefined)
+      const next = await storeSession(payload)
       await SecureStore.setItemAsync("tcgaio-admin-url", server)
       await SecureStore.setItemAsync("tcgaio-admin-email", savedEmail)
-      await SecureStore.setItemAsync("tcgaio-admin-token", next)
-      await SecureStore.setItemAsync("tcgaio-admin-exp", String(exp))
       setBase(server)
       setEmail(savedEmail)
-      setToken(next)
       setPassword("")
       await openDesk(server, next)
       setPhase("desk")
@@ -281,6 +360,14 @@ export default function App() {
   }
 
   async function signOut() {
+    // Revoke the refresh token on the server; sign out locally even if offline.
+    const refreshToken = await SecureStore.getItemAsync("tcgaio-admin-refresh").catch(() => null)
+    const access = tokenRef.current
+    await fetch(`${base}/v1/admin/logout`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(access ? { authorization: `Bearer ${access}` } : {}) },
+      body: JSON.stringify(refreshToken ? { refreshToken } : {})
+    }).catch(() => undefined)
     await endSession("")
   }
 
@@ -454,10 +541,11 @@ export default function App() {
             <Text style={styles.label}>Email</Text>
             <TextInput style={styles.input} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" value={email} onChangeText={setEmail} />
             <Text style={styles.label}>Password</Text>
-            <TextInput style={styles.input} secureTextEntry value={password} onChangeText={setPassword} />
+            <TextInput style={styles.input} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="password" value={password} onChangeText={setPassword} />
             <Pressable style={styles.primary} disabled={busy} onPress={() => void signIn()}><Text style={styles.primaryText}>{busy ? "Signing in…" : "Sign in"}</Text></Pressable>
           </View>
         ) : null}
+        {phase === "login" ? <AdminUpdatePrompt base={base} token="" onAuthError={() => setError("Sign in to download the update.")} /> : null}
         {phase === "desk" ? (
           <View style={styles.desk}>
             <View style={styles.toolbar}>
@@ -474,7 +562,7 @@ export default function App() {
                 <Pressable style={styles.primary} disabled={busy} onPress={() => void changePassword()}><Text style={styles.primaryText}>{busy ? "Saving…" : "Save password"}</Text></Pressable>
               </View>
             ) : null}
-            <AdminUpdatePrompt base={base} token={token} onAuthError={(message) => void endSession(message)} />
+            <AdminUpdatePrompt base={base} token={token} onAuthError={(message) => void handleAuthError(message)} />
             {createdKey ? (
               <View style={styles.keyCard}>
                 <Text style={styles.label}>License key, copy it now</Text>

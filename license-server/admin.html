@@ -104,14 +104,40 @@
   <script>
     const error = document.getElementById("error")
     const emailInput = document.getElementById("email")
-    let token = localStorage.getItem("tcgaio-admin") || ""
+    // 0.2.39: access token lives in memory only; the long-lived refresh token is an httpOnly cookie.
+    localStorage.removeItem("tcgaio-admin")
+    let token = ""
+    let tokenExp = 0
+    let renewing = null
+    function deviceId() {
+      let id = localStorage.getItem("tcgaio-admin-device") || ""
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(id)) {
+        id = Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("")
+        localStorage.setItem("tcgaio-admin-device", id)
+      }
+      return id
+    }
+    function renew() {
+      if (renewing) return renewing
+      renewing = fetch("/v1/admin/refresh", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ deviceId: deviceId() }) })
+        .then(async (response) => {
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok || !payload.token) return false
+          token = payload.token
+          tokenExp = Number(payload.expiresAt || 0)
+          return true
+        })
+        .catch(() => false)
+        .finally(() => { renewing = null })
+      return renewing
+    }
     let createdId = ""
     let tab = "pending"
     emailInput.value = localStorage.getItem("tcgaio-admin-email") || ""
     const showError = (message) => { error.className = message ? "error" : ""; error.textContent = message || "" }
     function showLogin(message) {
       token = ""
-      localStorage.removeItem("tcgaio-admin")
+      tokenExp = 0
       document.getElementById("login").hidden = false
       document.getElementById("desk").hidden = true
       document.getElementById("sign-out").hidden = true
@@ -168,13 +194,15 @@
       }
       actions.append(picker.wrap, remove)
     }
-    async function api(path, options = {}) {
+    async function api(path, options = {}, retried = false) {
       const response = await fetch(path, {
+        credentials: "same-origin",
         method: options.method || "GET",
         headers: { "content-type": "application/json", ...(token ? { authorization: "Bearer " + token } : {}) },
         body: options.body ? JSON.stringify(options.body) : undefined
       })
       const payload = await response.json().catch(() => ({}))
+      if (response.status === 401 && !options.login && !retried && await renew()) return api(path, options, true)
       if (response.status === 401 && !options.login) {
         const err = new Error(payload.error || "Sign in to the admin desk again.")
         err.session = true
@@ -344,9 +372,9 @@
       event.preventDefault()
       showError("")
       try {
-        const payload = await api("/v1/admin/login", { method: "POST", login: true, body: { email: emailInput.value, password: password.value } })
+        const payload = await api("/v1/admin/login", { method: "POST", login: true, body: { email: emailInput.value, password: password.value, deviceId: deviceId(), web: true } })
         token = payload.token
-        localStorage.setItem("tcgaio-admin", token)
+        tokenExp = Number(payload.expiresAt || 0)
         localStorage.setItem("tcgaio-admin-email", emailInput.value.trim())
         showDesk()
         await load()
@@ -357,7 +385,10 @@
     }
     document.getElementById("create").onclick = () => { document.getElementById("create-form").hidden = false }
     document.getElementById("search").oninput = () => load().catch(guard)
-    document.getElementById("sign-out").onclick = () => showLogin("")
+    document.getElementById("sign-out").onclick = async () => {
+      await fetch("/v1/admin/logout", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...(token ? { authorization: "Bearer " + token } : {}) }, body: "{}" }).catch(() => undefined)
+      showLogin("")
+    }
     document.getElementById("change-password").onclick = () => { const form = document.getElementById("password-form"); form.hidden = !form.hidden; if (!form.hidden) document.getElementById("current-password").focus() }
     document.getElementById("cancel-password").onclick = () => { document.getElementById("password-form").hidden = true }
     document.getElementById("password-form").onsubmit = async (event) => {
@@ -388,11 +419,17 @@
       console.error(event.error || event.message)
       showError(event.message || "Something went wrong.")
     })
-    if (token) {
+    renew().then((ok) => {
+      if (!ok) return
       showDesk()
       load().catch(guard)
-    }
-    setInterval(() => { if (token) load().catch(guard) }, 15000)
+    })
+    setInterval(async () => {
+      if (!token) return
+      if (tokenExp - Date.now() < 5 * 60 * 1000) await renew()
+      load().catch(guard)
+    }, 15000)
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && token && tokenExp - Date.now() < 5 * 60 * 1000) renew() })
   </script>
   <dialog id="confirm-delete">
     <form method="dialog">

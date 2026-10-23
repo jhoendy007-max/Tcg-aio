@@ -31,6 +31,13 @@ const ARGON = { t: 2, m: 8192, p: 1, dkLen: 32 }
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const TRANSFER_MS = 30 * 24 * 60 * 60 * 1000
 const ADMIN_MS = 12 * 60 * 60 * 1000
+/** Access token lifetime when the client also holds a refresh token (0.2.39+). */
+const ADMIN_ACCESS_MS = 60 * 60 * 1000
+/** Refresh tokens slide: every rotation pushes this out again, so an active device stays signed in until Sign out. */
+const ADMIN_REFRESH_MS = 365 * 24 * 60 * 60 * 1000
+/** A just-rotated token is still honored briefly so a dropped response does not sign the device out. */
+const ADMIN_REFRESH_GRACE_MS = 60 * 1000
+export const ADMIN_REFRESH_COOKIE = "zzz_admin_rt"
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000
 const RATE_WINDOW_MS = 10 * 60 * 1000
 const RATE_LIMIT = 8
@@ -47,9 +54,11 @@ export interface LicenseApiOptions {
   adminApkDir?: string
 }
 
+export interface ApiResult { status: number; body: string; setCookie?: string }
+
 export interface LicenseApi {
   publicKey: string
-  handle(method: string, path: string, headers: Record<string, string | undefined>, raw: string, ip?: string): { status: number; body: string }
+  handle(method: string, path: string, headers: Record<string, string | undefined>, raw: string, ip?: string): ApiResult
   storeAdminApk(input: { version: string; versionCode: number; bytes: Buffer; authorization: string; notes?: string }): { status: number; body: string }
   adminDownload(headers: Record<string, string | undefined>, ticket?: string): { status: number; body: string; file?: string; size?: number }
   attachRelay(server: { on(event: "upgrade", listener: (req: IncomingMessage, socket: unknown, head: Buffer) => void): void }): void
@@ -102,6 +111,17 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
     CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS login_failures (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, ip TEXT NOT NULL, at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS rate_limits (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS admin_refresh_tokens (
+      token_hash TEXT PRIMARY KEY,
+      family TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      rotated_at INTEGER,
+      access_hash TEXT
+    );
+    CREATE INDEX IF NOT EXISTS admin_refresh_family ON admin_refresh_tokens (family);
     CREATE TABLE IF NOT EXISTS admin_download_tickets (
       token_hash TEXT PRIMARY KEY,
       expires_at INTEGER NOT NULL
@@ -118,7 +138,7 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
   const apkDir = options.adminApkDir?.trim() || dirname(options.dbPath)
   const rates = new Map<string, { count: number; resetAt: number }>()
 
-  function handle(method: string, path: string, headers: Record<string, string | undefined>, raw: string, ip = "local"): { status: number; body: string } {
+  function handle(method: string, path: string, headers: Record<string, string | undefined>, raw: string, ip = "local"): ApiResult {
     try {
       const url = new URL(path, "http://127.0.0.1")
       const route = url.pathname.replace(/\/$/, "") || "/"
@@ -128,10 +148,17 @@ export function openLicenseApi(options: LicenseApiOptions): LicenseApi {
       const body = raw ? parseObject(raw) : {}
       if (requestHasSecret(body)) return json(400, { ok: false, error: "License data cannot include card, cookie, or session fields." })
       if (method === "POST" && route === "/v1/owner/setup") return setupOwner(db, body, now)
-      if ((method === "POST" && (route === "/v1/account/login" || route === "/v1/account/claim" || route === "/v1/account/signup" || route === "/v1/admin/login" || route === "/v1/admin/password")) && !takeRate(rates, `${route}:${ip}`, now())) {
+      if ((method === "POST" && (route === "/v1/account/login" || route === "/v1/account/claim" || route === "/v1/account/signup" || route === "/v1/admin/login" || route === "/v1/admin/password" || route === "/v1/admin/refresh")) && !takeRate(rates, `${route}:${ip}`, now())) {
         return json(429, { ok: false, error: "Too many attempts. Wait a few minutes and try again." })
       }
-      if (method === "POST" && route === "/v1/admin/login") return adminLogin(db, body, now)
+      if (method === "POST" && route === "/v1/admin/login") return adminLogin(db, body, headers, ip, now, options.push)
+      if (method === "POST" && route === "/v1/admin/refresh") return adminRefresh(db, body, headers, ip, now)
+      if (method === "POST" && route === "/v1/admin/logout") return adminLogout(db, body, headers, now)
+      if (method === "GET" && route === "/v1/admin/app/latest") {
+        // Public update check: version info only. The APK download still needs an admin session or ticket.
+        const release = adminRelease(db)
+        return json(200, { ok: true, version: release.version, versionCode: release.versionCode, available: release.available })
+      }
       if (method === "POST" && route === "/v1/account/signup") return signup(db, body, now, () => notify(db, options.push, "signup", "New signup", `${normalizeEmail(text(body.email))} created an account and is waiting for a license.`))
       if (method === "POST" && route === "/v1/account/claim") return claim(db, identity.privateKey, body, now, () => notify(db, options.push, "claimed", "License claimed", `${text(body.email)} claimed a license.`))
       if (method === "POST" && route === "/v1/account/redeem") return redeem(db, identity.privateKey, body, now, options.push)
@@ -288,7 +315,7 @@ export function listenLicenseApi(options: LicenseApiOptions & { port?: number; h
       const ip = clientAddress(req.socket.remoteAddress, Array.isArray(forwarded) ? forwarded[0] : forwarded, options.trustProxy === true)
       const result = api.handle(req.method ?? "GET", path, headers, Buffer.concat(chunks).toString("utf8"), ip)
       const contentType = result.body.startsWith("<") ? "text/html; charset=utf-8" : "application/json"
-      res.writeHead(result.status, { "content-type": contentType })
+      res.writeHead(result.status, { "content-type": contentType, "cache-control": "no-store", ...(result.setCookie ? { "set-cookie": result.setCookie } : {}) })
       res.end(result.body)
     })
   })
@@ -419,6 +446,7 @@ export function changeOwnerPassword(db: DatabaseSync, password: string): void {
   if (next.length < 8) throw new Error("Use a password of at least 8 characters.")
   db.prepare("UPDATE users SET password_hash = ?, verified = 1 WHERE id = ?").run(hashPassword(next), owner.id)
   db.prepare("DELETE FROM sessions WHERE user_id = ?").run(owner.id)
+  db.prepare("DELETE FROM admin_refresh_tokens WHERE user_id = ?").run(owner.id)
 }
 
 function changeAdminPassword(db: DatabaseSync, user: UserRow, body: Record<string, unknown>): { status: number; body: string } {
@@ -500,16 +528,116 @@ function login(db: DatabaseSync, privateKey: string, body: Record<string, unknow
   return bindAndIssue(db, privateKey, user, fingerprint, now, push)
 }
 
-function adminLogin(db: DatabaseSync, body: Record<string, unknown>, now: () => number): { status: number; body: string } {
+function adminLogin(db: DatabaseSync, body: Record<string, unknown>, headers: Record<string, string | undefined>, ip: string, now: () => number, push?: LicenseApiOptions["push"]): ApiResult {
   const email = normalizeEmail(text(body.email))
   const password = text(body.password)
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as UserRow | undefined
-  if (!user || user.role !== "owner" || !user.verified || !user.password_hash || !verifyPassword(password, user.password_hash)) {
-    return json(401, { ok: false, error: "That admin sign-in was not accepted." })
+  const reason = !user ? "unknown_email" : user.role !== "owner" ? "not_owner" : !user.verified ? "unverified" : !user.password_hash ? "no_password" : !verifyPassword(password, user.password_hash) ? "wrong_password" : ""
+  if (reason || !user) {
+    // Never log the password, only who/where/why.
+    console.warn(`[admin] sign-in failed email=${JSON.stringify(email)} ip=${ip} reason=${reason}`)
+    noteFailure(db, email, ip, now, push)
+    return json(401, { ok: false, error: "Wrong email or password." })
   }
-  const token = randomBytes(32).toString("base64url")
-  db.prepare("INSERT INTO sessions (token_hash, user_id, fingerprint, expires_at, kind) VALUES (?, ?, '', ?, 'admin')").run(sha(token), user.id, now() + ADMIN_MS)
-  return json(200, { ok: true, token, expiresAt: now() + ADMIN_MS, email: user.email, role: "owner" })
+  const deviceId = cleanDeviceId(body.deviceId)
+  const web = body.web === true
+  if (!deviceId) {
+    // Pre-0.2.39 clients: one 12 hour token, exactly as before.
+    const token = randomBytes(32).toString("base64url")
+    db.prepare("INSERT INTO sessions (token_hash, user_id, fingerprint, expires_at, kind) VALUES (?, ?, '', ?, 'admin')").run(sha(token), user.id, now() + ADMIN_MS)
+    console.log(`[admin] signed in ip=${ip} legacy=1`)
+    return json(200, { ok: true, token, expiresAt: now() + ADMIN_MS, email: user.email, role: "owner" })
+  }
+  console.log(`[admin] signed in ip=${ip} device=${deviceId.slice(0, 8)} web=${web ? 1 : 0}`)
+  return issueAdminPair(db, user, deviceId, randomId(), web, headers, now)
+}
+
+function cleanDeviceId(value: unknown): string {
+  const id = text(value)
+  return /^[A-Za-z0-9_-]{16,128}$/.test(id) ? id : ""
+}
+
+function issueAdminPair(db: DatabaseSync, user: UserRow, deviceId: string, family: string, web: boolean, headers: Record<string, string | undefined>, now: () => number): ApiResult {
+  const access = randomBytes(32).toString("base64url")
+  const refresh = randomBytes(48).toString("base64url")
+  const at = now()
+  db.prepare("INSERT INTO sessions (token_hash, user_id, fingerprint, expires_at, kind) VALUES (?, ?, '', ?, 'admin')").run(sha(access), user.id, at + ADMIN_ACCESS_MS)
+  db.prepare("INSERT INTO admin_refresh_tokens (token_hash, family, user_id, device_id, expires_at, created_at, rotated_at, access_hash) VALUES (?, ?, ?, ?, ?, ?, NULL, ?)").run(sha(refresh), family, user.id, sha(deviceId), at + ADMIN_REFRESH_MS, at, sha(access))
+  db.prepare("DELETE FROM sessions WHERE kind = 'admin' AND expires_at <= ?").run(at)
+  db.prepare("DELETE FROM admin_refresh_tokens WHERE expires_at <= ? OR (rotated_at IS NOT NULL AND rotated_at <= ?)").run(at, at - 7 * 24 * 60 * 60 * 1000)
+  const payload: Record<string, unknown> = { ok: true, token: access, expiresAt: at + ADMIN_ACCESS_MS, email: user.email, role: "owner" }
+  if (!web) return json(200, { ...payload, refreshToken: refresh, refreshExpiresAt: at + ADMIN_REFRESH_MS })
+  return { ...json(200, payload), setCookie: refreshCookie(refresh, ADMIN_REFRESH_MS, secureRequest(headers)) }
+}
+
+function refreshCookie(value: string, maxAgeMs: number, secure: boolean): string {
+  return `${ADMIN_REFRESH_COOKIE}=${value}; Path=/v1/admin; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(maxAgeMs / 1000)}${secure ? "; Secure" : ""}`
+}
+
+function secureRequest(headers: Record<string, string | undefined>): boolean {
+  const proto = (headers["x-forwarded-proto"] ?? "").toLowerCase()
+  const host = (headers.host ?? "").toLowerCase()
+  return proto === "https" || !(host.startsWith("127.0.0.1") || host.startsWith("localhost"))
+}
+
+function presentedRefresh(body: Record<string, unknown>, headers: Record<string, string | undefined>): { token: string; web: boolean } {
+  const fromBody = text(body.refreshToken)
+  if (fromBody) return { token: fromBody, web: false }
+  const cookie = headers.cookie ?? ""
+  for (const part of cookie.split(";")) {
+    const [name, ...rest] = part.trim().split("=")
+    if (name === ADMIN_REFRESH_COOKIE) return { token: rest.join("="), web: true }
+  }
+  return { token: "", web: false }
+}
+
+function adminRefresh(db: DatabaseSync, body: Record<string, unknown>, headers: Record<string, string | undefined>, ip: string, now: () => number): ApiResult {
+  const presented = presentedRefresh(body, headers)
+  const deviceId = cleanDeviceId(body.deviceId)
+  const signedOut = (): ApiResult => ({ ...json(401, { ok: false, error: "Sign in to the admin desk again." }), ...(presented.web ? { setCookie: refreshCookie("", 0, secureRequest(headers)) } : {}) })
+  if (!presented.token || !deviceId) return signedOut()
+  const at = now()
+  const row = db.prepare("SELECT * FROM admin_refresh_tokens WHERE token_hash = ?").get(sha(presented.token)) as { family: string; user_id: string; device_id: string; expires_at: number; rotated_at: number | null } | undefined
+  if (!row || row.expires_at <= at) return signedOut()
+  if (row.device_id !== sha(deviceId)) {
+    console.warn(`[admin] refresh rejected ip=${ip} reason=device_mismatch`)
+    revokeAdminFamily(db, row.family)
+    return signedOut()
+  }
+  if (row.rotated_at !== null && at - row.rotated_at > ADMIN_REFRESH_GRACE_MS) {
+    // A rotated token came back after the grace window: treat it as stolen and end that device's sign-in.
+    console.warn(`[admin] refresh rejected ip=${ip} reason=reuse`)
+    revokeAdminFamily(db, row.family)
+    return signedOut()
+  }
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(row.user_id) as UserRow | undefined
+  if (!user || user.role !== "owner" || !user.password_hash) {
+    revokeAdminFamily(db, row.family)
+    return signedOut()
+  }
+  // Rotate: the presented token and any sibling issued in the grace window are retired; one fresh pair is issued.
+  const live = db.prepare("SELECT token_hash, access_hash FROM admin_refresh_tokens WHERE family = ? AND rotated_at IS NULL").all(row.family) as Array<{ token_hash: string; access_hash: string | null }>
+  for (const item of live) if (item.access_hash) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(item.access_hash)
+  db.prepare("UPDATE admin_refresh_tokens SET rotated_at = ? WHERE family = ? AND rotated_at IS NULL").run(at, row.family)
+  return issueAdminPair(db, user, deviceId, row.family, presented.web, headers, now)
+}
+
+function revokeAdminFamily(db: DatabaseSync, family: string): void {
+  const rows = db.prepare("SELECT access_hash FROM admin_refresh_tokens WHERE family = ?").all(family) as Array<{ access_hash: string | null }>
+  for (const item of rows) if (item.access_hash) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(item.access_hash)
+  db.prepare("DELETE FROM admin_refresh_tokens WHERE family = ?").run(family)
+}
+
+function adminLogout(db: DatabaseSync, body: Record<string, unknown>, headers: Record<string, string | undefined>, now: () => number): ApiResult {
+  const presented = presentedRefresh(body, headers)
+  if (presented.token) {
+    const row = db.prepare("SELECT family FROM admin_refresh_tokens WHERE token_hash = ?").get(sha(presented.token)) as { family: string } | undefined
+    if (row) revokeAdminFamily(db, row.family)
+  }
+  const match = /^Bearer\s+(\S+)$/.exec(headers.authorization ?? "")
+  if (match) db.prepare("DELETE FROM sessions WHERE token_hash = ? AND kind = 'admin'").run(sha(match[1]))
+  void now
+  return { ...json(200, { ok: true }), setCookie: refreshCookie("", 0, secureRequest(headers)) }
 }
 
 function heartbeat(db: DatabaseSync, privateKey: string, body: Record<string, unknown>, now: () => number, push?: LicenseApiOptions["push"]): { status: number; body: string } {
