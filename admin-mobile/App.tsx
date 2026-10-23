@@ -240,7 +240,7 @@ export default function App() {
   }
 
   async function unlock() {
-    const result = await LocalAuthentication.authenticateAsync({ promptMessage: "Unlock Zzz AP" })
+    const result = await LocalAuthentication.authenticateAsync({ promptMessage: "Unlock Zzz AIO Admin" })
     if (!result.success) {
       setError("Unlock was cancelled.")
       return
@@ -429,7 +429,7 @@ export default function App() {
         <View style={styles.header}>
           <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginRight: 10 }} accessibilityLabel="Zzz logo" />
           <View style={styles.headerCopy}>
-            <Text style={styles.mark}>Zzz AP</Text>
+            <Text style={styles.mark}>Zzz AIO Admin</Text>
             <Text style={styles.title}>Admin</Text>
             {appVersion ? <Text style={styles.version}>v{appVersion}</Text> : null}
           </View>

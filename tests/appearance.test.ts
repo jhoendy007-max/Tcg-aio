@@ -74,7 +74,7 @@ describe("appearance", () => {
     })
     expect(fallback.theme).toBe("dark")
     expect(fallback.accent).toBe("gold")
-    expect(fallback.appName).toBe("TCGAIO")
+    expect(fallback.appName).toBe("Zzz AIO")
     expect(fallback.taskView).toBe("detailed")
     expect(fallback.successSound).toBe(false)
     expect(fallback.wizardDone).toBe(false)

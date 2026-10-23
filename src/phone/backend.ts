@@ -16,7 +16,7 @@ import { EMPTY_ALERTS, projectAccount, projectProfile, projectProxyGroup, projec
 import type { PhoneHost } from "./server"
 
 export function desktopName(): string {
-  return hostname().slice(0, 60) || "TCGAIO"
+  return hostname().slice(0, 60) || "Zzz AIO"
 }
 
 export interface PhoneChallengeActions {
@@ -91,7 +91,7 @@ export function createPhoneHost(
       },
       autopilot: settings.autopilot,
       brand: {
-        appName: settings.appName,
+        appName: !settings.appName || /^tcg[\s-]?aio$/i.test(settings.appName) ? "Zzz AIO" : settings.appName,
         theme: settings.theme,
         accent: settings.accent,
         successSound: settings.successSound
