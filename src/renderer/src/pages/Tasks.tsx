@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { StoreLogo } from "../components/StoreLogo"
+import { StoreSelect } from "../components/StoreSelect"
 import { stockOfLine, stockOfTask } from "../../../shared/stock"
 import { issueText, type HealthIssue } from "../../../shared/checkout-health"
 import { clientIdOf, clientText, ME_CLIENT_ID, type Client } from "../../../shared/clients"
@@ -779,17 +780,14 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
         </div>
       </div>
       <p className="span-2 hint">{monitor ? "Watches the product and lights up green when it is in stock." : "Buys the product with your profile when it is in stock."} {live ? taskText(lang, "live") : ""}</p>
-      <Field label={taskText(lang, "store")}>
-        <div className="store-pick"><StoreLogo store={form.store} size={34} />
-        <Select value={form.store} disabled={live} onChange={(event) => {
-          const store = event.target.value as TaskInput["store"]
-          onChange(applyRole({ ...form, store, accountId: "" }, form.kind === "monitor" ? "monitor" : "checkout", settings))
-        }}>
-          {stores.map((store) => (
-            <option key={store.id} value={store.id}>{store.name}{store.implemented ? "" : " (stub)"}</option>
-          ))}
-        </Select></div>
-      </Field>
+      <div className="field"><span>{taskText(lang, "store")}</span>
+        <div className="store-pick">
+          <StoreSelect value={form.store} stores={stores} disabled={live} onChange={(id) => {
+            const store = id as TaskInput["store"]
+            onChange(applyRole({ ...form, store, accountId: "" }, form.kind === "monitor" ? "monitor" : "checkout", settings))
+          }} />
+        </div>
+      </div>
       <Field label="Product link or SKU" hint={selectedStore?.skuHint}>
         <TextInput value={form.sku} disabled={live} onChange={(event) => onChange({ ...form, sku: event.target.value })} placeholder="Paste a product link or SKU" required={!form.keywords?.trim()} />
       </Field>

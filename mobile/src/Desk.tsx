@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react"
+import { LogsToggle } from "./LogsToggle"
+import { stockOfLine } from "../../src/shared/stock"
 import { Alert, Pressable, Text, TextInput, View } from "react-native"
 import type { PhoneSession } from "../../src/phone/client"
 import type { PhoneSnapshot } from "../../src/phone/protocol"
@@ -41,7 +43,11 @@ export function LogsPanel({ snap }: { snap: PhoneSnapshot | null }) {
     <View style={{ gap: 12 }}>
       <View style={styles.card}>
         <Text style={styles.h2}>Activity</Text>
-        {lines.length === 0 ? <Text style={styles.p}>Task logs appear here while the PC is running them.</Text> : lines.map((line) => <Text key={line.id} style={styles.log}>{line.text}</Text>)}
+        {lines.length === 0 ? <Text style={styles.p}>Task logs appear here while the PC is running them.</Text> : (
+          <LogsToggle count={lines.length}>
+            {lines.map((line) => <Text key={line.id} style={[styles.log, stockOfLine(line.text) ? { color: stockOfLine(line.text) === "in" ? "#39ff88" : "#ff4d6d" } : null]}>{line.text}</Text>)}
+          </LogsToggle>
+        )}
       </View>
       <View style={styles.card}>
         <Text style={styles.h2}>Success and declines</Text>

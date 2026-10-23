@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zzz AIO Session Sync",
-  "version": "0.2.34",
+  "version": "0.2.35",
   "description": "Sends your own store sign-in from this browser to Zzz AIO on your PC. It does not read other sites.",
   "permissions": ["cookies", "storage", "alarms", "scripting"],
   "host_permissions": [
