@@ -188,6 +188,33 @@ export interface ProxyStoreTestResult {
   detail: string
 }
 
+/** Proxies page site test: one GET of the chosen website per proxy. */
+export interface ProxySiteResult {
+  proxyId: string
+  label: string
+  url: string
+  status: number | null
+  /** Response time in ms; set whenever a response came back (also when blocked). */
+  ms: number | null
+  verdict: "works" | "blocked" | "timeout" | "error"
+  detail: string
+}
+
+/** Proxies page deeper test: the store's real stock parser on a real product, per proxy. */
+export type MonitorVerdict = "in" | "oos" | "blocked" | "timeout" | "parse-error" | "error"
+
+export interface MonitorProbeResult {
+  proxyId: string
+  label: string
+  store: StoreId
+  storeName: string
+  status: number | null
+  ms: number | null
+  verdict: MonitorVerdict
+  detail: string
+  title?: string
+}
+
 export type LogLevel = "info" | "warn" | "error" | "success"
 
 export interface LogLine {

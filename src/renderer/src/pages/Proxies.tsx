@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react"
+import { ProxySiteTester } from "../components/ProxySiteTester"
+import type { StoreChoice } from "../components/StoreSelect"
 import { consistencyText, healthScore } from "../../../shared/consistency"
 import { formatProxy } from "../../../shared/proxy"
 import type { ProxyGroup, ProxyNetwork, ProxyScore, ProxyStoreTestResult, ProxyTestResult } from "../../../shared/types"
@@ -16,9 +18,12 @@ export function ProxiesPage() {
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<Record<string, ProxyTestResult[]>>({})
   const [testing, setTesting] = useState<string | null>(null)
-  const [storeResults, setStoreResults] = useState<Record<string, ProxyStoreTestResult[]>>({})
-  const [storeTesting, setStoreTesting] = useState<string | null>(null)
+  const [storeResults] = useState<Record<string, ProxyStoreTestResult[]>>({})
   const [lang, setLang] = useState<"en" | "es">("en")
+  const [stores, setStores] = useState<StoreChoice[]>([])
+  useEffect(() => {
+    void unwrap(window.aio.stores.list()).then((list) => setStores(Array.isArray(list) ? list.map((store) => ({ id: store.id, name: store.name })) : [])).catch(() => undefined)
+  }, [])
 
   async function reload() {
     const [nextGroups, nextScores, settings] = await Promise.all([
@@ -66,18 +71,6 @@ export function ProxiesPage() {
     }
   }
 
-  async function storeTest(id: string) {
-    setStoreTesting(id)
-    setError("")
-    try {
-      const next = await unwrap(window.aio.proxies.storeTest(id))
-      setStoreResults((current) => ({ ...current, [id]: next }))
-    } catch (err) {
-      setError(errorText(err))
-    } finally {
-      setStoreTesting(null)
-    }
-  }
 
   async function remove(id: string) {
     if (!window.confirm("Delete this proxy group?")) return
@@ -128,11 +121,11 @@ export function ProxiesPage() {
               </div>
               <div className="actions">
                 <button type="button" onClick={() => { setEditing(group.id); setName(group.name); setNetwork(group.network); setText((group.proxies ?? []).map(formatProxy).join("\n")) }}>Edit</button>
-                <button type="button" onClick={() => void test(group.id)} disabled={testing === group.id}>{testing === group.id ? "Testing…" : "Test"}</button>
-                <button type="button" onClick={() => void storeTest(group.id)} disabled={storeTesting === group.id} title="Sends one real stock request per store through each proxy and shows OK or Blocked.">{storeTesting === group.id ? "Testing stores…" : "Test proxy against store"}</button>
+                <button type="button" onClick={() => void test(group.id)} disabled={testing === group.id} title="Checks that each proxy answers and shows its exit IP">{testing === group.id ? "Checking…" : "Alive check"}</button>
                 <button type="button" className="danger" onClick={() => void remove(group.id)}>Delete</button>
               </div>
             </div>
+            <ProxySiteTester groupId={group.id} stores={stores} />
             {results[group.id] ? (
               <ul className="proxy-results">
                 {results[group.id].map((result) => (

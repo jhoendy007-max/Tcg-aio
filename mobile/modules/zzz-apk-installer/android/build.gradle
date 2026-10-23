@@ -1,0 +1,15 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.zzzaio'
+version = '0.2.37'
+
+android {
+  namespace "expo.modules.zzzapkinstaller"
+  defaultConfig {
+    versionCode 1
+    versionName '0.2.37'
+  }
+}

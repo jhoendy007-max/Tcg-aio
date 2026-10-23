@@ -18,6 +18,8 @@ replacements = {
     "reactNativeArchitectures": "armeabi-v7a,arm64-v8a",
     "android.enableMinifyInReleaseBuilds": "false",
     "android.enableShrinkResourcesInReleaseBuilds": "false",
+    # 0.2.37: pin the latest stable target (Android 16 / API 36), matching the Expo 58 default.
+    "android.targetSdkVersion": "36",
 }
 for key, value in replacements.items():
     pattern = re.compile(rf"^{re.escape(key)}=.*$", re.MULTILINE)
@@ -58,6 +60,10 @@ if "TCGAIO_RELEASE_SIGNING" not in gradle:
             storePassword keystoreProperties['storePassword']
             keyAlias keystoreProperties['keyAlias']
             keyPassword keystoreProperties['keyPassword']
+            // 0.2.37: APK Signature Scheme v2 + v3 (v3 allows key rotation later).
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
         }
 """
     needle = "            keyPassword 'android'\n        }\n    }\n    buildTypes {"

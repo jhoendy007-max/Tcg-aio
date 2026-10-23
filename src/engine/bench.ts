@@ -12,27 +12,48 @@ import { parseSku as parseCrunchy, productApiUrl as crunchyProduct } from "../st
 import { parseSku as parsePokemon, searchUrl } from "../stores/pokemon-center/parse"
 import { parseTcin } from "../shared/tcin"
 import { parseItemId } from "../stores/walmart/parse"
-import { STORE_IDS, type ProxyEndpoint, type ProxyGroup, type StoreId } from "../shared/types"
+import { STORE_IDS, type MonitorVerdict, type ProxyEndpoint, type ProxyGroup, type StoreId } from "../shared/types"
+import { parseStock as targetStock } from "../stores/target/parse"
+import { readStock as walmartStock } from "../stores/walmart/parse"
+import { readStock as bestbuyStock } from "../stores/bestbuy/parse"
+import { readStock as pokemonStock } from "../stores/pokemon-center/parse"
+import { readOffers as amazonOffers } from "../stores/amazon/parse"
+import { readStock as crunchyStock } from "../stores/crunchyroll/parse"
+import { readStock as bandaiStock } from "../stores/bandai/parse"
+import { readPageOffer } from "../stores/page/parse"
+import { readListings, readProduct } from "../stores/tcgplayer/parse"
 
 /** Public read-only monitor URLs. These match the stock checks, not cart or checkout. */
+/**
+ * Real Pokemon TCG products (0.2.37). Costco, Sam's, B&N, and Crunchyroll replaced placeholder ids
+ * that never matched a product and so always looked "blocked" or "error".
+ */
 export const BENCH_SKUS: Record<StoreId, string> = {
   target: "88897904",
   walmart: "13816151308",
   bestbuy: "6606082",
   "pokemon-center": "699-85207",
   amazon: "B0BSHF7WHW",
-  crunchyroll: "810158836396",
+  // Pokemon TCG: Mega Evolution Chaos Rising Elite Trainer Box
+  crunchyroll: "196214154117",
   bandai: "N2716225001",
   gamestop: "436435",
-  "barnes-noble": "9781465481234",
-  costco: "100000001",
-  sams: "980000001",
+  // Pokemon Scarlet & Violet Prismatic Evolutions Elite Trainer Box
+  "barnes-noble": "https://www.barnesandnoble.com/w/pokemon-scarlet-violet-s85-prismatic-evolutions-elite-trainer-box-pokemon/1146574246",
+  // Pokemon TCG: Charizard ex Super-Premium Collection
+  costco: "4000313298",
+  // SV8.5 Prismatic Evolutions Super Premium Collection
+  sams: "https://www.samsclub.com/ip/sv8-5-prismatic-evolutions-super-premium-collection/19170800669",
   tcgplayer: "509980"
 }
+
+/** Monitor-style request timeout for the benchmark and the Proxies page tests. */
+export const BENCH_TIMEOUT_MS = 8000
 
 export interface BenchSample {
   store: StoreId
   ok: boolean
+  verdict: MonitorVerdict
   status: number | null
   dnsMs: number
   connectMs: number
@@ -48,6 +69,11 @@ export interface BenchStoreReport {
   checks: number
   success: number
   successRate: number
+  inStock: number
+  outOfStock: number
+  blocked: number
+  timeouts: number
+  parseErrors: number
   p50Ms: number
   p95Ms: number
   samples: BenchSample[]
@@ -130,12 +156,88 @@ function headersFor(store: StoreId, url: string): Record<string, string> {
   return headers
 }
 
-/** A 2xx or 3xx body that is not a block page. */
+/** A 2xx body that is not a block page. Monitors do not follow redirects, so a 3xx is a block (captcha/bot wall). */
 export function monitorReadOk(status: number, body: string): boolean {
-  if (status < 200 || status >= 400) return false
+  if (status < 200 || status >= 300) return false
   const text = body.slice(0, 2000).toLowerCase()
   if (text.includes("access denied") || text.includes("just a moment") || text.includes("verify you are human") || text.includes("px-captcha")) return false
   return true
+}
+
+const BLOCK_RE = /access denied|just a moment|verify you are human|px-captcha|captcha|datadome|are-you-human|perimeterx|request unsuccessful|robot check/i
+
+/** True for a block: 3xx (monitors never follow), 403/412/429/435/503, or a challenge page. */
+export function isBlocked(status: number, body: string): boolean {
+  if (status >= 300 && status < 400) return true
+  if (status === 403 || status === 412 || status === 429 || status === 435 || status === 503) return true
+  return BLOCK_RE.test(body.slice(0, 6000))
+}
+
+export function isTimeout(err: unknown): boolean {
+  const text = err instanceof Error ? `${err.name} ${err.message}` : String(err)
+  return /time(d)? ?out|ETIMEDOUT|AbortError|aborted/i.test(text)
+}
+
+/** Run the store's real stock parser on a monitor response. */
+export function readMonitor(store: StoreId, sku: string, status: number, body: string): { verdict: MonitorVerdict; title?: string; detail: string } {
+  if (isBlocked(status, body)) return { verdict: "blocked", detail: `Blocked (HTTP ${status})` }
+  if (status < 200 || status >= 300) return { verdict: "error", detail: `HTTP ${status}` }
+  try {
+    const reading = parseFor(store, sku, body)
+    if (!reading) return { verdict: "parse-error", detail: "The page loaded but the stock parser found no product." }
+    return { verdict: reading.inStock ? "in" : "oos", title: reading.title, detail: reading.inStock ? "In stock" : "Out of stock" }
+  } catch (err) {
+    return { verdict: "parse-error", detail: err instanceof Error ? err.message.slice(0, 120) : "The stock parser failed." }
+  }
+}
+
+function parseFor(store: StoreId, sku: string, body: string): { inStock: boolean; title?: string } | null {
+  switch (store) {
+    case "target": return targetStock(body)
+    case "walmart": return walmartStock(body)
+    case "bestbuy": { const id = parseBestBuy(sku); return id ? bestbuyStock(body, id) : null }
+    case "pokemon-center": { const id = parsePokemon(sku); return id ? pokemonStock(body, id) : null }
+    case "amazon": {
+      if (!/aod-|offer/i.test(body)) return null
+      return { inStock: amazonOffers(body).length > 0 }
+    }
+    case "crunchyroll": { const id = parseCrunchy(sku); return id ? crunchyStock(body, id) : null }
+    case "bandai": { const id = parseBandai(sku); return id ? bandaiStock(body, id) : null }
+    case "gamestop": return pageRead(GAMESTOP, sku, body)
+    case "barnes-noble": return pageRead(BARNES_NOBLE, sku, body)
+    case "costco": return pageRead(COSTCO, sku, body)
+    case "sams": return pageRead(SAMS, sku, body)
+    case "tcgplayer": {
+      const id = parseProductId(sku)
+      const product = id ? readProduct(body, id) : null
+      if (!product) return null
+      return { inStock: readListings(body).length > 0 || (product.marketPrice ?? 0) > 0, title: product.title }
+    }
+  }
+}
+
+function pageRead(spec: PageSpec, sku: string, body: string): { inStock: boolean; title?: string } | null {
+  const target = parsePageTarget(spec, sku)
+  if (!target) return null
+  const reading = readPageOffer(spec, body, target.sku)
+  // No product JSON-LD and no add-to-cart control: the page is not a product page we can read.
+  if (!reading.title && !reading.inStock) return null
+  return { inStock: reading.inStock, title: reading.title }
+}
+
+/** One monitor request through one proxy, read with the store's stock parser. */
+export async function probeMonitor(http: HttpClient, store: StoreId, sku: string, proxy?: ProxyEndpoint): Promise<{ status: number | null; ms: number | null; verdict: MonitorVerdict; detail: string; title?: string }> {
+  const url = monitorReadUrl(store, sku)
+  if (!url) return { status: null, ms: null, verdict: "parse-error", detail: "This product id does not parse for the store." }
+  const started = Date.now()
+  try {
+    const response = await http.request({ method: "GET", url, headers: headersFor(store, url), proxy, redirect: "manual", timeoutMs: BENCH_TIMEOUT_MS })
+    const ms = Math.round(response.timing?.totalMs || Date.now() - started)
+    return { status: response.status, ms, ...readMonitor(store, sku, response.status, response.body) }
+  } catch (err) {
+    if (isTimeout(err)) return { status: null, ms: null, verdict: "timeout", detail: `No answer in ${BENCH_TIMEOUT_MS / 1000}s` }
+    return { status: null, ms: null, verdict: "error", detail: err instanceof Error ? err.message.slice(0, 160) : "The request failed." }
+  }
 }
 
 function proxyLabel(proxy?: ProxyEndpoint): string {
@@ -169,29 +271,32 @@ export async function benchmarkStores(options: {
     for (let index = 0; index < n; index += 1) {
       if (options.gap !== false && index > 0) await sleep(STORE_GAP_MS[store])
       if (!url) {
-        samples.push({ store, ok: false, status: null, dnsMs: 0, connectMs: 0, ttfbMs: 0, totalMs: 0, proxy: label, error: "No monitor URL." })
+        samples.push({ store, ok: false, verdict: "parse-error", status: null, dnsMs: 0, connectMs: 0, ttfbMs: 0, totalMs: 0, proxy: label, error: "No monitor URL." })
         continue
       }
+      const started = Date.now()
       try {
         const response = await http.request({
           method: "GET",
           url,
           headers: headersFor(store, url),
           proxy,
-          timeoutMs: 20000
+          redirect: "manual",
+          timeoutMs: BENCH_TIMEOUT_MS
         })
-        samples.push(sampleFrom(store, label, response))
+        samples.push(sampleFrom(store, BENCH_SKUS[store], label, response, Date.now() - started))
       } catch (err) {
         samples.push({
           store,
           ok: false,
+          verdict: isTimeout(err) ? "timeout" : "error",
           status: null,
           dnsMs: 0,
           connectMs: 0,
           ttfbMs: 0,
           totalMs: 0,
           proxy: label,
-          error: err instanceof Error ? err.message : "The monitor request failed."
+          error: isTimeout(err) ? `No answer in ${BENCH_TIMEOUT_MS / 1000}s` : err instanceof Error ? err.message : "The monitor request failed."
         })
       }
     }
@@ -209,23 +314,32 @@ export function summarizeBench(store: StoreId, proxy: string, samples: BenchSamp
     checks: samples.length,
     success: success.length,
     successRate: samples.length ? success.length / samples.length : 0,
+    inStock: samples.filter((sample) => sample.verdict === "in").length,
+    outOfStock: samples.filter((sample) => sample.verdict === "oos").length,
+    blocked: samples.filter((sample) => sample.verdict === "blocked").length,
+    timeouts: samples.filter((sample) => sample.verdict === "timeout").length,
+    parseErrors: samples.filter((sample) => sample.verdict === "parse-error").length,
     p50Ms: percentile(times, 50),
     p95Ms: percentile(times, 95),
     samples
   }
 }
 
-function sampleFrom(store: StoreId, proxy: string, response: HttpResponse): BenchSample {
+function sampleFrom(store: StoreId, sku: string, proxy: string, response: HttpResponse, elapsedMs: number): BenchSample {
   const timing = response.timing
+  const read = readMonitor(store, sku, response.status, response.body)
   return {
     store,
-    ok: monitorReadOk(response.status, response.body),
+    // A good sample is one the stock parser could read (in stock or out of stock).
+    ok: read.verdict === "in" || read.verdict === "oos",
+    verdict: read.verdict,
     status: response.status,
     dnsMs: timing?.dnsMs ?? 0,
     connectMs: timing?.connectMs ?? 0,
     ttfbMs: timing?.ttfbMs ?? 0,
-    totalMs: timing?.totalMs ?? 0,
-    proxy
+    totalMs: timing?.totalMs || elapsedMs,
+    proxy,
+    ...(read.verdict === "in" || read.verdict === "oos" ? {} : { error: read.detail })
   }
 }
 
