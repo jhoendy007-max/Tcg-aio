@@ -1,10 +1,6 @@
 {
   "name": "tcgaio",
-<<<<<<< HEAD
-  "version": "0.2.38",
-=======
   "version": "0.2.39",
->>>>>>> 81a6a71 (0.2.39: admin stays signed in (rotating refresh tokens), clearer wrong-password message, admin sign-in failure logs, public admin update check)
   "private": true,
   "description": "Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops.",
   "main": "./out/main/index.js",
