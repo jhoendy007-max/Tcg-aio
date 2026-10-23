@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Pressable, Text, View } from "react-native"
 import { RELEASE_OWNER, RELEASE_REPO } from "../../src/shared/version"
 import { decidePhoneUpdate, emptyPhoneUpdate, phoneDownloadProgress, phoneUpdateFailed, phoneUpdateReady, phoneUpdateText, readPhoneReleases, startPhoneCheck, startPhoneDownload, type PhoneUpdateState } from "../../src/shared/phone-update"
-import { downloadApk, openApkInstaller } from "./apk-install"
+import { canInstallUpdates, downloadApk, openApkInstaller, openInstallSettings } from "./apk-install"
 import { PHONE_VERSION } from "./version"
 import { useTheme } from "./theme-context"
 
@@ -25,7 +25,14 @@ export function PhoneUpdateCard() {
     }
   }
 
+  const [needsPermission, setNeedsPermission] = useState(false)
+
   async function download() {
+    if (!canInstallUpdates()) {
+      setNeedsPermission(true)
+      return
+    }
+    setNeedsPermission(false)
     const next = startPhoneDownload(state)
     setState(next)
     if (next.phase !== "downloading" || !next.apkUrl) return
@@ -44,6 +51,12 @@ export function PhoneUpdateCard() {
       <Text style={styles.p}>Checks public GitHub releases for {RELEASE_OWNER}/{RELEASE_REPO}, including prereleases. The APK installs over this app when it is signed with the same key.</Text>
       <Text style={styles.p}>{phoneUpdateText(state)}</Text>
       {state.notes && (state.phase === "available" || state.phase === "ready") ? <Text style={styles.log}>{state.notes.slice(0, 500)}</Text> : null}
+      {needsPermission ? (
+        <View style={{ gap: 6 }}>
+          <Text style={styles.p}>One-time step: allow Zzz APP to install updates. Tap Open settings, turn on "Allow from this source", then come back and tap Download again.</Text>
+          <Pressable style={styles.secondary} onPress={() => openInstallSettings()}><Text style={styles.secondaryText}>Open settings</Text></Pressable>
+        </View>
+      ) : null}
       <View style={styles.row}>
         <Pressable style={styles.secondary} disabled={busy} onPress={() => void check()}><Text style={styles.secondaryText}>{state.phase === "checking" ? "Checking…" : "Check for updates"}</Text></Pressable>
         {state.phase === "available" || state.phase === "downloading" ? (

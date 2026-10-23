@@ -33,6 +33,8 @@ const api: AioApi = {
     delete: (id) => ipcRenderer.invoke(channels.proxiesDelete, id),
     test: (id) => ipcRenderer.invoke(channels.proxiesTest, id),
     storeTest: (id) => ipcRenderer.invoke(channels.proxiesStoreTest, id),
+    siteTest: (id, url) => ipcRenderer.invoke(channels.proxiesSiteTest, id, url),
+    monitorTest: (id, store) => ipcRenderer.invoke(channels.proxiesMonitorTest, id, store),
     health: () => ipcRenderer.invoke(channels.proxiesHealth)
   },
   accounts: {

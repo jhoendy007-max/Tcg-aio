@@ -54,7 +54,19 @@ if [[ -n "$SDK" ]]; then
   APKSIGNER="$(find "$SDK/build-tools" -type f -name apksigner | sort | tail -1 || true)"
 fi
 if [[ -n "$APKSIGNER" ]]; then
-  CERT="$("$APKSIGNER" verify --print-certs "$APK")"
+  CERT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+  for scheme in v2 v3; do
+    if ! printf '%s\n' "$CERT" | grep -q "Verified using $scheme scheme (APK Signature Scheme $scheme): true"; then
+      echo "Release APK is not signed with APK Signature Scheme $scheme." >&2
+      exit 1
+    fi
+  done
+  AAPT="$(find "$SDK/build-tools" -type f -name aapt2 | sort | tail -1 || true)"
+  if [[ -n "$AAPT" ]]; then
+    TARGET="$("$AAPT" dump badging "$APK" | grep -o "targetSdkVersion:'[0-9]*'" || true)"
+    echo "APK $TARGET"
+    [[ "$TARGET" == "targetSdkVersion:'36'" ]] || { echo "Release APK targetSdk is not 36." >&2; exit 1; }
+  fi
   printf '%s\n' "$CERT" | head -n 20
   if printf '%s\n' "$CERT" | grep -qi "CN=Android Debug"; then
     echo "Release APK is still signed with the Android debug certificate." >&2

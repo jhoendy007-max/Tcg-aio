@@ -28,9 +28,10 @@ export const STORE_LOGOS: Record<string, string> = {
   walmart
 }
 
-export function StoreLogo({ store, size = 26, withName = false }: { store: string; size?: number; withName?: boolean }) {
+export function StoreLogo({ store, size = 26, withName = false, label }: { store: string; size?: number; withName?: boolean; label?: string }) {
   const src = STORE_LOGOS[store]
-  const name = storeName(store as never) || store
+  const known = storeName(store as never)
+  const name = (known && known !== store ? known : "") || label || store
   return (
     <span className="store-logo-wrap">
       <span className="store-logo" style={{ width: size, height: size }} title={name}>

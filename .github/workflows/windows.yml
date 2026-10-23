@@ -112,6 +112,21 @@ jobs:
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
       - run: npm ci
         working-directory: mobile
+      - name: Check Android signing secrets
+        env:
+          HAS_KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+          HAS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD != '' }}
+          HAS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS != '' }}
+          HAS_KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD != '' }}
+        run: |
+          missing=""
+          [[ "$HAS_KS" == "true" ]] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [[ "$HAS_PASS" == "true" ]] || missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [[ "$HAS_ALIAS" == "true" ]] || missing="$missing ANDROID_KEY_ALIAS"
+          [[ "$HAS_KEYPASS" == "true" ]] || missing="$missing ANDROID_KEY_PASSWORD"
+          if [[ -n "$missing" ]]; then
+            echo "::warning title=Android signing secrets missing::Add these repository secrets:$missing. Until then the build reuses the last saved keystore artifact (it is no longer re-uploaded)."
+          fi
       - name: Build the release APK
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -135,16 +150,6 @@ jobs:
         with:
           name: TCGAIO-Android-APK
           path: release/TCGAIO-Phone-*.apk
-          if-no-files-found: error
-      - name: Save the release keystore for the next tagged build
-        if: github.ref_type == 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: tcgaio-release-keystore
-          path: |
-            mobile/release.keystore
-            mobile/keystore.properties
-          retention-days: 90
           if-no-files-found: error
       - name: Replace the broken debug APK on v0.2.0-beta
         if: github.ref == 'refs/tags/v0.2.1-beta'
@@ -178,6 +183,21 @@ jobs:
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
       - run: npm ci
         working-directory: admin-mobile
+      - name: Check Android signing secrets
+        env:
+          HAS_KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+          HAS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD != '' }}
+          HAS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS != '' }}
+          HAS_KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD != '' }}
+        run: |
+          missing=""
+          [[ "$HAS_KS" == "true" ]] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [[ "$HAS_PASS" == "true" ]] || missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [[ "$HAS_ALIAS" == "true" ]] || missing="$missing ANDROID_KEY_ALIAS"
+          [[ "$HAS_KEYPASS" == "true" ]] || missing="$missing ANDROID_KEY_PASSWORD"
+          if [[ -n "$missing" ]]; then
+            echo "::warning title=Android signing secrets missing::Add these repository secrets:$missing. Until then the build reuses the last saved keystore artifact (it is no longer re-uploaded)."
+          fi
       - name: Build the admin release APK
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

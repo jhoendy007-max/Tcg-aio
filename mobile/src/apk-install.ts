@@ -1,3 +1,4 @@
+import { apkInstaller } from "../modules/zzz-apk-installer"
 import * as FileSystem from "expo-file-system/legacy"
 import * as IntentLauncher from "expo-intent-launcher"
 
@@ -13,7 +14,21 @@ export async function downloadApk(url: string, onProgress: (percent: number) => 
   return result.uri
 }
 
+/** True when Android lets this app install updates; false means the one-time "Install unknown apps" switch is off. */
+export function canInstallUpdates(): boolean {
+  try { return apkInstaller ? apkInstaller.canRequestInstalls() : true } catch { return true }
+}
+
+export function openInstallSettings(): void {
+  apkInstaller?.openInstallSettings()
+}
+
+/** 0.2.37: PackageInstaller session (native module), falling back to the system APK viewer on old builds. */
 export async function openApkInstaller(uri: string): Promise<void> {
+  if (apkInstaller) {
+    await apkInstaller.install(uri)
+    return
+  }
   const content = await FileSystem.getContentUriAsync(uri)
   await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
     data: content,

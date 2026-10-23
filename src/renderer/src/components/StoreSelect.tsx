@@ -72,7 +72,7 @@ export function StoreSelect({ value, stores, disabled, onChange, label = "Store"
         onClick={() => { setActive(selectedIndex); setOpen((on) => !on) }}
         onKeyDown={onKey}
       >
-        <StoreLogo store={value} size={26} withName />
+        <StoreLogo store={value} size={26} withName label={current?.name} />
         <span className="store-select-caret" aria-hidden="true">▾</span>
       </button>
       <Popover anchor={button} open={open} onClose={close} matchWidth className="store-select-pop">
@@ -88,7 +88,7 @@ export function StoreSelect({ value, stores, disabled, onChange, label = "Store"
               onMouseEnter={() => setActive(index)}
               onMouseDown={(event) => { event.preventDefault(); pick(index) }}
             >
-              <StoreLogo store={store.id} size={26} withName />
+              <StoreLogo store={store.id} size={26} withName label={store.name} />
               {store.implemented === false ? <span className="stub">soon</span> : null}
             </li>
           ))}

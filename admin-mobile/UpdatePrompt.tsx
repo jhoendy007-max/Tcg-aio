@@ -3,6 +3,7 @@ import { AppState, Modal, Pressable, Text, View } from "react-native"
 import Constants from "expo-constants"
 import * as FileSystem from "expo-file-system/legacy"
 import * as IntentLauncher from "expo-intent-launcher"
+import { apkInstaller } from "./modules/zzz-apk-installer"
 import {
   ADMIN_PACKAGE,
   APK_INSTALL_FLAGS,
@@ -105,6 +106,18 @@ export function AdminUpdatePrompt({ base, token, onAuthError }: { base: string; 
       move("installing")
       setPercent(100)
       setMessage("Confirm the install prompt. If you do not see it, allow this app to install unknown apps.")
+      if (apkInstaller) {
+        // 0.2.37: PackageInstaller session. Android shows its own confirm sheet; on success the app restarts updated.
+        if (!apkInstaller.canRequestInstalls()) {
+          move("error")
+          setMessage("One-time step: tap Allow installs, turn on \"Allow from this source\", then tap Install again.")
+          return
+        }
+        const done = await apkInstaller.install(result.uri)
+        move("available")
+        setMessage(done === "cancelled" ? "Install cancelled. Tap Install to try again." : "Installed. Reopen Zzz AP if it did not restart.")
+        return
+      }
       const content = await FileSystem.getContentUriAsync(result.uri)
       const opened = IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
         data: content,

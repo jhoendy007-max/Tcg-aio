@@ -8,6 +8,8 @@ import type {
   ProxyScore,
   ProxyTestResult,
   ProxyStoreTestResult,
+  ProxySiteResult,
+  MonitorProbeResult,
   PublicAccount,
   PublicProfile,
   PublicTask,
@@ -76,6 +78,8 @@ export interface AioApi {
     delete: (id: string) => Promise<Result<{ id: string }>>
     test: (id: string) => Promise<Result<ProxyTestResult[]>>
     storeTest: (id: string) => Promise<Result<ProxyStoreTestResult[]>>
+    siteTest: (id: string, url: string) => Promise<Result<ProxySiteResult[]>>
+    monitorTest: (id: string, store: StoreId) => Promise<Result<MonitorProbeResult[]>>
     health: () => Promise<Result<ProxyScore[]>>
   }
   accounts: {

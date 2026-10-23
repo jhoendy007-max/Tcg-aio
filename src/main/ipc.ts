@@ -4,6 +4,9 @@ import { relayRestockUrl, type AlertService } from "../engine/alerts"
 import type { ChallengeController } from "./challenge-window"
 import { postDiscord } from "../engine/discord"
 import { checkStoreHealth, testProxiesAgainstStores } from "../engine/health"
+import { testMonitorOnProxies, testProxiesOnSite } from "../engine/site-test"
+import { cleanSiteUrl } from "../shared/store-sites"
+import { STORE_IDS } from "../shared/types"
 import type { SessionBrowser } from "./session-window"
 import type { UpdateController } from "./auto-update"
 import { parseBulkTasks } from "../engine/bulk"
@@ -99,6 +102,15 @@ export function registerIpc(
     return { id }
   })
   handle(channels.proxiesTest, (id: string) => testProxies(db.getProxyGroup(id).proxies))
+  handle(channels.proxiesSiteTest, (id: string, url: string) => {
+    const clean = cleanSiteUrl(String(url ?? ""))
+    if (!clean) throw new Error("Enter an https:// website address.")
+    return testProxiesOnSite(chromiumHttp, db.getProxyGroup(id).proxies, clean)
+  })
+  handle(channels.proxiesMonitorTest, (id: string, store: StoreId) => {
+    if (!(STORE_IDS as readonly string[]).includes(store)) throw new Error("Pick a store to test.")
+    return testMonitorOnProxies(chromiumHttp, db.getProxyGroup(id).proxies, store)
+  })
   handle(channels.proxiesStoreTest, (id: string) => testProxiesAgainstStores(chromiumHttp, db.getProxyGroup(id).proxies))
   handle(channels.proxiesHealth, () => db.proxyScores())
   handle(channels.accountsList, () => db.listAccounts())

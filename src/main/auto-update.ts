@@ -16,8 +16,12 @@ export interface UpdateController {
 
 export function createUpdateController(db: Database, emit: (status: UpdateStatus) => void): UpdateController {
   let state = idle(db)
+  // 0.2.37: seamless updates. electron-updater fetches only changed blocks (latest.yml + .blockmap),
+  // downloads in the background, and the NSIS installer runs silently and relaunches the app.
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.disableDifferentialDownload = false
+  // "Later" still applies the downloaded update the next time the app quits.
+  autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.allowPrerelease = true
   autoUpdater.on("download-progress", (progress) => {
     state = applyProgress(state, progress.percent)
@@ -55,6 +59,10 @@ export function createUpdateController(db: Database, emit: (status: UpdateStatus
           ...(feed.token ? { token: feed.token } : {})
         })
         await autoUpdater.checkForUpdates()
+        emit(publicState(state))
+        // Background download: no click needed. The popup asks Install / Later once it is ready.
+        void download()
+        return publicState(state)
       }
     } catch (err) {
       state = markFailed(current(), err instanceof Error ? err.message : "The update check failed.")
@@ -90,7 +98,8 @@ export function createUpdateController(db: Database, emit: (status: UpdateStatus
       emit(publicState(state))
       throw new Error(decision.status.error)
     }
-    autoUpdater.quitAndInstall()
+    // isSilent: NSIS runs with /S (no wizard). isForceRunAfter: relaunch Zzz AIO when it finishes.
+    autoUpdater.quitAndInstall(true, true)
   }
 
   return { current, check, download, install }

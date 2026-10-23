@@ -67,8 +67,9 @@ export const COSTCO: PageSpec = {
   hosts: ["costco.com", "www.costco.com"],
   cautiousOutOfStock: true,
   bare: /^\d{5,12}$/,
-  pathId: /\.product\.(\d{5,12})\.html$/i,
-  canonical: (id) => `https://www.costco.com/.product.${id}.html`
+  // Costco moved product pages to /p/-/<slug>/<id>; the old .product.<id>.html now 302s there.
+  pathId: /(?:\.product\.(\d{5,12})\.html|\/p\/(?:[^/]+\/)*(\d{5,12}))\/?$/i,
+  canonical: (id) => `https://www.costco.com/p/-/product/${id}`
 }
 
 export const SAMS: PageSpec = {
@@ -99,7 +100,8 @@ export function parsePageTarget(spec: PageSpec, input: string): PageTarget | nul
     if (url.protocol !== "https:") return null
     if (!spec.hosts.includes(url.hostname.toLowerCase())) return null
     const match = url.pathname.match(spec.pathId)
-    const sku = match?.[1] ? normalizeId(match[1]) : ""
+    const id = match?.[1] || match?.[2] || ""
+    const sku = id ? normalizeId(id) : ""
     if (!sku) return null
     return { sku, url: `https://${spec.host}${url.pathname}` }
   } catch {

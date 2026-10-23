@@ -51,6 +51,7 @@ export function App() {
   const [rail, setRail] = useState(readRail)
   const [update, setUpdate] = useState<UpdateStatus | null>(null)
   const [updateError, setUpdateError] = useState("")
+  const [updateLater, setUpdateLater] = useState("")
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [booting, setBooting] = useState(true)
   const [account, setAccount] = useState<AccountView | null>(null)
@@ -199,8 +200,21 @@ export function App() {
             </div>
             <div className="actions">
               {update.status === "checking" || update.status === "error" ? <button type="button" onClick={() => void unwrap(window.aio.updates.check()).then(setUpdate).catch((err) => setUpdateError(errorText(err)))}>{update.status === "checking" ? "Checking…" : "Check for updates"}</button> : null}
-              {update.status === "available" || update.status === "downloading" ? <button type="button" className="primary" disabled={update.status === "downloading"} onClick={() => void unwrap(window.aio.updates.download()).then(setUpdate).catch((err) => setUpdateError(errorText(err)))}>{update.status === "downloading" ? `Downloading ${Math.round(update.percent ?? 0)}%` : "Download"}</button> : null}
-              {update.status === "downloaded" ? <button type="button" className="primary" onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setUpdateError(errorText(err)))}>Restart and install</button> : null}
+              {update.status === "available" || update.status === "downloading" ? <button type="button" className="primary" disabled={update.status === "downloading"} onClick={() => void unwrap(window.aio.updates.download()).then(setUpdate).catch((err) => setUpdateError(errorText(err)))}>{update.status === "downloading" ? `Downloading in background ${Math.round(update.percent ?? 0)}%` : "Download"}</button> : null}
+              {update.status === "downloaded" ? <button type="button" className="primary" onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setUpdateError(errorText(err)))}>Install now</button> : null}
+            </div>
+          </div>
+        ) : null}
+        {update?.status === "downloaded" && update.version && updateLater !== update.version ? (
+          <div className="drawer-scrim update-popup" role="dialog" aria-modal="true" aria-label="Update ready">
+            <div className="drawer card">
+              <div className="update-popup-head"><ZzzLogo size={44} /><div><strong>Zzz AIO {update.version} is ready</strong><p>Downloaded in the background. Install restarts Zzz AIO in a few seconds; running tasks stop first.</p></div></div>
+              {update.notes ? <p className="update-notes">{update.notes.slice(0, 600)}</p> : null}
+              <div className="actions">
+                <button type="button" onClick={() => setUpdateLater(update.version ?? "")}>Later</button>
+                <button type="button" className="primary" onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setUpdateError(errorText(err)))}>Install now</button>
+              </div>
+              <small className="hint">Later installs it automatically the next time you close Zzz AIO.</small>
             </div>
           </div>
         ) : null}
