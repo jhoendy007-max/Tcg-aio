@@ -281,7 +281,7 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
       {tab === "autopilot" ? <AutopilotPage /> : null}
       {tab === "keeper" ? <KeeperPage /> : null}
       {tab === "vault" ? <VaultPage /> : null}
-      {tab === "general" || tab === "advanced" || !items.some(([id]) => id === tab) ? <><SettingsPage />{tools}</> : null}
+      {tab === "general" || tab === "advanced" || !items.some(([id]) => id === tab) ? <SettingsPage tools={<div className="segments scroll-x" role="tablist" aria-label="More tools">{advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`}>{label}</a>)}</div>} /> : null}
     </section>
   )
 }

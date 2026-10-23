@@ -3,9 +3,11 @@ import { deskText } from "../../../shared/desk-ui"
 import { todayCheckoutStats } from "../../../shared/desk"
 import { isActiveStatus, type AnalyticsReport, type ProxyScore, type PublicAccount, type PublicTask } from "../../../shared/types"
 import { storeName } from "../../../shared/stores"
-import { ProductVisual } from "../components/marks"
+import { StoreLogo } from "../components/StoreLogo"
+import { stockOfTask } from "../../../shared/stock"
+import { friendlyStatus } from "./Tasks"
 import { Banner } from "../components/ui"
-import { errorText, STATUS_LABEL, unwrap } from "../lib"
+import { errorText, unwrap } from "../lib"
 
 export function DashboardPage({ onTasks, lang = "en" }: { onTasks: () => void; lang?: "en" | "es" }) {
   const [tasks, setTasks] = useState<PublicTask[] | null>(null)
@@ -94,7 +96,7 @@ export function DashboardPage({ onTasks, lang = "en" }: { onTasks: () => void; l
           <tbody>
             {recent.length === 0 ? <tr><td className="empty">Checkouts show up here after a task runs.</td></tr> : recent.slice(0, 6).map((row) => (
               <tr key={`${row.id}-${row.at}`}>
-                <td>{storeName(row.store)} · {row.sku}</td>
+                <td><span className="store-row"><StoreLogo store={row.store} /> {storeName(row.store)} · {row.sku}</span></td>
                 <td className={`status-text status-${row.outcome}`}>{row.outcome === "success" || row.outcome === "tested" ? deskText(lang, "outcomeSuccess") : row.outcome === "failure" ? deskText(lang, "outcomeDeclined") : row.outcome === "paused" ? deskText(lang, "outcomeWaiting") : row.outcome}</td>
                 <td>{row.price == null ? "—" : `$${row.price.toFixed(2)}`}</td>
               </tr>
@@ -111,14 +113,14 @@ export function DashboardPage({ onTasks, lang = "en" }: { onTasks: () => void; l
               <tr key={task.id}>
                 <td>
                   <div className="product-cell">
-                    <ProductVisual store={task.store} name={storeName(task.store)} sku={task.sku} imageUrl={task.imageUrl} />
+                    <StoreLogo store={task.store} size={32} />
                     <div>
                       <div>{storeName(task.store)}</div>
                       <div className="detail">{task.sku}</div>
                     </div>
                   </div>
                 </td>
-                <td><span className={`pill ${task.status}`}>{STATUS_LABEL[task.status]}</span></td>
+                <td><span className={`status-pill s-${task.status}${stockOfTask(task) ? ` stock-${stockOfTask(task)}` : ""}`}>{stockOfTask(task) === "in" ? "In stock" : stockOfTask(task) === "out" ? "Out of stock" : friendlyStatus(task.status)}</span></td>
               </tr>
             ))}
           </tbody>

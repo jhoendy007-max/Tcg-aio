@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
 import { healthText } from "../../../shared/checkout-health"
 import { consistencyText } from "../../../shared/consistency"
@@ -9,7 +10,15 @@ import { MailSettings } from "./MailSettings"
 import { applyTheme } from "../theme"
 import { errorText, unwrap } from "../lib"
 
-export function SettingsPage() {
+const SPEED_MS = [6000, 3500, 1500]
+
+function speedLevel(ms: number): number {
+  if (ms >= 5000) return 0
+  if (ms >= 2500) return 1
+  return 2
+}
+
+export function SettingsPage({ tools }: { tools?: ReactNode } = {}) {
   const [payload, setPayload] = useState<SettingsPayload | null>(null)
   const [form, setForm] = useState<Settings>(DEFAULT_SETTINGS)
   const [advancedOpen, setAdvancedOpen] = useState(() => typeof location !== "undefined" && location.hash === "#settings/advanced")
@@ -94,76 +103,91 @@ export function SettingsPage() {
       <header className="page-head">
         <div>
           <h1>Settings</h1>
-          <p>The basics. Everything technical is under Advanced.</p>
+          <p>A few basics. Everything else is under Advanced at the bottom.</p>
         </div>
       </header>
       {error && !/public key/i.test(error) ? <Banner tone="error">{error}</Banner> : null}
       {message ? <Banner tone="info">{message}</Banner> : null}
-      {account?.signedIn ? (
-        <div className="card stack">
-          <h2>{account.role === "owner" ? "Owner" : "Signed in"}</h2>
-          <p className="hint">{account.email} · {account.plan || "standard"}{account.expiresAt ? ` · until ${new Date(account.expiresAt).toLocaleDateString()}` : ""} · PC {account.fingerprint || "this PC"}</p>
+      <div className="settings-grid">
+        <div className="card stack settings-card">
+          <h2>Account &amp; License</h2>
+          {account?.signedIn ? (
+            <>
+              <div className="kv"><span>Email</span><strong>{account.email}</strong></div>
+              <div className="kv"><span>Plan</span><strong className="plan-chip">{account.role === "owner" ? "Owner · everything" : account.plan === "aco" ? "ACO" : "Standard"}</strong></div>
+              {account.expiresAt ? <div className="kv"><span>Renews</span><strong>{new Date(account.expiresAt).toLocaleDateString()}</strong></div> : null}
+              <div className="actions">
+                {account.role === "owner" ? <button type="button" className="primary" onClick={() => void unwrap(window.aio.account.openAdmin()).catch((err) => setError(errorText(err)))}>Open admin desk</button> : null}
+                <button type="button" onClick={() => void unwrap(window.aio.account.signOut()).then(() => { setAccount(null); window.dispatchEvent(new Event("tcgaio-signout")) }).catch((err) => setError(errorText(err)))}>Sign out</button>
+              </div>
+            </>
+          ) : <p className="hint">Not signed in.</p>}
+        </div>
+        <form className="card stack settings-card" onSubmit={save}>
+          <h2>Notifications</h2>
+          <Field label="Discord webhook" hint="One webhook for everything. Card data is never sent.">
+            <div className="inline-field">
+              <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
+              <button type="button" onClick={() => void testWebhook()} disabled={busy || !form.discordWebhook.trim()}>Test</button>
+            </div>
+          </Field>
+            <label className="switch-row"><span>Monitor in stock</span><input type="checkbox" role="switch" checked={form.notifyInStock !== false} onChange={(event) => setForm({ ...form, notifyInStock: event.target.checked })} /></label>
+            <label className="switch-row"><span>Back out of stock</span><input type="checkbox" role="switch" checked={form.notifyOutOfStock === true} onChange={(event) => setForm({ ...form, notifyOutOfStock: event.target.checked })} /></label>
+            <label className="switch-row"><span>Checkout success</span><input type="checkbox" role="switch" checked={form.notifySuccess !== false} onChange={(event) => setForm({ ...form, notifySuccess: event.target.checked })} /></label>
+            <label className="switch-row"><span>Checkout failed / declined</span><input type="checkbox" role="switch" checked={form.notifyFailed !== false} onChange={(event) => setForm({ ...form, notifyFailed: event.target.checked })} /></label>
+            <label className="switch-row"><span>Proxy blocked</span><input type="checkbox" role="switch" checked={form.notifyBlocked === true} onChange={(event) => setForm({ ...form, notifyBlocked: event.target.checked })} /></label>
+          <div className="actions"><button className="primary" type="submit" disabled={busy}>Save</button></div>
+        </form>
+        <form className="card stack settings-card" onSubmit={save}>
+          <h2>Monitor speed</h2>
+          <input className="speed-slider" type="range" min={0} max={2} step={1} value={speedLevel(form.monitorDelayMs)} aria-label="Monitor speed" onChange={(event) => setForm({ ...form, monitorDelayMs: SPEED_MS[Number(event.target.value)] })} />
+          <div className="speed-labels"><span>Slow</span><span>Normal</span><span>Fast</span></div>
+          <p className="hint">{["Slow: easiest on proxies.", "Normal: a good default.", "Fast: needs several good proxies."][speedLevel(form.monitorDelayMs)]} Checks every {(form.monitorDelayMs / 1000).toFixed(1)}s.</p>
+          <div className="actions"><button className="primary" type="submit" disabled={busy}>Save</button></div>
+        </form>
+        <div className="card stack settings-card">
+          <h2>Updates</h2>
+          {update ? <p className="hint" aria-live="polite">{updateStatusText(update)}</p> : null}
+          {update?.status === "downloading" ? <progress className="update-progress" value={update.percent ?? 0} max={100} /> : null}
+          <label className="switch-row"><span>Check for updates automatically</span><input type="checkbox" role="switch" checked={form.autoUpdateCheck !== false} onChange={(event) => { const next = { ...form, autoUpdateCheck: event.target.checked }; setForm(next); void unwrap(window.aio.settings.save(next)).then((saved) => setPayload(saved)).catch((err) => setError(errorText(err))) }} /></label>
           <div className="actions">
-            {account.role === "owner" ? <button type="button" className="primary" onClick={() => void unwrap(window.aio.account.openAdmin()).catch((err) => setError(errorText(err)))}>Open admin desk</button> : null}
-            <button type="button" onClick={() => void unwrap(window.aio.account.transfer()).then(setAccount).catch((err) => setError(errorText(err)))}>Move to this PC</button>
-            <button type="button" onClick={() => void unwrap(window.aio.account.signOut()).then(() => { setAccount(null); window.dispatchEvent(new Event("tcgaio-signout")) }).catch((err) => setError(errorText(err)))}>Sign out</button>
+            <button type="button" className="primary" disabled={busy || update?.status === "checking" || update?.status === "downloading"} onClick={() => void unwrap(window.aio.updates.check()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update?.status === "checking" ? "Checking…" : "Check now"}</button>
+            {update?.status === "available" || update?.status === "downloading" ? <button type="button" disabled={busy || update.status === "downloading"} onClick={() => void unwrap(window.aio.updates.download()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update.status === "downloading" ? `Downloading ${Math.round(update.percent ?? 0)}%` : "Download"}</button> : null}
+            {update?.status === "downloaded" ? <button type="button" className="primary" disabled={busy} onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setError(errorText(err)))}>Restart and install</button> : null}
           </div>
-          {account.role === "owner" ? <p className="hint">Owner debug: this signed-in role comes from the license server, not from the email typed on this PC.</p> : null}
         </div>
-      ) : null}
+      </div>
+      <details className="advanced card" open={advancedOpen} onToggle={(event) => setAdvancedOpen((event.target as HTMLDetailsElement).open)}>
+        <summary>Advanced</summary>
+        {tools ? <div className="card stack"><h2>More tools</h2>{tools}</div> : null}
       <form className="card form-grid" onSubmit={save}>
-        <div className="span-2">
-          <h2>Appearance</h2>
-          <p className="hint">Theme, accent, and the name in the sidebar. The logo stays on this PC.</p>
-        </div>
         <Field label="Theme">
           <Select value={form.theme} onChange={(event) => { const theme: Settings["theme"] = event.target.value === "light" ? "light" : "dark"; const next = { ...form, theme }; setForm(next); applyTheme(next) }}>
-            <option value="dark">Dark</option>
+            <option value="dark">Glass Neon (dark)</option>
             <option value="light">Light</option>
           </Select>
         </Field>
-        <Field label="Task table">
-          <Select value={form.taskView} onChange={(event) => setForm({ ...form, taskView: event.target.value === "compact" ? "compact" : "detailed" })}>
-            <option value="detailed">Detailed</option>
-            <option value="compact">Compact</option>
-          </Select>
-        </Field>
-        <fieldset className="span-2">
-          <legend>Accent</legend>
-          <div className="swatches">
-            {(["gold", "blue", "green", "rose"] as const).map((accent) => (
-              <label key={accent} className="swatch">
-                <input type="radio" name="accent" value={accent} checked={form.accent === accent} onChange={() => { const next = { ...form, accent }; setForm(next); applyTheme(next) }} />
-                <span>{accent}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
         <Field label="App name" hint="Shown in the sidebar. Up to 24 characters.">
           <TextInput value={form.appName} maxLength={24} onChange={(event) => setForm({ ...form, appName: event.target.value })} />
         </Field>
-        <Field label="Logo" hint="PNG, JPEG, or WebP under about 80 KB. Leave it empty to keep the mark.">
+        <Field label="Logo" hint="PNG, JPEG, or WebP under about 80 KB. Leave it empty to keep the Zzz logo.">
           <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void readLogo(event.target.files?.[0])} />
         </Field>
-        {form.logoDataUrl ? <img className="brand-logo" src={form.logoDataUrl} alt="Current logo" /> : null}
         {form.logoDataUrl ? <button type="button" onClick={() => setForm({ ...form, logoDataUrl: "" })}>Remove logo</button> : null}
-        <label className="check span-2">
-          <input type="checkbox" checked={form.successSound} onChange={(event) => setForm({ ...form, successSound: event.target.checked })} />
-          <span>Play a short sound when a checkout succeeds. This stays off until you turn it on.</span>
-        </label>
-        <Field className="span-2" label="Discord webhook" hint="https://discord.com/api/webhooks/… Success, failure, and challenge pauses are posted here. Card data is not.">
-          <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
-        </Field>
-        <Field label="Monitor delay (ms)" hint="Wait between stock checks outside a drop window. 1000–60000.">
-          <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
-        </Field>
         <label className="check span-2">
           <input type="checkbox" checked={form.testMode} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
           <span>Test mode for every task. The real flow runs through payment and stops before place order. Nothing is charged.</span>
         </label>
-        <details className="advanced span-2" open={advancedOpen} onToggle={(event) => setAdvancedOpen((event.target as HTMLDetailsElement).open)}>
-          <summary>Advanced</summary>
-          <div className="form-grid">
+        <label className="check span-2">
+          <input type="checkbox" checked={form.successSound} onChange={(event) => setForm({ ...form, successSound: event.target.checked })} />
+          <span>Play a short sound when a checkout succeeds.</span>
+        </label>
+        <Field label="Exact monitor delay (ms)" hint="The speed slider sets this. 1000–60000.">
+          <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
+        </Field>
+        <Field label="In-stock alert cooldown (minutes)" hint="The same item will not alert again inside this time. 0 alerts on every change.">
+          <TextInput type="number" min={0} max={1440} value={form.notifyCooldownMin ?? 10} onChange={(event) => setForm({ ...form, notifyCooldownMin: Number(event.target.value) })} />
+        </Field>
         <label className="check span-2">
           <input type="checkbox" checked={form.groupDiscord} onChange={(event) => setForm({ ...form, groupDiscord: event.target.checked })} />
           <span>Also post restocks and successful checkouts to a shared group webhook. This stays off until you turn it on. The group post leaves out profile, email, card, and proxy details.</span>
@@ -300,11 +324,8 @@ export function SettingsPage() {
         <Field label="Target API key" hint="Leave blank to use the key embedded in Target's web app. It can change when the site deploys.">
           <TextInput value={form.targetApiKey} onChange={(event) => setForm({ ...form, targetApiKey: event.target.value })} autoComplete="off" />
         </Field>
-          </div>
-        </details>
         <div className="actions span-2">
           <button className="primary" type="submit" disabled={busy}>Save settings</button>
-          <button type="button" onClick={() => void testWebhook()} disabled={busy}>Send test webhook</button>
         </div>
       </form>
       <form className="card stack" onSubmit={(event) => {
@@ -321,27 +342,12 @@ export function SettingsPage() {
           .catch((err) => setError(errorText(err)))
           .finally(() => setBusy(false))
       }}>
-        <div>
-          <h2>Updates</h2>
-          <p className="hint">New versions show a popup with Install now or Later. You can also check here.</p>
-          {update ? <p className="hint" aria-live="polite">{updateStatusText(update)}</p> : null}
-          {update?.status === "downloading" ? <progress className="update-progress" value={update.percent ?? 0} max={100} /> : null}
-        </div>
-        <details className="advanced">
-          <summary>Private repo token</summary>
+        <h2>Private update token</h2>
         <Field label="GitHub token" hint={hasToken ? "A token is saved. Paste a new one to replace it." : "No token saved. A public repo does not need one."}>
           <TextInput type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} placeholder="github_pat_…" />
         </Field>
-        </details>
-        <div className="actions">
-          <button className="primary" type="submit" disabled={busy}>{token ? "Save token" : "Remove token"}</button>
-          <button type="button" disabled={busy || update?.status === "checking" || update?.status === "downloading"} onClick={() => void unwrap(window.aio.updates.check()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update?.status === "checking" ? "Checking…" : "Check for updates"}</button>
-          {update?.status === "available" || update?.status === "downloading" ? <button type="button" disabled={busy || update.status === "downloading"} onClick={() => void unwrap(window.aio.updates.download()).then((status) => { setUpdate(status); setMessage(updateStatusText(status)) }).catch((err) => setError(errorText(err)))}>{update.status === "downloading" ? `Downloading ${Math.round(update.percent ?? 0)}%` : "Download"}</button> : null}
-          {update?.status === "downloaded" ? <button type="button" className="primary" disabled={busy} onClick={() => void unwrap(window.aio.updates.install()).catch((err) => setError(errorText(err)))}>Restart and install</button> : null}
-        </div>
+        <div className="actions"><button className="primary" type="submit" disabled={busy}>{token ? "Save token" : "Remove token"}</button></div>
       </form>
-      <details className="advanced card" open={advancedOpen} onToggle={(event) => setAdvancedOpen((event.target as HTMLDetailsElement).open)}>
-        <summary>Advanced: license server, mail, backup</summary>
       <div className="card stack">
         <h2>License server</h2>
         <Field label="Address">

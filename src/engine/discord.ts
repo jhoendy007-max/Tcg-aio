@@ -24,14 +24,55 @@ export const BRAND_ICON_URL = "https://raw.githubusercontent.com/jhoendy007-max/
 const BRAND_AUTHOR = { name: "Zzz AIO", icon_url: BRAND_ICON_URL }
 const BRAND_FOOTER = { text: "Zzz AIO · Cop while you sleep", icon_url: BRAND_ICON_URL }
 
+const STORE_ICON_BASE = "https://raw.githubusercontent.com/jhoendy007-max/Tcg-aio/main/docs/brand/stores/"
+const STORE_ICONS = new Set(["amazon", "bandai", "barnes-noble", "bestbuy", "costco", "crunchyroll", "gamestop", "pokemon-center", "sams", "target", "tcgplayer", "walmart"])
+
+export function storeIconUrl(store: string | undefined): string | undefined {
+  return store && STORE_ICONS.has(store) ? `${STORE_ICON_BASE}${store}.png` : undefined
+}
+
+function productLink(notice: Notice): string | undefined {
+  if (notice.url && /^https:\/\//.test(notice.url)) return notice.url
+  if (/^https:\/\//.test(notice.sku)) return notice.sku
+  return undefined
+}
+
+/** In-stock / out-of-stock embed: product, image, store, price, SKU, link, time. */
+export function buildStockBody(notice: Notice): { embeds: Array<Record<string, unknown>> } {
+  const inStock = notice.kind === "instock"
+  const link = productLink(notice)
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: "Store", value: notice.storeName || "—", inline: true },
+    { name: "Price", value: notice.price != null ? `$${notice.price.toFixed(2)}` : "—", inline: true },
+    { name: "SKU", value: (notice.sku || "—").slice(0, 200), inline: true }
+  ]
+  if (link) fields.push({ name: "Link", value: `[Open product page](${link})` })
+  return {
+    embeds: [
+      {
+        title: `${inStock ? "🟢 In stock" : "🔴 Out of stock"} · ${(notice.title || notice.sku).slice(0, 200)}`,
+        url: link,
+        color: inStock ? 0x39ff88 : 0xff4d6d,
+        description: redact(notice.detail || "").slice(0, 600) || undefined,
+        fields,
+        thumbnail: notice.imageUrl && /^https:\/\//.test(notice.imageUrl) ? { url: notice.imageUrl } : storeIconUrl(notice.store) ? { url: storeIconUrl(notice.store) } : undefined,
+        author: { name: `Zzz AIO · ${notice.storeName}`, icon_url: storeIconUrl(notice.store) ?? BRAND_ICON_URL },
+        footer: BRAND_FOOTER,
+        timestamp: new Date(notice.at ?? Date.now()).toISOString()
+      }
+    ]
+  }
+}
+
 export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string, unknown>> } {
+  if (notice.kind === "instock" || notice.kind === "oos") return buildStockBody(notice)
   const color = notice.kind === "success"
     ? 0x3cba8b
     : notice.kind === "tested" || notice.kind === "alert"
       ? 0x6aa6ff
       : notice.kind === "drop" || notice.kind === "health"
         ? 0x6aa6ff
-        : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session"
+        : notice.kind === "paused" || notice.kind === "challenge" || notice.kind === "session" || notice.kind === "blocked"
           ? 0xe0a045
           : 0xe25b5b
   const title =
@@ -49,6 +90,8 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
                 ? `${notice.sku} drop`
                 : notice.kind === "health"
                   ? "Daily health report"
+                  : notice.kind === "blocked"
+                  ? `${notice.storeName} blocked`
                   : notice.kind === "paused"
                   ? `${notice.storeName} needs attention`
                   : `${notice.storeName} checkout failed`

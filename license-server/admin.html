@@ -45,6 +45,7 @@
     button.tab.on .badge { background: rgba(0,0,0,.25); color: #fff; }
     button.danger { background: linear-gradient(90deg,#f472b6,#fb7185); border-radius: 999px; }
     .pill.pending { background: rgba(139,92,246,.18); color: #c4b5fd; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -69,6 +70,7 @@
       <label>Current password<input id="current-password" type="password" autocomplete="current-password" required /></label>
       <label>New password<input id="next-password" type="password" autocomplete="new-password" required minlength="8" /></label>
       <button class="primary" type="submit">Save password</button>
+      <button id="cancel-password" type="button">Cancel</button>
     </form>
     <div class="row">
       <button class="tab on" id="tab-pending" type="button">Pending <span id="count-pending" class="badge" hidden>0</span></button>
@@ -352,7 +354,8 @@
     document.getElementById("create").onclick = () => { document.getElementById("create-form").hidden = false }
     document.getElementById("search").oninput = () => load().catch(guard)
     document.getElementById("sign-out").onclick = () => showLogin("")
-    document.getElementById("change-password").onclick = () => { document.getElementById("password-form").hidden = false }
+    document.getElementById("change-password").onclick = () => { const form = document.getElementById("password-form"); form.hidden = !form.hidden; if (!form.hidden) document.getElementById("current-password").focus() }
+    document.getElementById("cancel-password").onclick = () => { document.getElementById("password-form").hidden = true }
     document.getElementById("password-form").onsubmit = async (event) => {
       event.preventDefault()
       showError("")

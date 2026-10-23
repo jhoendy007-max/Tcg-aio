@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar"
+import { stockOfLine, stockOfTask, type StockState } from "../src/shared/stock"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
@@ -377,7 +378,7 @@ export default function App() {
                     <Text style={styles.h2}>{item.storeName}</Text>
                     <Text style={styles.pill}>{taskText(snap?.language === "es" ? "es" : "en", item.kind === "monitor" || item.monitorOnly ? "roleBadgeMonitor" : "roleBadgeCheckout")}</Text>
                     {item.testMode || snap?.testMode ? <Text style={styles.pill}>TEST</Text> : null}
-                    <Text style={[styles.pill, { color: statusColor(item.status) }]}>{STATUS_LABEL[item.status] ?? item.status}</Text>
+                    <Text style={[styles.pill, { color: stockColor(stockOfTask(item)) ?? statusColor(item.status) }, stockOfTask(item) ? { textShadowColor: stockColor(stockOfTask(item)), textShadowRadius: 8 } : null]}>{stockOfTask(item) === "in" ? "In stock" : stockOfTask(item) === "out" ? "Out of stock" : STATUS_LABEL[item.status] ?? item.status}</Text>
                   </View>
                   <Text style={styles.sku}>{item.sku}</Text>
                   <Text style={styles.p}>Qty {item.quantity} · {item.profileName} · {item.accountLabel} · {item.proxyGroupName ?? "Direct"}</Text>
@@ -709,7 +710,7 @@ function TaskDetail({ task, onRun, session, onEdit }: {
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.deleteTask(task.id))}><Text style={styles.secondaryText}>Delete</Text></Pressable>
       </View>
       {asList<PhoneTask["logs"][number]>(task.logs).map((line, index) => (
-        <Text key={`${line.ts}-${index}`} style={styles.log}>{line.message}</Text>
+        <Text key={`${line.ts}-${index}`} style={[styles.log, stockOfLine(line.message) ? { color: stockColor(stockOfLine(line.message)) } : null]}>{line.message}</Text>
       ))}
     </View>
   )
@@ -839,13 +840,19 @@ function AlertsPanel({ snap, onRun, session, onBack }: {
   )
 }
 
+/** Neon green and red mean stock only. Blocked is amber; idle and watching stay neutral. */
+function stockColor(stock: StockState): string | undefined {
+  if (stock === "in") return "#39ff88"
+  if (stock === "out") return "#ff4d6d"
+  return undefined
+}
+
 function statusColor(status: string): string {
-  if (status === "success" || status === "tested") return "#3cba8b"
-  if (status === "failed") return "#ff8d8d"
-  if (status === "adding_to_cart" || status === "checking_out") return "#c4b5fd"
-  if (status === "monitoring" || status === "in_stock") return "#8eb4ff"
-  if (status === "in_queue" || status === "paused" || status === "challenge" || status === "idle") return "#e0b15a"
-  return "#a8b3c7"
+  if (status === "success" || status === "tested") return "#c4b5fd"
+  if (status === "failed") return "#f472b6"
+  if (status === "adding_to_cart" || status === "checking_out") return "#22d3ee"
+  if (status === "paused" || status === "challenge") return "#fbbf24"
+  return "#a3a8c9"
 }
 
 function upsert(tasks: PhoneTask[], task: PhoneTask): PhoneTask[] {

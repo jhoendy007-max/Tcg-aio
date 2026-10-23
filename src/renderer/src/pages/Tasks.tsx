@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { StoreLogo } from "../components/StoreLogo"
+import { stockOfLine, stockOfTask } from "../../../shared/stock"
 import { issueText, type HealthIssue } from "../../../shared/checkout-health"
 import { clientIdOf, clientText, ME_CLIENT_ID, type Client } from "../../../shared/clients"
 import { consistencyText, effectiveBinding } from "../../../shared/consistency"
@@ -9,7 +11,6 @@ import { isActiveStatus, type ProxyGroup, type PublicAccount, type PublicChallen
 import { moduleScope, moduleText, resolveModule, sourceLabel } from "../../../shared/module-settings"
 import { taskText } from "../../../shared/task-role"
 import { storeName } from "../../../shared/stores"
-import { ProductVisual } from "../components/marks"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { TasksBulk } from "./TasksBulk"
 import { errorText, formatTime, STATUS_LABEL, statusLabel, unwrap } from "../lib"
@@ -69,7 +70,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
   const [clientFilter, setClientFilter] = useState("")
   const [clients, setClients] = useState<Client[]>([])
   const [grouped, setGrouped] = useState(false)
-  const [dragId, setDragId] = useState<string | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
   const [checkoutIssues, setCheckoutIssues] = useState<Map<string, HealthIssue[]>>(new Map())
 
   async function reload() {
@@ -92,7 +93,6 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
     setStores(nextStores)
     setClients(nextClients)
     setCheckoutIssues(new Map(healthRows.map((row) => [row.taskId, row.issues])))
-    setSelectedId((current) => current ?? nextTasks[0]?.id ?? null)
   }
 
   useEffect(() => {
@@ -163,36 +163,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
     return stats
   }, [filtered])
   const listed = useMemo(() => (folder ? filtered.filter((task) => folderName(task) === folder) : filtered), [filtered, folder])
-  const sections = useMemo(() => {
-    if (!grouped) return [{ label: "", rows: listed }]
-    const buckets = new Map<string, PublicTask[]>()
-    for (const task of listed) {
-      const label = task.group?.trim() || "Ungrouped"
-      const rows = buckets.get(label) ?? []
-      rows.push(task)
-      buckets.set(label, rows)
-    }
-    return [...buckets.entries()].map(([label, rows]) => ({ label, rows }))
-  }, [listed, grouped])
 
-  async function commitOrder(ids: string[]) {
-    setError("")
-    try {
-      setTasks(await unwrap(window.aio.tasks.reorder(ids)))
-    } catch (err) {
-      setError(errorText(err))
-    }
-  }
-
-  function place(fromId: string, toId: string, after: boolean) {
-    if (fromId === toId) return
-    const next = tasks.map((task) => task.id).filter((id) => id !== fromId)
-    let index = next.indexOf(toId)
-    if (index < 0) return
-    if (after) index += 1
-    next.splice(index, 0, fromId)
-    void commitOrder(next)
-  }
 
 
   async function setView(taskView: Settings["taskView"]) {
@@ -225,9 +196,8 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
     setBusy(true)
     setError("")
     try {
-      const saved = await unwrap(window.aio.tasks.save(form))
+      await unwrap(window.aio.tasks.save(form))
       setForm(null)
-      setSelectedId(saved.id)
       await reload()
     } catch (err) {
       setError(errorText(err))
@@ -295,6 +265,17 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
         if (action === "start") await unwrap(window.aio.tasks.start(id))
         else await unwrap(window.aio.tasks.stop(id))
       }
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
+  async function duplicate(task: PublicTask) {
+    setError("")
+    try {
+      const copy: TaskInput = { ...toInput(task), id: undefined }
+      await unwrap(window.aio.tasks.save(copy))
+      await reload()
     } catch (err) {
       setError(errorText(err))
     }
@@ -374,6 +355,106 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
           </div>
         </div>
       ) : null}
+      <div className="task-desk">
+        <aside className="folders">
+          <div className="groups-head">
+            <div><h2>Task Groups</h2><span className="hint">{folders.length + 1} total</span></div>
+          </div>
+          {([["", filtered.length], ...folders] as Array<[string, number]>).map(([label, count]) => {
+            const stat = label ? folderStats.get(label) : [...folderStats.values()].reduce((sum, row) => ({ carts: sum.carts + row.carts, wins: sum.wins + row.wins, fails: sum.fails + row.fails, live: sum.live + row.live }), { carts: 0, wins: 0, fails: 0, live: 0 })
+            return (
+              <button key={label || "all"} type="button" className="group-card" aria-pressed={folder === label} onClick={() => setFolder(label)}>
+                <span className="group-top"><strong>{label || deskText(lang, "allGroups")}</strong><span className="count">{count}</span></span>
+                <span className="group-stats">
+                  <span className="gs cart" title="Running">● {stat?.live ?? 0}</span>
+                  <span className="gs win" title="Checked out">✓ {stat?.wins ?? 0}</span>
+                  <span className="gs fail" title="Failed">✕ {stat?.fails ?? 0}</span>
+                </span>
+              </button>
+            )
+          })}
+        </aside>
+        <div className="group-main">
+          <div className="group-head">
+            <div className="group-title">
+              <div><strong>{folder || deskText(lang, "allGroups")}</strong><span className="hint">{listed.length} tasks · {listed.filter((task) => isActiveStatus(task.status)).length} running</span></div>
+            </div>
+            <div className="actions group-actions">
+              <button type="button" className="primary" disabled={!listed.length} onClick={() => void bulkRun("start")}>▶ Start {picked.length ? "selected" : "all"}</button>
+              <button type="button" className="dark" disabled={!listed.length} onClick={() => void bulkRun("stop")}>■ Stop {picked.length ? "selected" : "all"}</button>
+              <button type="button" className="primary" onClick={() => { setForm(freshTask(settings, kindFilter === "monitor" ? "monitor" : "checkout")); setError("") }}>＋ Add Task</button>
+            </div>
+          </div>
+          <div className="chip-row">
+            <div className="pill-tabs" role="tablist">
+              {(["", "monitor", "checkout"] as const).map((kind) => (
+                <a key={kind || "all"} href={kind ? `#tasks/${kind}` : "#tasks"} aria-current={role === kind ? "page" : undefined}>{kind === "" ? "All" : kind === "monitor" ? "Monitor" : "Checkout"}</a>
+              ))}
+            </div>
+            <TextInput className="group-search chip-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="🔍 Search" aria-label="Search tasks" />
+            <button type="button" className={selectMode ? "chip-btn on" : "chip-btn"} aria-pressed={selectMode} onClick={() => { setSelectMode((on) => !on); setPicked([]) }}>{selectMode ? "Done" : "Select"}</button>
+            {selectMode ? (
+              <>
+                <button type="button" className="chip-btn" onClick={() => setPicked(allPicked ? [] : listed.map((task) => task.id))}>{allPicked ? "Clear" : deskText(lang, "selectAll")}</button>
+                <button type="button" className="chip-btn danger" disabled={!picked.length} onClick={() => void bulkRun("delete")}>Delete {picked.length || ""}</button>
+              </>
+            ) : null}
+          </div>
+          {tasks.length === 0 ? (
+            <div className="card friendly-empty">
+              <div className="empty-ico">💤</div>
+              <h2>No tasks yet</h2>
+              <p>Add a task with a product link or SKU. A monitor watches for stock, a checkout buys it.</p>
+              <button type="button" className="primary" onClick={() => { setForm(freshTask(settings, "checkout")); setError("") }}>＋ Add your first task</button>
+            </div>
+          ) : (
+          <div className="table-wrap card task-table">
+            <table>
+              <thead>
+                <tr>
+                  {selectMode ? <th className="sel" /> : null}
+                  <th>Store</th>
+                  <th>Product</th>
+                  <th>Mode</th>
+                  <th>Status</th>
+                  <th className="th-actions" aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {listed.length === 0 ? (
+                  <tr><td colSpan={selectMode ? 6 : 5} className="empty">No tasks match this filter.</td></tr>
+                ) : listed.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    expanded={task.id === selectedId}
+                    selectMode={selectMode}
+                    picked={picked.includes(task.id)}
+                    globalTest={globalTest}
+                    names={names}
+                    accounts={accounts}
+                    groups={groups}
+                    lang={lang}
+                    issues={checkoutIssues.get(task.id) ?? []}
+                    onExpand={() => setSelectedId((current) => current === task.id ? null : task.id)}
+                    onToggle={() => togglePick(task.id)}
+                    onStart={() => void start(task.id)}
+                    onStop={() => void stop(task.id)}
+                    onTest={() => void runTest(task.id)}
+                    onEdit={() => { setForm(toInput(task)); setError("") }}
+                    onDuplicate={() => void duplicate(task)}
+                    onDelete={() => void remove(task.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          )}
+        </div>
+      </div>
+      <details className="advanced">
+        <summary>More tools: quick setup, check stores, create many, filters, clone</summary>
+        <div className="actions"><button type="button" onClick={() => setShowQuick((open) => !open)}>{deskText(lang, "quickSetup")}</button></div>
       <details className="advanced">
         <summary>{deskText(lang, "checkStores")}</summary>
       <div className="card">
@@ -396,7 +477,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
               <tbody>
                 {health.map((row) => (
                   <tr key={row.store}>
-                    <td>{row.storeName}</td>
+                    <td><StoreLogo store={row.store} withName /></td>
                     <td>{row.proxy}</td>
                     <td>{row.status ?? "—"} · {row.ms}ms</td>
                     <td>{row.blockSamples ? `${row.blockCount}/${row.blockSamples} · ${Math.round(row.blockRate * 100)}%` : "—"}</td>
@@ -454,103 +535,6 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
         </div>
       </div>
       </details>
-      <div className="task-desk">
-        <aside className="folders">
-          <div className="groups-head">
-            <div><h2>Task Groups</h2><span className="hint">{folders.length + 1} total</span></div>
-            <button type="button" className="plus-btn" aria-label={deskText(lang, "newTask")} title={deskText(lang, "newTask")} onClick={() => { setForm(freshTask(settings, kindFilter === "monitor" ? "monitor" : "checkout")); setError("") }}>+</button>
-          </div>
-          {([["", filtered.length], ...folders] as Array<[string, number]>).map(([label, count]) => {
-            const stat = label ? folderStats.get(label) : [...folderStats.values()].reduce((sum, row) => ({ carts: sum.carts + row.carts, wins: sum.wins + row.wins, fails: sum.fails + row.fails, live: sum.live + row.live }), { carts: 0, wins: 0, fails: 0, live: 0 })
-            return (
-              <button key={label || "all"} type="button" className="group-card" aria-pressed={folder === label} onClick={() => setFolder(label)}>
-                <span className="group-top"><strong>{label || deskText(lang, "allGroups")}</strong><span className="count">{stat?.live ?? 0} / {count}</span></span>
-                <span className="group-stats">
-                  <span className="gs cart" title="Carts">🛒 {stat?.carts ?? 0}</span>
-                  <span className="gs win" title="Checkouts">✓ {stat?.wins ?? 0}</span>
-                  <span className="gs fail" title="Declines">✕ {stat?.fails ?? 0}</span>
-                </span>
-              </button>
-            )
-          })}
-        </aside>
-        <div className="group-main">
-          <div className="group-head">
-            <div className="group-title">
-              <span className="store-badge">{(folder || "A").slice(0, 1).toUpperCase()}</span>
-              <div><strong>{folder || deskText(lang, "allGroups")}</strong><span className="hint">{listed.length} Tasks</span></div>
-              <button type="button" className="plus-btn" aria-label={deskText(lang, "newTask")} onClick={() => { setForm(freshTask(settings, kindFilter === "monitor" ? "monitor" : "checkout")); setError("") }}>+</button>
-              <div className="pill-tabs" role="tablist">
-                {(["", "monitor", "checkout"] as const).map((kind) => (
-                  <a key={kind || "all"} href={kind ? `#tasks/${kind}` : "#tasks"} aria-current={role === kind ? "page" : undefined}>{deskText(lang, kind === "" ? "tabAll" : kind === "monitor" ? "tabMonitor" : "tabCheckout")}</a>
-                ))}
-              </div>
-              <TextInput className="group-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search tasks" />
-            </div>
-            <div className="actions group-actions">
-              <button type="button" onClick={() => setShowQuick((open) => !open)}>⚙ {deskText(lang, "quickSetup")}</button>
-              <button type="button" className="dark" disabled={picked.length !== 1} onClick={() => {
-                const task = tasks.find((item) => item.id === picked[0])
-                if (task) { setForm(toInput(task)); setError("") }
-              }}>✎ Edit</button>
-              <button type="button" className="primary" disabled={!listed.length} onClick={() => void bulkRun("start")}>▶ Start {picked.length ? "Selected" : "All"}</button>
-              <button type="button" className="primary" disabled={!listed.length} onClick={() => void bulkRun("stop")}>■ Stop {picked.length ? "Selected" : "All"}</button>
-              <button type="button" className="danger solid" disabled={!listed.length} onClick={() => void bulkRun("delete")}>🗑 Delete {picked.length ? "Selected" : "All"}</button>
-            </div>
-          </div>
-      <div className="table-wrap card">
-        <table>
-          <thead>
-            <tr>
-              <th><input type="checkbox" aria-label={deskText(lang, "selectAll")} checked={allPicked} onChange={() => {
-                const ids = listed.map((task) => task.id)
-                setPicked((current) => allPicked ? current.filter((id) => !ids.includes(id)) : [...new Set([...current, ...ids])])
-              }} /></th>
-              <th>Item/s</th>
-              {taskView === "detailed" ? <th className="col-extra">Qty</th> : null}
-              {taskView === "detailed" ? <th className="col-extra">Profile</th> : null}
-              {taskView === "detailed" ? <th className="col-extra">Account</th> : null}
-              {taskView === "detailed" ? <th className="col-extra">Proxy</th> : null}
-              <th>Status</th>
-              <th className="th-actions">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.length === 0 ? (
-              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty"><div className="empty-ico">☰</div>{deskText(lang, "emptyTasks")} <button type="button" className="primary" onClick={() => { setForm(freshTask(settings, "checkout")); setError("") }}>{deskText(lang, "emptyNext")}</button></td></tr>
-            ) : listed.length === 0 ? (
-              <tr><td colSpan={taskView === "detailed" ? 8 : 4} className="empty">No tasks match this search.</td></tr>
-            ) : sections.map((section) => (
-              <SectionRows
-                key={section.label || "all"}
-                section={section}
-                grouped={grouped}
-                taskView={taskView}
-                selectedId={selectedId}
-                picked={picked}
-                globalTest={globalTest}
-                dragId={dragId}
-                names={names}
-                accounts={accounts}
-                groups={groups}
-                lang={lang}
-                checkoutIssues={checkoutIssues}
-                onSelect={setSelectedId}
-                onToggle={togglePick}
-                onDrag={setDragId}
-                onDrop={(target) => { if (dragId) place(dragId, target, false); setDragId(null) }}
-                onStart={start}
-                onStop={stop}
-                onTest={runTest}
-                onEdit={(task) => { setForm(toInput(task)); setError("") }}
-                onDelete={remove}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-        </div>
-      </div>
       {selected ? (
         <div className="card stack">
           <h2>{dropOpsText(lang, "cloneTitle")}</h2>
@@ -573,101 +557,104 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
           </div>
         </div>
       ) : null}
-      <div className="card log-card">
-        <div className="log-head">
-          <h2>Status log</h2>
-          <span>{selected ? selected.sku : "Select a task"}</span>
-        </div>
-        <div className="log" aria-live="polite">
-          {selected && (selected.logs ?? []).length > 0 ? (selected.logs ?? []).map((line, index) => (
-            <div key={`${line.ts}-${index}`} className={`log-line ${line.level}`}>
-              <time>{formatTime(line.ts)}</time>
-              <span>{line.message}</span>
-            </div>
-          )) : <div className="empty">The live log for the selected task appears here.</div>}
-        </div>
-      </div>
+      </details>
     </section>
   )
 }
 
-function SectionRows({ section, grouped, taskView, selectedId, picked, globalTest, dragId, names, accounts, groups, lang, checkoutIssues, onSelect, onToggle, onDrag, onDrop, onStart, onStop, onTest, onEdit, onDelete }: {
-  section: { label: string; rows: PublicTask[] }
-  grouped: boolean
-  taskView: "compact" | "detailed"
-  selectedId: string | null
-  picked: string[]
+const FRIENDLY_STATUS: Record<TaskStatus, string> = {
+  idle: "Idle",
+  stopped: "Idle",
+  monitoring: "Watching",
+  in_queue: "Watching",
+  in_stock: "In stock",
+  adding_to_cart: "Carting",
+  checking_out: "Carting",
+  success: "Checked out",
+  tested: "Test passed",
+  failed: "Failed",
+  paused: "Blocked",
+  challenge: "Blocked"
+}
+
+export function friendlyStatus(status: TaskStatus): string {
+  return FRIENDLY_STATUS[status] ?? status
+}
+
+function TaskRow({ task, expanded, selectMode, picked, globalTest, names, accounts, groups, lang, issues, onExpand, onToggle, onStart, onStop, onTest, onEdit, onDuplicate, onDelete }: {
+  task: PublicTask
+  expanded: boolean
+  selectMode: boolean
+  picked: boolean
   globalTest: boolean
-  dragId: string | null
   names: { profile: Map<string, string>; account: Map<string, string>; group: Map<string, string>; client: Map<string, string> }
   accounts: PublicAccount[]
   groups: ProxyGroup[]
   lang: "en" | "es"
-  checkoutIssues: Map<string, HealthIssue[]>
-  onSelect: (id: string) => void
-  onToggle: (id: string) => void
-  onDrag: (id: string | null) => void
-  onDrop: (id: string) => void
-  onStart: (id: string) => void
-  onStop: (id: string) => void
-  onTest: (id: string) => void
-  onEdit: (task: PublicTask) => void
-  onDelete: (id: string) => void
+  issues: HealthIssue[]
+  onExpand: () => void
+  onToggle: () => void
+  onStart: () => void
+  onStop: () => void
+  onTest: () => void
+  onEdit: () => void
+  onDuplicate: () => void
+  onDelete: () => void
 }) {
-  const cols = taskView === "detailed" ? 8 : 4
+  const live = isActiveStatus(task.status)
+  const monitor = task.kind === "monitor"
+  const stock = stockOfTask(task)
+  const binding = bindingCell(task, accounts, groups, lang)
+  const cols = selectMode ? 6 : 5
+  const product = (task.sku.startsWith("http") ? task.sku.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60) : task.sku)
   return (
     <>
-      {grouped ? <tr className="group-row"><td colSpan={cols}>{section.label}</td></tr> : null}
-      {section.rows.map((task) => (
-        <tr
-          key={task.id}
-          className={`${task.id === selectedId ? "selected" : ""} ${dragId === task.id ? "dragging" : ""}`.trim()}
-          onClick={() => onSelect(task.id)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => { event.preventDefault(); onDrop(task.id) }}
-        >
-          <td>
-            <input type="checkbox" aria-label={task.sku} checked={picked.includes(task.id)} onClick={(event) => event.stopPropagation()} onChange={() => onToggle(task.id)} />
-            <button type="button" className="drag-handle" draggable title="Drag to reorder" aria-label={`Drag ${task.sku}`} onDragStart={(event) => { event.dataTransfer.setData("text/plain", task.id); event.dataTransfer.effectAllowed = "move"; onDrag(task.id) }} onDragEnd={() => onDrag(null)}>⋮⋮</button>
-          </td>
-          
-          <td>
-            <div className="product-cell">
-              <ProductVisual store={task.store} name={storeName(task.store)} sku={task.sku} imageUrl={task.imageUrl} />
-              <div>
-                <div>{storeName(task.store)}<span className={`pill role ${task.kind === "monitor" ? "role-monitor" : "role-checkout"}`}>{taskText(lang, task.kind === "monitor" ? "roleBadgeMonitor" : "roleBadgeCheckout")}</span>{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</div>
-                <div className="sku">{task.sku}</div>
-                {taskView === "compact" ? bindingCell(task, accounts, groups, lang).summary : null}
-                <div className="detail">{names.client.get(clientIdOf(task.clientId)) ?? clientText(lang, "me")}</div>
-                {typeof task.monitorMs === "number" ? <div className="detail">{task.monitorMs} ms last read{typeof task.detectToCartMs === "number" ? ` · ${task.detectToCartMs} ms to cart` : ""}</div> : null}
-              </div>
+      <tr className={expanded ? "selected task-row" : "task-row"} onClick={onExpand} aria-expanded={expanded}>
+        {selectMode ? <td className="sel"><input type="checkbox" aria-label={task.sku} checked={picked} onClick={(event) => event.stopPropagation()} onChange={onToggle} /></td> : null}
+        <td><StoreLogo store={task.store} withName /></td>
+        <td><div className="product-name" title={task.sku}>{product}</div>{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</td>
+        <td><span className={`mode-badge ${monitor ? "monitor" : "checkout"}`}>{monitor ? "Monitor" : "Checkout"}</span></td>
+        <td><span className={`status-pill s-${task.status}${stock ? ` stock-${stock}` : ""}`}>{stock === "in" ? "In stock" : stock === "out" ? "Out of stock" : friendlyStatus(task.status)}</span></td>
+        <td className="row-actions" onClick={(event) => event.stopPropagation()}>
+          {live ? (
+            <button type="button" className="toggle-btn stop" aria-label={`Stop ${task.sku}`} onClick={onStop}>■ Stop</button>
+          ) : (
+            <button type="button" className="toggle-btn start" aria-label={`Start ${task.sku}`} disabled={!task.confirmPurchase && !task.testMode && !monitor && !globalTest} title={!task.confirmPurchase && !task.testMode && !monitor && !globalTest ? "Edit the task and confirm real orders, or turn on test mode" : undefined} onClick={onStart}>▶ Start</button>
+          )}
+          <details className="row-menu">
+            <summary aria-label={`More actions for ${task.sku}`}>⋯</summary>
+            <div className="row-menu-list">
+              <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); onEdit() }}>Edit</button>
+              <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); onDuplicate() }}>Duplicate</button>
+              {!live && !monitor ? <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); onTest() }}>Test run</button> : null}
+              <button type="button" className="danger" disabled={live} onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); onDelete() }}>Delete</button>
+            </div>
+          </details>
+        </td>
+      </tr>
+      {expanded ? (
+        <tr className="row-detail">
+          <td colSpan={cols}>
+            <div className="detail-grid">
+              <div><span>SKU / link</span><strong className="wrap">{task.sku}</strong></div>
+              <div><span>Quantity</span><strong>{task.quantity}</strong></div>
+              <div><span>Profile</span><strong>{monitor ? "—" : names.profile.get(task.profileId) ?? "Not set"}</strong></div>
+              <div><span>Account</span><strong>{binding.account}</strong></div>
+              <div><span>Proxy</span><strong>{monitor ? names.group.get(task.monitorProxyGroupId ?? "") ?? "Direct connection" : binding.proxy}</strong></div>
+              <div><span>Group</span><strong>{task.group || "—"}</strong></div>
+              {typeof task.monitorMs === "number" ? <div><span>Last read</span><strong>{task.monitorMs} ms</strong></div> : null}
+              <div><span>Client</span><strong>{names.client.get(clientIdOf(task.clientId)) ?? clientText(lang, "me")}</strong></div>
+            </div>
+            {task.detail ? <p className="hint">{task.detail}</p> : null}
+            {issues.slice(0, 3).map((item) => <p key={item.code} className="hint warn-line">⚠ {issueText(lang, item)}</p>)}
+            <div className="log mini-log" aria-live="polite">
+              {(task.logs ?? []).length ? (task.logs ?? []).slice(-8).map((line, index) => (
+                <div key={`${line.ts}-${index}`} className={`log-line ${line.level}${stockOfLine(line.message) ? ` stock-${stockOfLine(line.message)}` : ""}`}><time>{formatTime(line.ts)}</time><span>{line.message}</span></div>
+              )) : <div className="empty">The live log appears here after the task starts.</div>}
             </div>
           </td>
-          {taskView === "detailed" ? <td className="col-extra">{task.quantity}</td> : null}
-          {taskView === "detailed" ? <td className="col-extra">{task.kind === "monitor" ? "—" : names.profile.get(task.profileId) ?? "Missing"}</td> : null}
-          {taskView === "detailed" ? <td className="col-extra">{bindingCell(task, accounts, groups, lang).account}</td> : null}
-          {taskView === "detailed" ? <td className="col-extra">{bindingCell(task, accounts, groups, lang).proxy}</td> : null}
-          <td>
-            <span className={`status-text status-${task.status}`}>{statusLabel(task.status, lang)}</span>
-            {task.detail ? <div className="detail">{task.detail}</div> : null}
-            {(checkoutIssues.get(task.id) ?? []).slice(0, 2).map((item) => (
-              <div key={item.code} className="detail">{issueText(lang, item)}</div>
-            ))}
-          </td>
-          <td className="row-actions">
-            {isActiveStatus(task.status) ? (
-              <button type="button" className="icon-btn" title={deskText(lang, "bulkStop")} aria-label={deskText(lang, "bulkStop")} onClick={(event) => { event.stopPropagation(); void onStop(task.id) }}>■</button>
-            ) : (
-              <button type="button" className="icon-btn primary" title={deskText(lang, "bulkStart")} aria-label={deskText(lang, "bulkStart")} disabled={!task.confirmPurchase && !task.testMode && task.kind !== "monitor" && !globalTest} onClick={(event) => { event.stopPropagation(); void onStart(task.id) }}>▶</button>
-            )}
-            {!isActiveStatus(task.status) ? (
-              <button type="button" className="icon-btn" title="Test" aria-label="Test" onClick={(event) => { event.stopPropagation(); void onTest(task.id) }}>◎</button>
-            ) : null}
-            <button type="button" className="icon-btn" title={deskText(lang, "editSelected")} aria-label={deskText(lang, "editSelected")} onClick={(event) => { event.stopPropagation(); onEdit(task) }}>✎</button>
-            <button type="button" className="icon-btn danger" title={deskText(lang, "bulkDelete")} aria-label={deskText(lang, "bulkDelete")} onClick={(event) => { event.stopPropagation(); void onDelete(task.id) }} disabled={isActiveStatus(task.status)}>✕</button>
-          </td>
         </tr>
-      ))}
+      ) : null}
     </>
   )
 }
@@ -782,17 +769,18 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
         <button type="button" className="icon-btn" aria-label="Close" onClick={onCancel}>✕</button>
       </div>
       <div className="span-2 role-switch" role="group" aria-label={taskText(lang, "roleTitle")}>
-        <span className="role-title">{taskText(lang, "roleTitle")}</span>
-        <div className="choices">
+        <span className="role-title">Mode</span>
+        <div className="pill-tabs mode-pick">
           {(["monitor", "checkout"] as const).map((kind) => (
             <button key={kind} type="button" aria-pressed={(form.kind ?? "checkout") === kind} disabled={live} onClick={() => chooseKind(kind)}>
-              {taskText(lang, kind)}
+              {kind === "monitor" ? "Monitor" : "Checkout"}
             </button>
           ))}
         </div>
       </div>
-      <p className="span-2 hint">{monitor ? taskText(lang, "hintMonitor") : taskText(lang, "hintCheckout")} {live ? taskText(lang, "live") : ""}</p>
+      <p className="span-2 hint">{monitor ? "Watches the product and lights up green when it is in stock." : "Buys the product with your profile when it is in stock."} {live ? taskText(lang, "live") : ""}</p>
       <Field label={taskText(lang, "store")}>
+        <div className="store-pick"><StoreLogo store={form.store} size={34} />
         <Select value={form.store} disabled={live} onChange={(event) => {
           const store = event.target.value as TaskInput["store"]
           onChange(applyRole({ ...form, store, accountId: "" }, form.kind === "monitor" ? "monitor" : "checkout", settings))
@@ -800,59 +788,25 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
           {stores.map((store) => (
             <option key={store.id} value={store.id}>{store.name}{store.implemented ? "" : " (stub)"}</option>
           ))}
-        </Select>
+        </Select></div>
       </Field>
-      <Field label={taskText(lang, "sku")} hint={selectedStore?.skuHint}>
-        <TextInput value={form.sku} disabled={live} onChange={(event) => onChange({ ...form, sku: event.target.value })} placeholder="88897904" required={!form.keywords?.trim()} />
-      </Field>
-      <Field label={taskText(lang, "keywords")} hint={taskText(lang, "inherit")}>
-        <TextInput value={form.keywords ?? ""} onChange={(event) => onChange({ ...form, keywords: event.target.value })} />
-      </Field>
-      <Field label={taskText(lang, "group")}>
-        <TextInput value={form.group ?? ""} onChange={(event) => onChange({ ...form, group: event.target.value })} placeholder="ETB" />
+      <Field label="Product link or SKU" hint={selectedStore?.skuHint}>
+        <TextInput value={form.sku} disabled={live} onChange={(event) => onChange({ ...form, sku: event.target.value })} placeholder="Paste a product link or SKU" required={!form.keywords?.trim()} />
       </Field>
       {monitor ? (
         <>
-          <Field label={taskText(lang, "monitorDelay")} hint={taskText(lang, "inherit")}>
-            <TextInput inputMode="numeric" value={form.overrides?.monitorDelayMs ?? ""} placeholder={inheritedDelay} onChange={(event) => {
-              const overrides = { ...form.overrides }
-              const raw = event.target.value
-              if (!raw.trim()) delete overrides.monitorDelayMs
-              else overrides.monitorDelayMs = Math.round(Number(raw))
-              onChange({ ...form, overrides })
-            }} />
-          </Field>
-          <Field label={clientText(lang, "filter")}>
-            <Select value={form.clientId || ME_CLIENT_ID} disabled={live} onChange={(event) => onChange({ ...form, clientId: event.target.value })}>
-              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-            </Select>
-          </Field>
-          <Field label={taskText(lang, "proxy")}>
+          <Field label="Proxy group">
             <Select value={form.monitorProxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, monitorProxyGroupId: event.target.value || null, proxyGroupId: null })}>
               <option value="">{taskText(lang, "direct")}</option>
               {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
             </Select>
           </Field>
-          <Field label={taskText(lang, "priceCap")}>
-            <TextInput type="number" min={0} step="0.01" value={form.priceCap ?? ""} onChange={(event) => onChange({ ...form, priceCap: event.target.value === "" ? null : Number(event.target.value) })} />
-          </Field>
-          <Field className="span-2" label={taskText(lang, "webhook")}>
-            <TextInput value={form.webhook ?? ""} onChange={(event) => onChange({ ...form, webhook: event.target.value })} placeholder="https://discord.com/api/webhooks/" inputMode="url" />
-          </Field>
-          <Field className="span-2" label={taskText(lang, "hours")} hint={taskText(lang, "hoursHint")}>
-            <textarea value={form.activeHours ?? ""} onChange={(event) => onChange({ ...form, activeHours: event.target.value })} rows={3} />
-          </Field>
-          <Field className="span-2" label={taskText(lang, "links")}>
-            <Select multiple value={form.linkedCheckoutIds ?? []} onChange={(event) => onChange({ ...form, linkedCheckoutIds: [...event.target.selectedOptions].map((option) => option.value) })}>
-              {checkouts.map((task) => <option key={task.id} value={task.id}>{storeName(task.store)} · {task.sku}</option>)}
-            </Select>
+          <Field label={taskText(lang, "quantity")} hint={recommended ? deskText(lang, fieldMark(form.quantity, recommended.quantity) === "custom" ? "markCustom" : "markDefault") : undefined}>
+            <TextInput type="number" min={1} max={12} value={form.quantity} disabled={live || monitor} onChange={(event) => onChange({ ...form, quantity: Number(event.target.value) })} required />
           </Field>
         </>
       ) : (
         <>
-          <Field label={taskText(lang, "quantity")} hint={recommended ? deskText(lang, fieldMark(form.quantity, recommended.quantity) === "custom" ? "markCustom" : "markDefault") : undefined}>
-            <TextInput type="number" min={1} max={12} value={form.quantity} disabled={live} onChange={(event) => onChange({ ...form, quantity: Number(event.target.value) })} required />
-          </Field>
           <Field label={taskText(lang, "profile")}>
             <Select value={form.profileId} disabled={live} onChange={(event) => onChange({ ...form, profileId: event.target.value })} required>
               <option value="">—</option>
@@ -871,16 +825,68 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
             </Select>
           </Field>
+          <Field label="Proxy group">
+            <Select value={form.proxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, proxyGroupId: event.target.value || null })}>
+              <option value="">{taskText(lang, "direct")}</option>
+              {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies?.length ?? 0})</option>)}
+            </Select>
+          </Field>
+          <Field label={taskText(lang, "quantity")} hint={recommended ? deskText(lang, fieldMark(form.quantity, recommended.quantity) === "custom" ? "markCustom" : "markDefault") : undefined}>
+            <TextInput type="number" min={1} max={12} value={form.quantity} disabled={live} onChange={(event) => onChange({ ...form, quantity: Number(event.target.value) })} required />
+          </Field>
+          <label className="check span-2">
+            <input type="checkbox" checked={form.testMode === true} disabled={live && form.testMode === true} onChange={(event) => onChange({ ...form, testMode: event.target.checked })} />
+            <span>{taskText(lang, "testMode")}</span>
+          </label>
+          <label className="check span-2">
+            <input type="checkbox" checked={form.confirmPurchase} disabled={live && !form.confirmPurchase} onChange={(event) => onChange({ ...form, confirmPurchase: event.target.checked })} />
+            <span>{taskText(lang, "confirm")}</span>
+          </label>
+        </>
+      )}
+      <details className="advanced span-2 more-options">
+        <summary>More options</summary>
+        <div className="form-grid inner">
+      <Field label={taskText(lang, "keywords")} hint={taskText(lang, "inherit")}>
+        <TextInput value={form.keywords ?? ""} onChange={(event) => onChange({ ...form, keywords: event.target.value })} />
+      </Field>
+      <Field label={taskText(lang, "group")}>
+        <TextInput value={form.group ?? ""} onChange={(event) => onChange({ ...form, group: event.target.value })} placeholder="ETB" />
+      </Field>
+          {monitor ? (
+            <>
+          <Field label={taskText(lang, "monitorDelay")} hint={taskText(lang, "inherit")}>
+            <TextInput inputMode="numeric" value={form.overrides?.monitorDelayMs ?? ""} placeholder={inheritedDelay} onChange={(event) => {
+              const overrides = { ...form.overrides }
+              const raw = event.target.value
+              if (!raw.trim()) delete overrides.monitorDelayMs
+              else overrides.monitorDelayMs = Math.round(Number(raw))
+              onChange({ ...form, overrides })
+            }} />
+          </Field>
+          <Field label={clientText(lang, "filter")}>
+            <Select value={form.clientId || ME_CLIENT_ID} disabled={live} onChange={(event) => onChange({ ...form, clientId: event.target.value })}>
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+            </Select>
+          </Field>
+          <Field label={taskText(lang, "priceCap")}>
+            <TextInput type="number" min={0} step="0.01" value={form.priceCap ?? ""} onChange={(event) => onChange({ ...form, priceCap: event.target.value === "" ? null : Number(event.target.value) })} />
+          </Field>
+          <Field className="span-2" label={taskText(lang, "hours")} hint={taskText(lang, "hoursHint")}>
+            <textarea value={form.activeHours ?? ""} onChange={(event) => onChange({ ...form, activeHours: event.target.value })} rows={3} />
+          </Field>
+          <Field className="span-2" label={taskText(lang, "links")}>
+            <Select multiple value={form.linkedCheckoutIds ?? []} onChange={(event) => onChange({ ...form, linkedCheckoutIds: [...event.target.selectedOptions].map((option) => option.value) })}>
+              {checkouts.map((task) => <option key={task.id} value={task.id}>{storeName(task.store)} · {task.sku}</option>)}
+            </Select>
+          </Field>
+            </>
+          ) : (
+            <>
           <Field label={taskText(lang, "proxy")}>
             <Select value={form.monitorProxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, monitorProxyGroupId: event.target.value || null })}>
               <option value="">{taskText(lang, "sameProxy")}</option>
               {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-            </Select>
-          </Field>
-          <Field label={taskText(lang, "checkoutProxy")}>
-            <Select value={form.proxyGroupId ?? ""} disabled={live} onChange={(event) => onChange({ ...form, proxyGroupId: event.target.value || null })}>
-              <option value="">{taskText(lang, "direct")}</option>
-              {groups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.proxies?.length ?? 0})</option>)}
             </Select>
           </Field>
           <Field label={taskText(lang, "checkoutDelay")}>
@@ -905,21 +911,15 @@ function TaskEditor({ form, tasks, settings, stores, profiles, accounts, clients
               </Select>
             </Field>
           ) : null}
-          <label className="check span-2">
-            <input type="checkbox" checked={form.testMode === true} disabled={live && form.testMode === true} onChange={(event) => onChange({ ...form, testMode: event.target.checked })} />
-            <span>{taskText(lang, "testMode")}</span>
-          </label>
-          <label className="check span-2">
-            <input type="checkbox" checked={form.confirmPurchase} disabled={live && !form.confirmPurchase} onChange={(event) => onChange({ ...form, confirmPurchase: event.target.checked })} />
-            <span>{taskText(lang, "confirm")}</span>
-          </label>
-        </>
-      )}
+            </>
+          )}
+          {settings ? <div className="span-2"><TaskOverrides form={form} settings={settings} onChange={onChange} /></div> : null}
+          <BindingNote form={form} accounts={accounts} groups={groups} lang={lang} />
+        </div>
+      </details>
       {selectedStore && !selectedStore.implemented ? (
         <Banner tone="info">{selectedStore.name} is registered, and starting a task records that checkout is not implemented yet.</Banner>
       ) : null}
-      {settings ? <details className="advanced span-2"><summary>{deskText(lang, "advanced")}</summary><TaskOverrides form={form} settings={settings} onChange={onChange} /></details> : null}
-      <BindingNote form={form} accounts={accounts} groups={groups} lang={lang} />
       <div className="actions span-2">
         <button className="primary" type="submit" disabled={busy}>{form.id ? "Save task" : "Create task"}</button>
         <button type="button" onClick={onCancel}>Cancel</button>

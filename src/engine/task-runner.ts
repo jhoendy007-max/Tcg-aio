@@ -8,6 +8,7 @@ import type { RequestTiming } from "./http"
 import { productImage } from "../shared/image"
 import { cleanImageUrl } from "./validate"
 import { postDiscord } from "./discord"
+import { noticeAllowed, StockAlerts, stockKey } from "./stock-alerts"
 import { clientCanStart, clientIdOf, clientSuccessNotice } from "../shared/clients"
 import { isCardDecline, issueText } from "../shared/checkout-health"
 import { moduleScope, resolveModule, resolvedValues, type ModulePace } from "../shared/module-settings"
@@ -32,6 +33,8 @@ export class TaskService {
   private readonly polite = new PoliteLimiter()
   private readonly hub = new MonitorHub()
   private readonly watches = new Map<string, WatchSnapshot>()
+  private readonly stockAlerts = new StockAlerts(() => Math.max(0, Number(this.db.getSettings().notifyCooldownMin ?? 10)) * 60_000)
+  private readonly blockNotes = new Map<string, number>()
 
   constructor(
     private readonly db: Database,
@@ -349,6 +352,24 @@ export class TaskService {
           if (status === "in_stock") detectedAt = Date.now()
           if (status === "adding_to_cart" && detectedAt) update({ detectToCartMs: Date.now() - detectedAt })
           update({ status })
+          if (monitorTask && (status === "in_stock" || status === "monitoring")) {
+            const change = this.stockAlerts.read(stockKey(task.store, task.sku), status === "in_stock")
+            if (change) {
+              update({ log: line(change === "instock" ? "success" : "warn", change === "instock" ? "In stock." : "Out of stock.") })
+              const current = this.db.getTask(id)
+              void this.safeNotify(update, {
+                kind: change,
+                store: task.store,
+                storeName: module.displayName,
+                sku: task.sku,
+                profileName: "Monitor",
+                detail: change === "instock" ? "The monitor saw this item in stock." : "This item went back out of stock.",
+                imageUrl: current.imageUrl || undefined,
+                url: /^https:\/\//.test(task.sku) ? task.sku : undefined,
+                at: Date.now()
+              })
+            }
+          }
           // A monitor never checks out, so it stays on the monitor proxies in every phase.
           // Moving to the checkout pool here sent an in-stock monitor out with no proxy at all.
           if (status === "monitoring" || monitorTask) {
@@ -406,6 +427,18 @@ export class TaskService {
               proxy: monitorProxy ? `${monitorProxy.host}:${monitorProxy.port}` : "direct"
             })
             update({ monitorMs: total })
+            if (blockStatus(status) && Date.now() - (this.blockNotes.get(id) ?? 0) > 10 * 60_000) {
+              this.blockNotes.set(id, Date.now())
+              void this.safeNotify(update, {
+                kind: "blocked",
+                store: task.store,
+                storeName: module.displayName,
+                sku: task.sku,
+                profileName: monitorProxy ? `${monitorProxy.host}:${monitorProxy.port}` : "direct",
+                detail: `The store answered ${status}. The task backs off and keeps going.`,
+                at: Date.now()
+              })
+            }
           }
           const image = readBody(value)
           if (image) {
@@ -472,7 +505,7 @@ export class TaskService {
               url: snapshot.url,
               imageUrl: snapshot.imageUrl,
               inStock: snapshot.purchasable
-            }, fresh.webhook)
+            })
           }
         },
         mailCode: this.readCode ? () => this.readCode!(task.store) : undefined,
@@ -907,13 +940,9 @@ export class TaskService {
     return fresh
   }
 
-  private async safeNotify(update: (patch: Parameters<Database["patchTask"]>[1]) => void, notice: Notice, webhook = ""): Promise<void> {
+  private async safeNotify(update: (patch: Parameters<Database["patchTask"]>[1]) => void, notice: Notice): Promise<void> {
     try {
-      if (webhook) {
-        await postDiscord(webhook, notice)
-        update({ log: line("info", "Discord notification sent.") })
-        return
-      }
+      if (!noticeAllowed(this.db.getSettings(), notice)) return
       const delivered = await this.notify(notice)
       update({ log: line("info", delivered ? "Discord notification sent." : "Discord webhook is not set.") })
     } catch (err) {
