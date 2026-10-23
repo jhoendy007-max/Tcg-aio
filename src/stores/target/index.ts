@@ -6,7 +6,7 @@ import { redact } from "../../shared/redact"
 import type { SessionCookies } from "../../shared/types"
 import { chromeUserAgent } from "../../engine/chrome-ua"
 import type { HttpRequest, HttpResponse } from "../../engine/http"
-import { checkoutPreflight, paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult } from "../module"
+import { checkoutPreflight, paceAddToCart, retryWait, type StoreModule, type StoreRunContext, type StoreRunResult, type ResumePoint } from "../module"
 import {
   bodyHas,
   findCartId,
@@ -108,40 +108,54 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
     note(ctx, "session", "skip", "Monitors check stock without a store account.")
   }
 
+  const resume = ctx.resume
+  ctx.resume = undefined
+  if (resume?.step === "checkout") {
+    ctx.log("info", "Challenge cleared. Continuing checkout with the cart that was already built.")
+    return checkoutFrom(ctx, jar, key, tcin, { cartId: resume.cartId, itemId: resume.itemId })
+  }
+  let skipMonitor = resume?.step === "cart"
+  if (skipMonitor) ctx.log("info", "Challenge cleared. Adding to cart again without waiting for the monitor.")
+
   ctx.phase("monitoring")
-  ctx.log("info", `Watching TCIN ${tcin} for ship-to-home stock (store ${location.storeId}, ZIP ${location.zip}).`)
+  if (!skipMonitor) ctx.log("info", `Watching TCIN ${tcin} for ship-to-home stock (store ${location.storeId}, ZIP ${location.zip}).`)
   let oosPolls = 0
 
   while (!ctx.signal.aborted) {
-    const stock = await readStockPlaces(ctx, key, tcin)
-    if (stock.kind === "paused") return { outcome: "paused", reason: stock.reason }
-    if (stock.kind === "retry") {
-      ctx.detail(stock.reason)
-      if (stock.reason !== MONITOR_WAIT) ctx.log("warn", stock.reason)
-      await ctx.sleep(retryWait(ctx))
-      continue
+    let price: number | undefined
+    if (!skipMonitor) {
+      const stock = await readStockPlaces(ctx, key, tcin)
+      if (stock.kind === "paused") return { outcome: "paused", reason: stock.reason }
+      if (stock.kind === "retry") {
+        ctx.detail(stock.reason)
+        if (stock.reason !== MONITOR_WAIT) ctx.log("warn", stock.reason)
+        await ctx.sleep(retryWait(ctx))
+        continue
+      }
+      if (stock.kind !== "ok") return asResult(stock)
+      const reading = stock.value
+      if (reading.title) ctx.detail(reading.title)
+      if (!reading.inStock) {
+        oosPolls += 1
+        const message = `Out of stock for shipping (${reading.status}).`
+        ctx.detail(reading.title ? `${reading.title} · ${message}` : message)
+        if (oosPolls === 1 || oosPolls % 10 === 0) ctx.log("info", message)
+        await ctx.sleep(ctx.settings.monitorDelayMs)
+        continue
+      }
+      ctx.phase("in_stock")
+      ctx.log("success", `Shipping in stock (${reading.status})${reading.title ? ` · ${reading.title}` : ""}.`)
+      note(ctx, "monitor", "pass", `In stock (${reading.status}).`)
+      if (await holdMonitorOnly(ctx)) continue
+      price = reading.price
+      const preflight = checkoutPreflight(ctx, price)
+      if (preflight) return preflight
+      await paceAddToCart(ctx)
     }
-    if (stock.kind !== "ok") return asResult(stock)
-    const reading = stock.value
-    if (reading.title) ctx.detail(reading.title)
-    if (!reading.inStock) {
-      oosPolls += 1
-      const message = `Out of stock for shipping (${reading.status}).`
-      ctx.detail(reading.title ? `${reading.title} · ${message}` : message)
-      if (oosPolls === 1 || oosPolls % 10 === 0) ctx.log("info", message)
-      await ctx.sleep(ctx.settings.monitorDelayMs)
-      continue
-    }
-
-    ctx.phase("in_stock")
-    ctx.log("success", `Shipping in stock (${reading.status})${reading.title ? ` · ${reading.title}` : ""}.`)
-    note(ctx, "monitor", "pass", `In stock (${reading.status}).`)
-    if (await holdMonitorOnly(ctx)) continue
-    const preflight = checkoutPreflight(ctx, reading.price)
-    if (preflight) return preflight
-    await paceAddToCart(ctx)
+    skipMonitor = false
     ctx.phase("adding_to_cart")
     const cart = await addToCart(ctx, jar, key, tcin)
+    if (cart.kind === "paused") return { outcome: "paused", reason: cart.reason, resume: { step: "cart" } }
     if (cart.kind === "oos") {
       ctx.log("warn", "Add to cart reported the item unavailable. Returning to the monitor.")
       ctx.phase("monitoring")
@@ -158,45 +172,54 @@ async function runTarget(ctx: StoreRunContext): Promise<StoreRunResult> {
       return asResult(cart)
     }
     note(ctx, "cart", "pass", `Added ${ctx.task.quantity} to the cart.`)
-
-    ctx.phase("checking_out")
-    ctx.log("info", "Submitting the shipping address from the saved profile.")
-    const shipped = await submitShipping(ctx, jar, key)
-    if (shipped.kind !== "ok") {
-      note(ctx, "address", "fail", shipped.reason)
-      return asResult(shipped)
-    }
-    note(ctx, "address", "pass", "Shipping address accepted.")
-    note(ctx, "shipping", "pass", "Ship-to-home selected.")
-    ctx.log("info", `Submitting payment for the card ending ${ctx.profile.last4}.`)
-    const paid = await submitPayment(ctx, jar, key, cart.value.cartId)
-    if (paid.kind !== "ok") {
-      note(ctx, "payment", "fail", paid.reason)
-      return asResult(paid)
-    }
-    note(ctx, "payment", "pass", "Payment instruction accepted. The card was not charged.")
-    if (ctx.testMode) {
-      if (ctx.clearCartAfterTest && cart.value.itemId) {
-        const cleared = await clearTargetLine(ctx, jar, key, tcin, cart.value.itemId)
-        note(ctx, "cart", cleared ? "pass" : "fail", cleared ? "Removed the test line from the cart." : "The test line could not be removed.")
-      } else if (ctx.clearCartAfterTest) {
-        note(ctx, "cart", "skip", "Target did not return a cart line id, so the cart was left as-is.")
-      }
-      return finishTest(ctx)
-    }
-    const order = await placeOrder(ctx, jar, key, cart.value.cartId)
-    if (order.kind === "oos") {
-      return fail("Target reported an empty cart during order submission. The place-order request was not retried; verify the cart before starting again.")
-    }
-    if (order.kind !== "ok") return asResult(order)
-    const orderId = order.value
-    return {
-      outcome: "success",
-      orderId,
-      detail: orderId ? `Order ${orderId}` : "Target accepted the shipping order."
-    }
+    return checkoutFrom(ctx, jar, key, tcin, cart.value)
   }
   return { outcome: "stopped", reason: "Stopped" }
+}
+
+/** Shipping, payment and order for a cart that already holds the item. A challenge here resumes here. */
+async function checkoutFrom(ctx: StoreRunContext, jar: CookieJar, key: string, tcin: string, cart: { cartId: string; itemId?: string }): Promise<StoreRunResult> {
+  const here: ResumePoint = { step: "checkout", cartId: cart.cartId, itemId: cart.itemId }
+  ctx.phase("checking_out")
+  ctx.log("info", "Submitting the shipping address from the saved profile.")
+  const shipped = await submitShipping(ctx, jar, key)
+  if (shipped.kind !== "ok") {
+    note(ctx, "address", "fail", shipped.reason)
+    return withResume(asResult(shipped), here)
+  }
+  note(ctx, "address", "pass", "Shipping address accepted.")
+  note(ctx, "shipping", "pass", "Ship-to-home selected.")
+  ctx.log("info", `Submitting payment for the card ending ${ctx.profile.last4}.`)
+  const paid = await submitPayment(ctx, jar, key, cart.cartId)
+  if (paid.kind !== "ok") {
+    note(ctx, "payment", "fail", paid.reason)
+    return withResume(asResult(paid), here)
+  }
+  note(ctx, "payment", "pass", "Payment instruction accepted. The card was not charged.")
+  if (ctx.testMode) {
+    if (ctx.clearCartAfterTest && cart.itemId) {
+      const cleared = await clearTargetLine(ctx, jar, key, tcin, cart.itemId)
+      note(ctx, "cart", cleared ? "pass" : "fail", cleared ? "Removed the test line from the cart." : "The test line could not be removed.")
+    } else if (ctx.clearCartAfterTest) {
+      note(ctx, "cart", "skip", "Target did not return a cart line id, so the cart was left as-is.")
+    }
+    return finishTest(ctx)
+  }
+  const order = await placeOrder(ctx, jar, key, cart.cartId)
+  if (order.kind === "oos") {
+    return fail("Target reported an empty cart during order submission. The place-order request was not retried; verify the cart before starting again.")
+  }
+  if (order.kind !== "ok") return withResume(asResult(order), here)
+  const orderId = order.value
+  return {
+    outcome: "success",
+    orderId,
+    detail: orderId ? `Order ${orderId}` : "Target accepted the shipping order."
+  }
+}
+
+function withResume(result: StoreRunResult, resume: ResumePoint): StoreRunResult {
+  return result.outcome === "paused" ? { ...result, resume } : result
 }
 
 async function ensureSession(ctx: StoreRunContext, jar: CookieJar, key: string): Promise<StoreRunResult | null> {

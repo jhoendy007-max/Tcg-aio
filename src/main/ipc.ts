@@ -2,7 +2,7 @@ import { ipcMain, session, shell, type BrowserWindow } from "electron"
 import QRCode from "qrcode"
 import { relayRestockUrl, type AlertService } from "../engine/alerts"
 import type { ChallengeController } from "./challenge-window"
-import { postDiscord } from "../engine/discord"
+import { postDiscord, sampleNotices } from "../engine/discord"
 import { checkStoreHealth, testProxiesAgainstStores } from "../engine/health"
 import { testMonitorOnProxies, testProxiesOnSite } from "../engine/site-test"
 import { cleanSiteUrl } from "../shared/store-sites"
@@ -175,13 +175,10 @@ export function registerIpc(
   handle(channels.settingsTest, async () => {
     const webhook = db.getSettings().discordWebhook
     if (!webhook) throw new Error("Save a Discord webhook first.")
-    await postDiscord(webhook, {
-      kind: "success",
-      storeName: "Zzz AIO",
-      sku: "Webhook test",
-      profileName: "Settings",
-      detail: "Discord notifications are connected."
-    })
+    const settings = db.getSettings()
+    const samples = sampleNotices(settings)
+    if (!samples.length) samples.push({ kind: "success", storeName: "Zzz AIO", sku: "Webhook test", profileName: "Settings", detail: "Discord notifications are connected." })
+    for (const sample of samples) await postDiscord(webhook, sample, undefined, settings.discordMention ?? "")
     return { delivered: true as const }
   })
   handle(channels.storesList, () => listStores(registry))

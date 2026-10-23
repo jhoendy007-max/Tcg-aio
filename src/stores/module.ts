@@ -45,6 +45,8 @@ export interface StoreRunContext {
   mailCode?: () => Promise<string | null>
   /** Watch stock only. The module must not add to cart. */
   monitorOnly?: boolean
+  /** Set by the runner after a solved challenge so the module continues from the step that paused. */
+  resume?: ResumePoint
   /** Extra wait before add-to-cart, in milliseconds. Zero uses the store pace only. */
   checkoutDelayMs?: number
   /** Resolved store settings. Task overrides already won. */
@@ -93,9 +95,18 @@ export function retryWait(ctx: StoreRunContext): number {
   return delay
 }
 
+/**
+ * Where a paused run can pick up after a person clears a challenge (0.2.40).
+ * "cart": the item was in stock, add it to the cart again without re-monitoring.
+ * "checkout": the item is already in the cart, continue with shipping/payment/order.
+ */
+export type ResumePoint =
+  | { step: "cart" }
+  | { step: "checkout"; cartId: string; itemId?: string }
+
 export type StoreRunResult =
   | { outcome: "success"; orderId?: string; detail: string }
-  | { outcome: "paused"; reason: string }
+  | { outcome: "paused"; reason: string; resume?: ResumePoint }
   | { outcome: "failed"; reason: string }
   | { outcome: "stopped"; reason: string }
   | { outcome: "tested"; detail: string }

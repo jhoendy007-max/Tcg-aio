@@ -626,14 +626,14 @@ function TaskRow({ task, title, expanded, selectMode, picked, globalTest, names,
       <tr className={expanded ? "selected task-row" : "task-row"} onClick={onExpand} aria-expanded={expanded}>
         {selectMode ? <td className="sel"><input type="checkbox" aria-label={task.sku} checked={picked} onClick={(event) => event.stopPropagation()} onChange={onToggle} /></td> : null}
         <td><StoreLogo store={task.store} withName /></td>
-        <td className="col-product">{title ? <div className="product-name" title={`${title} · ${task.sku}`}>{title}</div> : <div className="product-name" title={task.sku}><span className="sku-tag">SKU</span>{product}</div>}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</td>
+        <td className="col-product">{title ? <div className="product-name" title={`${title} · ${task.sku}`}>{title}</div> : <div className="product-name" title={task.sku}><span className="sku-tag">SKU</span>{product}</div>}{task.testMode || globalTest ? <span className="dry-run-badge" title="Place order is simulated, never sent">DRY RUN</span> : null}</td>
         <td><span className={`mode-badge ${monitor ? "monitor" : "checkout"}`}>{monitor ? "Monitor" : "Checkout"}</span></td>
         <td><span className={`status-pill s-${task.status}${stock ? ` stock-${stock}` : ""}`}>{stock === "in" ? "In stock" : stock === "out" ? "Out of stock" : friendlyStatus(task.status)}</span></td>
         <td className="row-actions" onClick={(event) => event.stopPropagation()}>
           {live ? (
             <button type="button" className="toggle-btn stop" aria-label={`Stop ${task.sku}`} onClick={onStop}>■ Stop</button>
           ) : (
-            <button type="button" className="toggle-btn start" aria-label={`Start ${task.sku}`} disabled={!task.confirmPurchase && !task.testMode && !monitor && !globalTest} title={!task.confirmPurchase && !task.testMode && !monitor && !globalTest ? "Edit the task and confirm real orders, or turn on test mode" : undefined} onClick={onStart}>▶ Start</button>
+            <button type="button" className="toggle-btn start" aria-label={`Start ${task.sku}`} disabled={!task.confirmPurchase && !task.testMode && !monitor && !globalTest} title={!task.confirmPurchase && !task.testMode && !monitor && !globalTest ? "Edit the task and confirm real orders, or turn on Dry run" : undefined} onClick={onStart}>▶ Start</button>
           )}
           <RowMenu label={task.sku} items={[
             { label: "Edit", run: onEdit },

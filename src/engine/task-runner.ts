@@ -24,7 +24,7 @@ import { redact } from "../shared/redact"
 import { isAbortError, sleep } from "./sleep"
 import type { Database } from "./database"
 import { defaultHttp, type HttpClient } from "./http"
-import type { StoreModule, StoreRunResult } from "../stores/module"
+import type { ResumePoint, StoreModule, StoreRunResult } from "../stores/module"
 import { isActiveStatus, type FullAccount, type FullProfile, type LogLevel, type Notice, type ProxyEndpoint, type PublicTask, type Settings, type StoreId, type TaskEvent, type TaskStatus } from "../shared/types"
 
 export class TaskService {
@@ -283,13 +283,15 @@ export class TaskService {
         jitterPct
       })
       const checks: string[] = []
-      if (testMode) update({ log: line("warn", "TEST MODE. The real flow runs through payment, then stops. The place-order request is not sent.") })
+      let stepClock = Date.now()
+      if (testMode) update({ log: line("warn", "DRY RUN. The real flow runs monitor → session → cart → address → shipping → payment, then SIMULATES place order. The place-order request is never sent.") })
       let handoffs = 0
       let detectedAt = 0
       let announcedStock = false
       let openedStock = false
       const guarded = testMode ? guardTestMode(task.store, http) : http
       const ctx = {
+        resume: undefined as ResumePoint | undefined,
         task: { id: task.id, sku: task.sku, quantity: task.quantity, store: task.store, maxPrice: task.maxPrice },
         healthCheck: () => {
           const report = this.db.assessTask(id)
@@ -325,7 +327,11 @@ export class TaskService {
         clearCartAfterTest: testMode && settings.clearCartAfterTest,
         mark: (stage: TestStage, result: CheckResult, detail: string) => {
           const label = result === "pass" ? "PASS" : result === "fail" ? "FAIL" : "SKIP"
-          const message = `${label} ${STAGE_LABEL[stage]} — ${detail}`
+          // 0.2.40 Dry run report: time spent on each step since the previous one.
+          const now = Date.now()
+          const ms = now - stepClock
+          stepClock = now
+          const message = `${testMode ? "DRY RUN · " : ""}${label} ${STAGE_LABEL[stage]} (${ms} ms) — ${detail}`
           checks.push(message)
           update({ log: line(result === "fail" ? "error" : result === "skip" ? "warn" : "success", message) })
         },
@@ -596,6 +602,11 @@ export class TaskService {
           if (resumed) {
             account = resumed
             ctx.account = resumed
+            // 0.2.40: pick up at the step that paused (cart kept), not from the monitor.
+            if (result.resume) {
+              ctx.resume = result.resume
+              update({ log: line("info", result.resume.step === "checkout" ? "Resuming at checkout with the existing cart." : "Resuming at add to cart.") })
+            }
             continue
           }
           return
@@ -645,7 +656,7 @@ export class TaskService {
     const timeout = this.db.getSettings().challengeTimeoutSec
     update({
       status: "challenge",
-      detail: `Waiting for a person to solve the challenge (${timeout}s).`,
+      detail: `Challenge needs you: clear it on the PC or phone. Resumes on its own when solved (${timeout}s).`,
       finishedAt: undefined,
       log: line("warn", reason)
     })
@@ -681,9 +692,9 @@ export class TaskService {
       this.db.updateSession(account.id, applySolvedCookies(account.session, outcome.cookies))
       update({
         status: "monitoring",
-        detail: "Challenge solved. Resuming.",
+        detail: "Challenge cleared. Resuming where it paused.",
         finishedAt: undefined,
-        log: line("success", "Saved the solved cookies and resumed the task.")
+        log: line("success", "Challenge cleared by you. Saved the new cookies and resumed the task.")
       })
       return this.db.readAccount(account.id)
     }

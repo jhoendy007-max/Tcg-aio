@@ -1,9 +1,10 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Pressable, StyleSheet, Text, View } from "react-native"
 import { WebView, type WebViewMessageEvent } from "react-native-webview"
 import type { PhoneSession } from "../../src/phone/client"
 import type { PhoneChallenge } from "../../src/phone/protocol"
 import { colors } from "./theme"
+import { solvedProbeScript } from "../../src/shared/challenge-solved"
 
 const HOSTS = new Set([
   "www.target.com",
@@ -18,24 +19,32 @@ export function ChallengeCard({
   challenge,
   now,
   session,
-  onRun
+  onRun,
+  autoOpen = false
 }: {
   challenge: PhoneChallenge
   now: number
   session: PhoneSession | null
   onRun: (action: () => Promise<{ ok: boolean; error?: string }>) => Promise<unknown>
+  autoOpen?: boolean
 }) {
   const web = useRef<WebView<{ marker?: undefined }>>(null)
-  const [open, setOpen] = useState(false)
   const url = safeUrl(challenge.url)
+  const [open, setOpen] = useState(autoOpen && Boolean(url))
+  const [solved, setSolved] = useState(false)
+  useEffect(() => {
+    if (autoOpen && url) setOpen(true)
+  }, [autoOpen, url])
   const left = Math.max(0, Math.ceil((challenge.expiresAt - now) / 1000))
   const seed = url ? seedScript(challenge.cookie) : "true;"
+  // Read-only: watches for the store page to come back normally after YOU clear the check.
+  const probe = url ? solvedProbeScript(challenge.store, new URL(url).hostname, challenge.cookie) : "true;"
   return (
     <View style={styles.card}>
-      <Text style={styles.h2}>Solve the challenge</Text>
+      <Text style={styles.h2}>{solved ? "Cleared. Resuming the task…" : "Challenge needs you"}</Text>
       <Text style={styles.p}>{challenge.storeName} · {challenge.sku} · {challenge.proxyLabel} · {left}s left</Text>
       <Text style={styles.p}>{challenge.reason}</Text>
-      <Text style={styles.p}>A person solves this. Zzz AIO does not send it to a solving service. Open on PC uses the task proxy and saves every cookie, including ones JavaScript cannot see. Solving on this phone uses the phone network and only sends cookies JavaScript can see.</Text>
+      <Text style={styles.p}>A person solves this. Zzz AIO does not send it to a solving service. When the store page comes back, the task resumes on its own. Open on PC uses the task proxy and saves every cookie, including ones JavaScript cannot see. Solving on this phone uses the phone network and only sends cookies JavaScript can see.</Text>
       <View style={styles.row}>
         <Pressable style={styles.primary} onPress={() => void onRun(() => session!.openChallenge())}><Text style={styles.primaryText}>Open on PC</Text></Pressable>
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.completeChallenge())}><Text style={styles.secondaryText}>I solved it on PC</Text></Pressable>
@@ -51,8 +60,19 @@ export function ChallengeCard({
             originWhitelist={["https://*"]}
             setSupportMultipleWindows={false}
             injectedJavaScriptBeforeContentLoaded={seed}
+            injectedJavaScript={probe}
             onMessage={(event: WebViewMessageEvent) => {
-              const cookie = event.nativeEvent.data
+              const raw = event.nativeEvent.data
+              let cookie = raw
+              try {
+                const parsed = JSON.parse(raw) as { type?: string; cookie?: string }
+                if (parsed.type === "solved" && typeof parsed.cookie === "string") {
+                  cookie = parsed.cookie
+                  setSolved(true)
+                }
+              } catch {
+                // Plain cookie string from "Send phone cookies".
+              }
               if (!cookie || cookie.length > 8192) return
               void onRun(() => session!.submitChallenge(cookie))
             }}

@@ -320,3 +320,49 @@ describe("store registry", () => {
     for (const module of registry.values()) expect(module.implemented).toBe(true)
   })
 })
+
+describe("target resume after a cleared challenge (0.2.40)", () => {
+  it("a challenge at payment pauses with a checkout resume point, and resuming skips monitor and add to cart", async () => {
+    let blockPayment = true
+    const fake = client((req) => {
+      if (req.url.includes("payment_instructions") && blockPayment) return json(403, "<html><div id=\"px-captcha\">Press &amp; Hold</div></html>")
+      return happy(req)
+    })
+    const module = createTargetModule()
+    const first = ctx(fake.http)
+    const paused = await module.run(first)
+    expect(paused).toMatchObject({ outcome: "paused", reason: TARGET_PAUSE, resume: { step: "checkout", cartId: "cart-1", itemId: "item-1" } })
+
+    // A person clears the check; the runner hands back the resume point.
+    blockPayment = false
+    fake.calls.length = 0
+    const resumed = await module.run(ctx(fake.http, { resume: paused.outcome === "paused" ? paused.resume : undefined }))
+    expect(resumed).toMatchObject({ outcome: "success", orderId: "100200300" })
+    expect(fake.calls.some((call) => call.url.includes("product_summary"))).toBe(false)
+    expect(fake.calls.some((call) => call.url.includes("/v1/cart_items") && call.method === "POST")).toBe(false)
+    expect(fake.calls.some((call) => call.url.includes("payment_instructions"))).toBe(true)
+  })
+
+  it("a challenge at add to cart resumes at add to cart without waiting for the monitor", async () => {
+    let blockCart = true
+    const fake = client((req) => {
+      if (req.url.includes("/v1/cart_items") && req.method === "POST" && blockCart) return json(403, "<html>px-captcha</html>")
+      return happy(req)
+    })
+    const module = createTargetModule()
+    const paused = await module.run(ctx(fake.http))
+    expect(paused).toMatchObject({ outcome: "paused", resume: { step: "cart" } })
+    blockCart = false
+    fake.calls.length = 0
+    const resumed = await module.run(ctx(fake.http, { resume: { step: "cart" } }))
+    expect(resumed).toMatchObject({ outcome: "success" })
+    expect(fake.calls.some((call) => call.url.includes("product_summary"))).toBe(false)
+  })
+
+  it("a monitor challenge has no resume point (the monitor simply starts again)", async () => {
+    const fake = client((req) => req.url.includes("product_summary") || req.url.includes("pdp_fulfillment") ? json(403, "<html>captcha</html>") : happy(req))
+    const result = await createTargetModule().run(ctx(fake.http))
+    expect(result.outcome).toBe("paused")
+    expect("resume" in result ? result.resume : undefined).toBeUndefined()
+  })
+})

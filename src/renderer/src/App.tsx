@@ -30,7 +30,8 @@ import { APP_VERSION } from "../../shared/version"
 import { DEFAULT_SETTINGS, type AccountView, type Settings, type UpdateStatus } from "../../shared/types"
 import { errorText, unwrap } from "./lib"
 import { applyTheme } from "./theme"
-import { playSuccessChime } from "./sound"
+import { soundEventFor } from "../../shared/sounds"
+import { playEventSound, playSuccessChime } from "./sound"
 
 const NAV: Array<{ id: SectionId; icon: string; label: "navHome" | "navTasks" | "navProfiles" | "navProxies" | "navAccounts" | "navAco" | "navSettings" }> = [
   { id: "home", icon: "home", label: "navHome" },
@@ -120,15 +121,17 @@ export function App() {
       const before = seen.current.get(event.task.id)
       seen.current.set(event.task.id, event.task.status)
       if (!before || before === event.task.status) return
+      // 0.2.40 sounds: in stock / success (dry runs too) / failure, each its own sound.
+      const soundEvent = soundEventFor(before, event.task.status)
+      if (soundEvent) playEventSound(settings, soundEvent)
       if (event.task.status !== "success" && event.task.status !== "tested") return
       const task = event.task
       void unwrap(window.aio.analytics.get()).then((report) => {
         const match = report.recent.find((row) => row.sku === task.sku && (row.outcome === task.status || row.outcome === "success"))
         setWin({ task, price: match?.price ?? null, orderId: match?.orderId ?? "" })
       }).catch(() => setWin({ task, price: null, orderId: "" }))
-      if (settings.successSound && task.status === "success") playSuccessChime()
     })
-  }, [settings.successSound])
+  }, [settings])
 
   async function setSound(on: boolean) {
     const next = { ...settings, successSound: on }
@@ -254,10 +257,11 @@ const NAV_PATH: Record<string, string> = {
   alerts: "M8 2.8a3.2 3.2 0 0 1 3.2 3.2v2.2l1 1.6H3.8l1-1.6V6A3.2 3.2 0 0 1 8 2.8zM6.6 12.6a1.4 1.4 0 0 0 2.8 0",
   autopilot: "M8 2.5 9.2 6.2 13 6.4 10.1 8.8 11.2 12.5 8 10.4 4.8 12.5 5.9 8.8 3 6.4 6.8 6.2z",
   phone: "M5.2 2.5h5.6v11H5.2zM7 11.8h2",
-  stores: "M3 6.2 8 3l5 3.2V13H3zM6.5 13V8.5h3V13"
+  stores: "M3 6.2 8 3l5 3.2V13H3zM6.5 13V8.5h3V13",
+  mail: "M2.5 4h11v8h-11zM2.5 4 8 8.6 13.5 4"
 }
 
-function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es"; onSettings: (next: Settings) => void }) {
+export function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es"; onSettings: (next: Settings) => void }) {
   const items = [
     ["general", deskText(lang, "setGeneral")],
     ["logs", deskText(lang, "setLogs")],
@@ -271,8 +275,16 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
     ["keeper", deskText(lang, "setKeeper")],
     ["vault", deskText(lang, "setVault")]
   ] as const
-  const advanced = items.filter(([id]) => id !== "general")
-  const inAdvanced = tab !== "general" && tab !== "advanced"
+  const TOP_TABS = [["general", "General", "settings"], ["phone", "Phone", "phone"], ["discord", "Discord", "alerts"], ["imap", "IMAP", "mail"]] as const
+  const isTop = tab === "general" || tab === "advanced" || tab === "phone" || tab === "discord" || tab === "imap" || tab === "sounds" || tab === "notifications"
+  const top = tab === "sounds" || tab === "notifications" ? "discord" : tab === "advanced" ? "general" : tab
+  const advanced = items.filter(([id]) => id !== "general" && id !== "phone")
+  const inAdvanced = !isTop && items.some(([id]) => id === tab)
+  const topBar = (
+    <nav className="settings-tabs glass-neon" role="tablist" aria-label="Settings">
+      {TOP_TABS.map(([id, label, icon]) => <a key={id} role="tab" href={`#settings/${id === "general" ? "" : id}`.replace(/\/$/, "")} aria-selected={top === id} className={top === id ? "active" : undefined}><NavIcon name={icon} />{label}</a>)}
+    </nav>
+  )
   const tools = (
     <details className="advanced" open={inAdvanced}>
       <summary>More tools: logs, store defaults, phone, alerts, drops, stats</summary>
@@ -283,6 +295,7 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
   )
   return (
     <section className="page">
+      {topBar}
       {inAdvanced ? <div className="segments" role="tablist"><a href="#settings">← {deskText(lang, "setGeneral")}</a></div> : null}
       {inAdvanced ? tools : null}
       {tab === "logs" ? <LogsPage /> : null}
@@ -295,7 +308,9 @@ function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en" | "es
       {tab === "autopilot" ? <AutopilotPage /> : null}
       {tab === "keeper" ? <KeeperPage /> : null}
       {tab === "vault" ? <VaultPage /> : null}
-      {tab === "general" || tab === "advanced" || !items.some(([id]) => id === tab) ? <SettingsPage tools={<div className="segments scroll-x" role="tablist" aria-label="More tools">{advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`}>{label}</a>)}</div>} /> : null}
+      {top === "discord" ? <SettingsPage section="discord" /> : null}
+      {top === "imap" ? <SettingsPage section="imap" /> : null}
+      {top === "general" || (!isTop && !inAdvanced) ? <SettingsPage tools={<div className="segments scroll-x" role="tablist" aria-label="More tools">{advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`}>{label}</a>)}</div>} /> : null}
     </section>
   )
 }
