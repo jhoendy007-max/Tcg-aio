@@ -44,7 +44,10 @@ export function AdminUpdatePrompt({ base, token, onAuthError }: { base: string; 
     move("checking")
     setMessage("Checking")
     try {
-      const response = await fetch(`${base.replace(/\/$/, "")}/v1/admin/app`, { headers: { authorization: `Bearer ${token}` } })
+      // Signed out: the public endpoint reports the version; installing still needs a sign-in.
+      const response = token
+        ? await fetch(`${base.replace(/\/$/, "")}/v1/admin/app`, { headers: { authorization: `Bearer ${token}` } })
+        : await fetch(`${base.replace(/\/$/, "")}/v1/admin/app/latest`)
       const info = await response.json() as { available?: boolean; version?: string; versionCode?: number; notes?: string; error?: string }
       if (preserveUpdatePhase(phaseRef.current)) return
       if (response.status === 401) {
@@ -80,6 +83,10 @@ export function AdminUpdatePrompt({ base, token, onAuthError }: { base: string; 
 
   async function install() {
     if (phaseRef.current === "downloading") return
+    if (!token) {
+      onAuthErrorRef.current("Sign in to download the update.")
+      return
+    }
     setMessage("")
     move("downloading")
     setPercent(0)
