@@ -287,7 +287,7 @@ if (gotLock) void app.whenReady().then(async () => {
     if (db.getSettings().autoUpdateCheck !== false) void updates.check()
   }, UPDATE_CHECK_MS)
   heartbeatTimer = setInterval(() => {
-    void heartbeatAccount(db, machineFingerprint()).catch(() => undefined)
+    void heartbeatAccount(db, machineFingerprint()).then(() => phone?.resumeRelay()).catch(() => undefined)
   }, HEARTBEAT_MS)
   createWindow()
   app.on("activate", () => {

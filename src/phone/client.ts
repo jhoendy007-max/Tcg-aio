@@ -87,6 +87,8 @@ export class PhoneSession {
   private onChallengeCb: ((challenge: PhoneChallenge | null) => void) | null = null
   private onOnlineCb: ((online: boolean) => void) | null = null
   private onVaultCb: ((accountId: string, cookie: string) => void) | null = null
+  /** Relay told us no desktop is on the channel. */
+  private pcAway = false
   constructor(private link: SavedPhoneLink | null = null) {}
 
   saved(): SavedPhoneLink | null {
@@ -191,6 +193,11 @@ export class PhoneSession {
     this.mode = "session"
     this.key = sessionKey(this.link.token)
     this.pcId = this.link.pcId
+    if (this.relay && this.pcAway) {
+      this.closeSockets()
+      this.setOnline(false)
+      throw new PcAway()
+    }
     const snapPromise = this.waitFor((message) => message.type === "snapshot" || message.type === "error")
     this.send({ type: "hello" })
     const snap = await snapPromise
@@ -423,6 +430,7 @@ export class PhoneSession {
 
   private async openTransport(payload: PairingPayload, options?: ConnectOptions): Promise<void> {
     this.closeSockets()
+    this.pcAway = false
     this.seen.clear()
     this.inbox = []
     this.rawInbox = []
@@ -461,9 +469,11 @@ export class PhoneSession {
       ...(payload.relayToken ? { token: payload.relayToken } : {})
     }))
     const joined = await this.waitRaw(timeoutMs)
-    const parsed = JSON.parse(joined) as { op?: string; id?: string }
+    const parsed = JSON.parse(joined) as { op?: string; id?: string; pc?: boolean }
     if (parsed.op !== "joined" || !parsed.id) throw new Error("The relay did not accept this phone.")
     this.relayId = parsed.id
+    // Older relays do not send presence; treat a missing flag as "PC may be there".
+    this.pcAway = parsed.pc === false
   }
 
   private openSocket(url: string, timeoutMs: number): Promise<void> {
@@ -513,9 +523,13 @@ export class PhoneSession {
     let body = text
     if (this.relay) {
       try {
-        const outer = JSON.parse(text) as { op?: string; body?: string; id?: string }
+        const outer = JSON.parse(text) as { op?: string; body?: string; id?: string; pc?: boolean }
         if (outer.op === "joined") {
           this.deliverRaw(text)
+          return
+        }
+        if (outer.op === "presence") {
+          this.onPresence(outer.pc === true)
           return
         }
         if (outer.op !== "deliver" || typeof outer.body !== "string") return
@@ -562,7 +576,7 @@ export class PhoneSession {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiters = this.waiters.filter((waiter) => waiter.timer !== timer)
-        reject(new Error("The PC did not answer."))
+        reject(this.relay && this.pcAway ? new PcAway() : new Error("The PC did not answer."))
       }, timeoutMs)
       this.waiters.push({ match, resolve, reject, timer })
     })
@@ -614,9 +628,41 @@ export class PhoneSession {
     this.socket = null
   }
 
+  /** Relay presence: the desktop left or (re)joined the channel. */
+  private onPresence(pc: boolean): void {
+    this.pcAway = !pc
+    if (!pc) {
+      this.setOnline(false)
+      this.failWaiters(new PcAway())
+      return
+    }
+    // The PC restarted and lost our relay session: say hello again to get a fresh snapshot.
+    if (this.mode === "session" && this.key && this.socket) {
+      try {
+        void this.waitFor((message) => message.type === "snapshot", 8000).then((snap) => {
+          if (snap.type !== "snapshot") return
+          this.conn = snap.conn
+          this.setOnline(true)
+        }).catch(() => undefined)
+        this.send({ type: "hello" })
+      } catch {
+        // The app's reconnect loop will try again.
+      }
+    }
+  }
+
   private setOnline(online: boolean): void {
     this.online = online
     this.onOnlineCb?.(online)
+  }
+}
+
+export const PC_AWAY_MESSAGE = "Your PC isn't connected. Open Zzz AIO on your PC."
+
+export class PcAway extends Error {
+  constructor() {
+    super(PC_AWAY_MESSAGE)
+    this.name = "PcAway"
   }
 }
 

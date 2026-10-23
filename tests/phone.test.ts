@@ -378,3 +378,86 @@ async function waitFor(ready: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
 }
+
+describe("hosted relay resume (0.2.36)", () => {
+  const cleanup: Array<() => Promise<void>> = []
+  afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
+  it("a restarted PC rejoins its saved relay without a new invite, and an away-from-home phone falls back to it", async () => {
+    const { listenLicenseApi, OWNER_EMAIL } = await import("../license-server/server")
+    const { provisionHostedRelay, mintRelayDevice } = await import("../src/phone/hosted-relay")
+    const { fingerprintHash } = await import("../src/shared/license-proof")
+    const { PC_AWAY_MESSAGE } = await import("../src/phone/client")
+    process.env.RELAY_QUIET = "1"
+    const dir = mkdtempSync(join(tmpdir(), "zzz-resume-"))
+    const license = await listenLicenseApi({ dbPath: join(dir, "license.sqlite"), adminHtml: "<p>ok</p>", ownerSetupToken: "setup-token-value", ownerPassword: "owner-password", host: "127.0.0.1" })
+    const login = await fetch(`${license.url}/v1/account/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: OWNER_EMAIL, password: "owner-password", fingerprint: fingerprintHash(["resume-pc"]) }) })
+    const sessionToken = String(((await login.json()) as { token: string }).token)
+
+    const mem = memoryHost()
+    let saved: { channel: string; token: string } | null = null
+    let provisioned = 0
+    const host: PhoneHost = {
+      ...mem.host,
+      canResumeRelay: () => Boolean(saved),
+      async provisionRelay() {
+        provisioned += 1
+        const hosted = await provisionHostedRelay({ licenseUrl: license.url, sessionToken, saved })
+        saved = { channel: hosted.channel, token: hosted.pcToken }
+        return hosted
+      },
+      issueRelayDevice: (deviceId: string) => mintRelayDevice({ licenseUrl: license.url, sessionToken, deviceId })
+    }
+    const servers: PhoneServer[] = []
+    const sessions: PhoneSession[] = []
+    cleanup.push(async () => {
+      for (const item of sessions) item.close()
+        for (const item of servers) await item.stop()
+        await license.close()
+    })
+
+    // First run: the person pairs from the QR code (this is the only path that used to join the relay).
+    const first = new PhoneServer(host, { bindHost: "127.0.0.1", advertiseHost: "127.0.0.1", port: 0 })
+    servers.push(first)
+    await first.start()
+    await first.prepareRelay()
+    const pairing = new PhoneSession()
+    sessions.push(pairing)
+    const link = await pairing.pair(first.createInvite(), "Pixel", { routes: ["relay"], directTimeoutMs: 500 })
+    expect(link.relayChannel).toBe(saved!.channel)
+    pairing.close()
+    await first.stop()
+
+    // Away from home: the LAN address is unreachable (TEST-NET), so direct times out and the relay is used.
+    const away = { ...link, host: "203.0.113.1", port: 47321 }
+    const phone = new PhoneSession(away)
+    sessions.push(phone)
+    const started = Date.now()
+    await expect(phone.connect({ directTimeoutMs: 800 })).rejects.toThrow(PC_AWAY_MESSAGE)
+    expect(Date.now() - started).toBeLessThan(4000)
+
+    // PC restarts. Nobody opens the pairing screen; it rejoins the saved channel on its own.
+    const before = provisioned
+    const second = new PhoneServer(host, { bindHost: "127.0.0.1", advertiseHost: "127.0.0.1", port: 0 })
+    servers.push(second)
+    await second.start()
+    await waitFor(() => provisioned > before)
+    let snapshot: Awaited<ReturnType<PhoneSession["connect"]>> | null = null
+    for (let attempt = 0; attempt < 20 && !snapshot; attempt += 1) {
+      snapshot = await phone.connect({ directTimeoutMs: 300 }).catch(() => null)
+      if (!snapshot) await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    expect(snapshot?.pcName).toBe("Test PC")
+    const result = await phone.saveTask({ store: "target", sku: "RELAY-RESUME-1", quantity: 1, profileId: "p1", accountId: "a1", proxyGroupId: "g1", confirmPurchase: false })
+    expect(result.ok).toBe(true)
+
+    // Live presence: PC goes away -> phone goes offline at once; PC comes back -> phone is online again without reconnecting.
+    const states: boolean[] = []
+    phone.onOnline((online) => states.push(online))
+    await second.stop()
+    await waitFor(() => states.includes(false))
+    const third = new PhoneServer(host, { bindHost: "127.0.0.1", advertiseHost: "127.0.0.1", port: 0 })
+    servers.push(third)
+    await third.start()
+    await waitFor(() => states[states.length - 1] === true)
+  }, 30_000)
+})

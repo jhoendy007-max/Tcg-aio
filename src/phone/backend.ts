@@ -155,6 +155,8 @@ export function createPhoneHost(
     pcId: db.pcId(),
     pcName,
     relayUrl: () => db.getSettings().phoneRelayUrl,
+    canResumeRelay: () => Boolean(db.readPhoneRelay() && db.sessionToken()),
+    log: (line: string) => console.info(line),
     async provisionRelay() {
       const sessionToken = db.sessionToken()
       if (!sessionToken) throw new Error("Sign in on this PC before pairing a phone.")
