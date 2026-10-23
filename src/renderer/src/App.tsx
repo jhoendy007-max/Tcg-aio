@@ -276,9 +276,9 @@ export function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en
     ["vault", deskText(lang, "setVault")]
   ] as const
   const TOP_TABS = [["general", "General", "settings"], ["phone", "Phone", "phone"], ["discord", "Discord", "alerts"], ["imap", "IMAP", "mail"]] as const
-  const isTop = tab === "general" || tab === "advanced" || tab === "phone" || tab === "discord" || tab === "imap" || tab === "sounds" || tab === "notifications"
-  const top = tab === "sounds" || tab === "notifications" ? "discord" : tab === "advanced" ? "general" : tab
-  const advanced = items.filter(([id]) => id !== "general" && id !== "phone")
+  const isTop = tab === "general" || tab === "advanced" || tab === "phone" || tab === "discord" || tab === "imap" || tab === "sounds" || tab === "notifications" || tab === "alerts" || tab === "drops"
+  const top = tab === "sounds" || tab === "notifications" || tab === "alerts" || tab === "drops" ? "discord" : tab === "advanced" ? "general" : tab
+  const advanced = items.filter(([id]) => id !== "general" && id !== "phone" && id !== "alerts" && id !== "drops")
   const inAdvanced = !isTop && items.some(([id]) => id === tab)
   const topBar = (
     <nav className="settings-tabs glass-neon" role="tablist" aria-label="Settings">
@@ -287,7 +287,7 @@ export function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en
   )
   const tools = (
     <details className="advanced" open={inAdvanced}>
-      <summary>More tools: logs, store defaults, phone, alerts, drops, stats</summary>
+      <summary>More tools: logs, store defaults, stats</summary>
       <div className="segments scroll-x" role="tablist">
         {advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`} aria-current={tab === id ? "page" : undefined}>{label}</a>)}
       </div>
@@ -301,14 +301,12 @@ export function SettingsTabs({ tab, lang, onSettings }: { tab: string; lang: "en
       {tab === "logs" ? <LogsPage /> : null}
       {tab === "stores" ? <StoresTab onSettings={onSettings} /> : null}
       {tab === "phone" ? <PhonePage /> : null}
-      {tab === "alerts" ? <AlertsPage /> : null}
-      {tab === "drops" ? <DropsPage /> : null}
       {tab === "stats" ? <AnalyticsPage /> : null}
       {tab === "ship" ? <ShipmentsPage /> : null}
       {tab === "autopilot" ? <AutopilotPage /> : null}
       {tab === "keeper" ? <KeeperPage /> : null}
       {tab === "vault" ? <VaultPage /> : null}
-      {top === "discord" ? <SettingsPage section="discord" /> : null}
+      {top === "discord" ? <><SettingsPage section="discord" /><AlertsPage /><DropsPage /></> : null}
       {top === "imap" ? <SettingsPage section="imap" /> : null}
       {top === "general" || (!isTop && !inAdvanced) ? <SettingsPage tools={<div className="segments scroll-x" role="tablist" aria-label="More tools">{advanced.map(([id, label]) => <a key={id} href={`#settings/${id}`}>{label}</a>)}</div>} /> : null}
     </section>

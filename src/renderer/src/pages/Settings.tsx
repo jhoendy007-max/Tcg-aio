@@ -105,7 +105,7 @@ export function SettingsPage({ tools, section = "general" }: { tools?: ReactNode
       <header className="page-head">
         <div>
           <h1>{section === "discord" ? "Discord & notifications" : section === "imap" ? "IMAP · mail and codes" : "Settings"}</h1>
-          <p>{section === "discord" ? "Webhook, per-event switches and sounds." : section === "imap" ? "Mailbox used to read store sign-in codes and order mail." : "A few basics. Everything else is under Advanced at the bottom."}</p>
+          <p>{section === "discord" ? "Everything Discord and alerts: webhook, per-event switches, sounds, restock alerts and drop schedules." : section === "imap" ? "Mailbox used to read store sign-in codes and order mail." : "A few basics. Everything else is under Advanced at the bottom."}</p>
         </div>
       </header>
       {error && !/public key/i.test(error) ? <Banner tone="error">{error}</Banner> : null}
@@ -114,6 +114,24 @@ export function SettingsPage({ tools, section = "general" }: { tools?: ReactNode
       {section === "discord" ? <div className="settings-grid">
         <NotificationsCard form={form} setForm={setForm} save={save} busy={busy} testWebhook={testWebhook} />
         <SoundsCard form={form} setForm={setForm} save={save} busy={busy} />
+        <form className="card form-grid settings-card" onSubmit={save}>
+          <h2 className="span-2">More alert options</h2>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.successSound} onChange={(event) => setForm({ ...form, successSound: event.target.checked })} />
+          <span>Play a short sound when a checkout succeeds.</span>
+        </label>
+        <Field label="In-stock alert cooldown (minutes)" hint="The same item will not alert again inside this time. 0 alerts on every change.">
+          <TextInput type="number" min={0} max={1440} value={form.notifyCooldownMin ?? 10} onChange={(event) => setForm({ ...form, notifyCooldownMin: Number(event.target.value) })} />
+        </Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.groupDiscord} onChange={(event) => setForm({ ...form, groupDiscord: event.target.checked })} />
+          <span>Also post restocks and successful checkouts to a shared group webhook. This stays off until you turn it on. The group post leaves out profile, email, card, and proxy details.</span>
+        </label>
+        <Field className="span-2" label="Group webhook" hint="A different https://discord.com/api/webhooks/… URL. Nothing is sent here while the switch above is off.">
+          <TextInput value={form.groupWebhook} onChange={(event) => setForm({ ...form, groupWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
+        </Field>
+          <div className="actions span-2"><button className="primary" type="submit" disabled={busy}>Save</button></div>
+        </form>
       </div> : null}
       {section === "general" ? <><div className="settings-grid">
         <div className="card stack settings-card">
@@ -173,22 +191,8 @@ export function SettingsPage({ tools, section = "general" }: { tools?: ReactNode
           <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void readLogo(event.target.files?.[0])} />
         </Field>
         {form.logoDataUrl ? <button type="button" onClick={() => setForm({ ...form, logoDataUrl: "" })}>Remove logo</button> : null}
-        <label className="check span-2">
-          <input type="checkbox" checked={form.successSound} onChange={(event) => setForm({ ...form, successSound: event.target.checked })} />
-          <span>Play a short sound when a checkout succeeds.</span>
-        </label>
         <Field label="Exact monitor delay (ms)" hint="The speed slider sets this. 1000–60000.">
           <TextInput type="number" min={1000} max={60000} value={form.monitorDelayMs} onChange={(event) => setForm({ ...form, monitorDelayMs: Number(event.target.value) })} required />
-        </Field>
-        <Field label="In-stock alert cooldown (minutes)" hint="The same item will not alert again inside this time. 0 alerts on every change.">
-          <TextInput type="number" min={0} max={1440} value={form.notifyCooldownMin ?? 10} onChange={(event) => setForm({ ...form, notifyCooldownMin: Number(event.target.value) })} />
-        </Field>
-        <label className="check span-2">
-          <input type="checkbox" checked={form.groupDiscord} onChange={(event) => setForm({ ...form, groupDiscord: event.target.checked })} />
-          <span>Also post restocks and successful checkouts to a shared group webhook. This stays off until you turn it on. The group post leaves out profile, email, card, and proxy details.</span>
-        </label>
-        <Field className="span-2" label="Group webhook" hint="A different https://discord.com/api/webhooks/… URL. Nothing is sent here while the switch above is off.">
-          <TextInput value={form.groupWebhook} onChange={(event) => setForm({ ...form, groupWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
         </Field>
         <label className="check span-2">
           <input type="checkbox" checked={form.clearCartAfterTest} onChange={(event) => setForm({ ...form, clearCartAfterTest: event.target.checked })} />

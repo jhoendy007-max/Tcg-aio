@@ -1,4 +1,4 @@
-export const PHONE_VERSION = "0.2.40"
+export const PHONE_VERSION = "0.2.41"
 
 export function isNewer(latest: string | null, current: string): boolean {
   if (!latest) return false
