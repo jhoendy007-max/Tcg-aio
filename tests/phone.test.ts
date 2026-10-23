@@ -461,3 +461,69 @@ describe("hosted relay resume (0.2.36)", () => {
     await waitFor(() => states[states.length - 1] === true)
   }, 30_000)
 })
+
+describe("resume reconnect time (0.2.38)", () => {
+  const cleanup: Array<() => Promise<void>> = []
+  afterEach(async () => { while (cleanup.length) await cleanup.pop()!() })
+  it("reconnects within ~1s after the app comes back, at home and away from home", async () => {
+    const { listenLicenseApi, OWNER_EMAIL } = await import("../license-server/server")
+    const { provisionHostedRelay, mintRelayDevice } = await import("../src/phone/hosted-relay")
+    const { fingerprintHash } = await import("../src/shared/license-proof")
+    process.env.RELAY_QUIET = "1"
+    const dir = mkdtempSync(join(tmpdir(), "zzz-wake-"))
+    const license = await listenLicenseApi({ dbPath: join(dir, "license.sqlite"), adminHtml: "<p>ok</p>", ownerSetupToken: "setup-token-value", ownerPassword: "owner-password", host: "127.0.0.1" })
+    const login = await fetch(`${license.url}/v1/account/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: OWNER_EMAIL, password: "owner-password", fingerprint: fingerprintHash(["wake-pc"]) }) })
+    const sessionToken = String(((await login.json()) as { token: string }).token)
+    const mem = memoryHost()
+    let saved: { channel: string; token: string } | null = null
+    const host: PhoneHost = {
+      ...mem.host,
+      canResumeRelay: () => Boolean(saved),
+      async provisionRelay() {
+        const hosted = await provisionHostedRelay({ licenseUrl: license.url, sessionToken, saved })
+        saved = { channel: hosted.channel, token: hosted.pcToken }
+        return hosted
+      },
+      issueRelayDevice: (deviceId: string) => mintRelayDevice({ licenseUrl: license.url, sessionToken, deviceId })
+    }
+    const server = new PhoneServer(host, { bindHost: "127.0.0.1", advertiseHost: "127.0.0.1", port: 0 })
+    const sessions: PhoneSession[] = []
+    cleanup.push(async () => {
+      for (const item of sessions) item.close()
+      await server.stop()
+      await license.close()
+    })
+    await server.start()
+    await server.prepareRelay()
+    const pairing = new PhoneSession()
+    sessions.push(pairing)
+    const link = await pairing.pair(server.createInvite(), "Pixel")
+    pairing.close()
+
+    // Background kills the socket; resume calls connect() with the app's default options.
+    async function resume(phone: PhoneSession): Promise<number> {
+      await phone.connect()
+      phone.close()
+      const started = performance.now()
+      await phone.connect()
+      return Math.round(performance.now() - started)
+    }
+    const home = new PhoneSession(link)
+    sessions.push(home)
+    const homeMs = await resume(home)
+    const away = new PhoneSession({ ...link, host: "203.0.113.1", port: 47321 })
+    sessions.push(away)
+    const awayMs = await resume(away)
+    console.log(`[resume] home=${homeMs}ms away=${awayMs}ms`)
+    expect(homeMs).toBeLessThan(1000)
+    expect(awayMs).toBeLessThan(1000)
+
+    // Foreground probe: a live session answers fast; a dead one says false instead of hanging.
+    const probing = away as PhoneSession & { probe?: (ms?: number) => Promise<boolean> }
+    if (probing.probe) {
+      expect(await probing.probe(700)).toBe(true)
+      away.close()
+      expect(await probing.probe(700)).toBe(false)
+    }
+  }, 30_000)
+})

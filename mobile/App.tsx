@@ -1,7 +1,7 @@
 import { StatusBar } from "expo-status-bar"
 import { stockOfLine, stockOfTask, type StockState } from "../src/shared/stock"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
+import { ActivityIndicator, AppState, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
 import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from "../src/phone/client"
 import type { PhoneChallenge, PhoneSnapshot, PhoneTask, PhoneTaskDraft } from "../src/phone/protocol"
@@ -58,6 +58,30 @@ export default function App() {
   const seen = useRef(new Map<string, string>())
   const [permission, requestPermission] = useCameraPermissions()
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 0.2.38 resume: backoff restarts at 0.5s and resets on every foreground, so coming back is instant.
+  const backoff = useRef(0)
+  const [reconnecting, setReconnecting] = useState(false)
+
+  function scheduleReconnect(delayMs?: number) {
+    if (retry.current) clearTimeout(retry.current)
+    const wait = delayMs ?? Math.min(500 * 2 ** backoff.current, 8000)
+    backoff.current = Math.min(backoff.current + 1, 5)
+    retry.current = setTimeout(() => {
+      void loadLink().then((saved) => {
+        if (saved) void connect(saved)
+      })
+    }, wait)
+  }
+
+  async function resumeNow() {
+    backoff.current = 0
+    const current = session.current
+    // A socket Android froze in the background can still look open: ask it, briefly.
+    if (current?.online && await current.probe(700)) return
+    if (session.current !== current) return
+    const saved = await loadLink()
+    if (saved) void connect(saved)
+  }
 
   function applySnapshot(next: PhoneSnapshot) {
     const tasks = asList<PhoneTask>(next?.tasks)
@@ -69,7 +93,13 @@ export default function App() {
 
   function bind(next: PhoneSession) {
     session.current = next
-    next.onOnline(setOnline)
+    next.onOnline((value) => {
+      if (session.current === next) setOnline(value)
+    })
+    next.onClosed(() => {
+      // The socket dropped while we were connected: try again right away, keep showing cached data.
+      if (session.current === next) scheduleReconnect(300)
+    })
     next.onSnapshot(applySnapshot)
     next.onTask((task) => {
       const before = seen.current.get(task.id)
@@ -111,11 +141,16 @@ export default function App() {
 
   async function connect(link: SavedPhoneLink) {
     if (retry.current) clearTimeout(retry.current)
-    session.current?.close()
+    const previous = session.current
     const next = new PhoneSession(link)
     bind(next)
+    previous?.close()
+    setReconnecting(true)
     try {
       await next.connect()
+      if (session.current !== next) return
+      backoff.current = 0
+      setReconnecting(false)
       setScreen("dash")
       setError("")
       await ensureNotificationPermission()
@@ -133,16 +168,21 @@ export default function App() {
         setScreen("pair")
         return
       }
+      if (session.current !== next) return
       setOnline(false)
+      setReconnecting(false)
       setScreen("dash")
       setError(err instanceof Error ? err.message : "The PC is offline.")
-      retry.current = setTimeout(() => {
-        void loadLink().then((saved) => {
-          if (saved) void connect(saved)
-        })
-      }, 4000)
+      scheduleReconnect()
     }
   }
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void resumeNow()
+    })
+    return () => sub.remove()
+  }, [])
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000)
@@ -281,7 +321,7 @@ export default function App() {
               <Text style={styles.brand}>{snap?.brand?.appName || "Zzz APP"}</Text>
               <Text style={styles.h1}>{pcName}</Text>
             </View>
-            <Text style={[styles.pill, online ? styles.pillOn : styles.pillOff]}>{online ? "PC online" : "PC offline"}</Text>
+            <Text style={[styles.pill, online ? styles.pillOn : styles.pillOff]}>{online ? "PC online" : reconnecting ? "Reconnecting…" : "PC offline"}</Text>
           </View>
           <Text style={styles.p}>Tasks run on the PC. This phone starts, stops, and watches them.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}

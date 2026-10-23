@@ -53,7 +53,10 @@ export class PhoneRevoked extends Error {
 interface ConnectOptions {
   routes?: ("direct" | "relay")[]
   directTimeoutMs?: number
+  relayTimeoutMs?: number
 }
+
+type Opened = { socket: WebSocket; route: "direct" | "relay"; relayId: string; pcAway: boolean; early: string[] }
 
 type Waiter = {
   match: (message: ServerMessage) => boolean
@@ -77,7 +80,6 @@ export class PhoneSession {
   private relay = false
   private seen = new Set<string>()
   private inbox: ServerMessage[] = []
-  private rawInbox: string[] = []
   private waiters: Waiter[] = []
   private onSnapshotCb: ((snapshot: PhoneSnapshot) => void) | null = null
   private onTaskCb: ((task: PhoneTask) => void) | null = null
@@ -433,69 +435,106 @@ export class PhoneSession {
     this.pcAway = false
     this.seen.clear()
     this.inbox = []
-    this.rawInbox = []
     this.conn = ""
     const routes = options?.routes ?? ["direct", "relay"]
-    const timeout = options?.directTimeoutMs ?? 4000
-    let last = "Could not reach the PC."
-    for (const route of routes) {
-      try {
-        if (route === "direct") await this.openDirect(payload, timeout)
-        else await this.openRelay(payload, timeout)
-        this.setOnline(true)
-        return
-      } catch (err) {
-        last = err instanceof Error ? err.message : last
-      }
+    const directMs = options?.directTimeoutMs ?? 4000
+    // The relay no longer waits behind the LAN attempt, so it can have a longer budget for slow mobile data.
+    const relayMs = options?.relayTimeoutMs ?? Math.max(directMs, 8000)
+    // 0.2.38: race every route at once and keep the first that answers. Before, an away-from-home
+    // phone waited out the whole LAN timeout (4s) before it even started the relay.
+    const winner = await new Promise<Opened>((resolve, reject) => {
+      let won = false
+      let failed = 0
+      const errors: (Error | undefined)[] = routes.map(() => undefined)
+      routes.forEach((route, index) => {
+        this.dial(route, payload, route === "direct" ? directMs : relayMs).then((opened) => {
+          if (won) {
+            opened.socket.close()
+            return
+          }
+          won = true
+          resolve(opened)
+        }, (err: unknown) => {
+          errors[index] = err instanceof Error ? err : new Error("Could not reach the PC.")
+          failed += 1
+          if (failed < routes.length || won) return
+          const revoked = errors.find((item) => item instanceof PhoneRevoked)
+          reject(revoked ?? [...errors].reverse().find(Boolean) ?? new Error("Could not reach the PC."))
+        })
+      })
+      if (!routes.length) reject(new Error("Could not reach the PC."))
+    })
+    this.socket = winner.socket
+    this.relay = winner.route === "relay"
+    this.relayId = winner.relayId
+    this.pcAway = winner.pcAway
+    this.lastRoute = winner.route
+    this.setOnline(true)
+    for (const text of winner.early.splice(0)) this.accept(text)
+  }
+
+  /** Which route the last successful connect used ("direct" on the LAN, "relay" when away). */
+  lastRoute: "direct" | "relay" | "" = ""
+
+  /**
+   * Cheap liveness check used when the app comes back to the foreground: a socket that Android
+   * froze in the background can look open but never answer. Resolves false instead of throwing.
+   */
+  async probe(timeoutMs = 700): Promise<boolean> {
+    if (!this.socket || !this.key || this.mode !== "session") return false
+    try {
+      const req = rid()
+      const pending = this.waitFor((message) => message.type === "result" && message.req === req, timeoutMs)
+      this.send({ type: "sync", req, conn: this.conn })
+      const result = await pending
+      return result.type === "result" && result.ok
+    } catch {
+      return false
     }
-    throw new Error(last)
   }
 
-  private openDirect(payload: PairingPayload, timeoutMs: number): Promise<void> {
-    this.relay = false
-    this.relayId = ""
-    return this.openSocket(`ws://${payload.host}:${payload.port}`, timeoutMs)
+  /** Called when an established socket closes (not when the PC merely leaves the relay). */
+  onClosed(cb: () => void): void {
+    this.onClosedCb = cb
   }
 
-  private async openRelay(payload: PairingPayload, timeoutMs: number): Promise<void> {
-    if (!payload.relay) throw new Error("No relay is configured on the PC.")
-    this.relay = true
-    await this.openSocket(payload.relay, timeoutMs)
-    this.socket?.send(JSON.stringify({
-      op: "join",
-      role: "phone",
-      pc: payload.pcId,
-      ...(payload.relayChannel ? { channel: payload.relayChannel } : {}),
-      ...(payload.relayToken ? { token: payload.relayToken } : {})
-    }))
-    const joined = await this.waitRaw(timeoutMs)
-    const parsed = JSON.parse(joined) as { op?: string; id?: string; pc?: boolean }
-    if (parsed.op !== "joined" || !parsed.id) throw new Error("The relay did not accept this phone.")
-    this.relayId = parsed.id
-    // Older relays do not send presence; treat a missing flag as "PC may be there".
-    this.pcAway = parsed.pc === false
-  }
+  private onClosedCb: (() => void) | null = null
 
-  private openSocket(url: string, timeoutMs: number): Promise<void> {
+  private dial(route: "direct" | "relay", payload: PairingPayload, timeoutMs: number): Promise<Opened> {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url)
+      if (route === "relay" && !payload.relay) {
+        reject(new Error("No relay is configured on the PC."))
+        return
+      }
+      const socket = new WebSocket(route === "relay" ? payload.relay! : `ws://${payload.host}:${payload.port}`)
       let opened = false
       let settled = false
-      const finish = (err?: Error) => {
+      // Frames that land after we settle but before connect() adopts this socket (ws can emit
+      // several in one tick, e.g. "joined" then "presence"). Replayed on adoption.
+      const early: string[] = []
+      const finish = (err?: Error, value?: Opened) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        if (err) reject(err)
-        else resolve()
+        if (err) {
+          try { socket.close() } catch { /* already closed */ }
+          reject(err)
+        } else resolve(value!)
       }
-      const timer = setTimeout(() => {
-        socket.close()
-        finish(new Error("Timed out reaching the PC."))
-      }, timeoutMs)
+      const timer = setTimeout(() => finish(new Error(route === "relay" && opened ? "The relay did not answer." : "Timed out reaching the PC.")), timeoutMs)
       socket.addEventListener("open", () => {
         opened = true
-        this.socket = socket
-        finish()
+        if (route === "direct") {
+          finish(undefined, { socket, route, relayId: "", pcAway: false, early })
+          return
+        }
+        socket.send(JSON.stringify({
+          op: "join",
+          role: "phone",
+          pc: payload.pcId,
+          ...(payload.relayChannel ? { channel: payload.relayChannel } : {}),
+          ...(payload.relayToken ? { token: payload.relayToken } : {})
+        }))
       })
       socket.addEventListener("error", () => {
         if (!opened) finish(new Error("Could not open a connection to the PC."))
@@ -503,18 +542,35 @@ export class PhoneSession {
       socket.addEventListener("message", (event) => {
         const text = typeof event.data === "string" ? event.data : ""
         if (!text) return
-        this.accept(text)
-      })
-      socket.addEventListener("close", (event) => {
-        if (!opened) {
-          finish(new Error("Could not open a connection to the PC."))
+        if (this.socket === socket) {
+          this.accept(text)
           return
         }
-        if (this.socket !== socket) return
+        if (settled) {
+          early.push(text)
+          return
+        }
+        if (route !== "relay") return
+        try {
+          const parsed = JSON.parse(text) as { op?: string; id?: string; pc?: boolean }
+          if (parsed.op !== "joined") return
+          if (!parsed.id) finish(new Error("The relay did not accept this phone."))
+          // Older relays do not send presence; treat a missing flag as "PC may be there".
+          else finish(undefined, { socket, route, relayId: parsed.id, pcAway: parsed.pc === false, early })
+        } catch {
+          // Not a relay control frame.
+        }
+      })
+      socket.addEventListener("close", (event) => {
+        if (this.socket !== socket) {
+          finish(event.code === 4003 ? new PhoneRevoked() : new Error(route === "relay" && opened ? "The relay did not accept this phone." : "Could not open a connection to the PC."))
+          return
+        }
         this.socket = null
         this.setOnline(false)
         if (event.code === 4003) this.link = null
         this.failWaiters(event.code === 4003 ? new PhoneRevoked() : new Error("The PC connection closed."))
+        this.onClosedCb?.()
       })
     })
   }
@@ -524,10 +580,7 @@ export class PhoneSession {
     if (this.relay) {
       try {
         const outer = JSON.parse(text) as { op?: string; body?: string; id?: string; pc?: boolean }
-        if (outer.op === "joined") {
-          this.deliverRaw(text)
-          return
-        }
+        if (outer.op === "joined") return
         if (outer.op === "presence") {
           this.onPresence(outer.pc === true)
           return
@@ -582,45 +635,12 @@ export class PhoneSession {
     })
   }
 
-  private rawWaiters: { resolve: (text: string) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }[] = []
-
-  private waitRaw(timeoutMs: number): Promise<string> {
-    const queued = this.rawInbox.shift()
-    if (queued) return Promise.resolve(queued)
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("The relay did not answer.")), timeoutMs)
-      this.rawWaiters.push({
-        resolve: (text) => {
-          clearTimeout(timer)
-          resolve(text)
-        },
-        reject,
-        timer
-      })
-    })
-  }
-
-  private deliverRaw(text: string): void {
-    const waiter = this.rawWaiters.shift()
-    if (!waiter) {
-      this.rawInbox.push(text)
-      return
-    }
-    clearTimeout(waiter.timer)
-    waiter.resolve(text)
-  }
-
   private failWaiters(err: Error): void {
     for (const waiter of this.waiters) {
       clearTimeout(waiter.timer)
       waiter.reject(err)
     }
     this.waiters = []
-    for (const waiter of this.rawWaiters) {
-      clearTimeout(waiter.timer)
-      waiter.reject(err)
-    }
-    this.rawWaiters = []
   }
 
   private closeSockets(): void {
