@@ -778,3 +778,12 @@ td.empty { text-align: center; padding: 56px 12px !important; color: var(--muted
 .verdict.info { color: #c4b5fd; border-color: rgba(196, 181, 253, 0.5); background: rgba(196, 181, 253, 0.08); }
 .site-results .result-cell { white-space: nowrap; width: 210px; }
 .site-results .result-cell .ms { display: inline-block; min-width: 64px; margin-left: 10px; text-align: right; }
+
+/* 0.2.40 Settings top tab bar: glass-neon, purple-to-cyan active pill. */
+.settings-tabs { display: flex; gap: 6px; padding: 6px; margin-bottom: 14px; border-radius: 14px; border: 1px solid rgba(139, 92, 246, 0.28); background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015)); backdrop-filter: blur(14px); box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.06), 0 8px 28px rgba(139, 92, 246, 0.12); overflow-x: auto; }
+.settings-tabs a { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; color: var(--muted); text-decoration: none; font-weight: 600; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.settings-tabs a svg { width: 16px; height: 16px; }
+.settings-tabs a:hover { color: var(--text); background: rgba(139, 92, 246, 0.1); }
+.settings-tabs a.active { color: #fff; background: linear-gradient(90deg, #8b5cf6, #22d3ee); box-shadow: 0 0 18px rgba(139, 92, 246, 0.45); }
+.sound-row { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.dry-run-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; color: #111; background: #fbbf24; margin-left: 6px; }

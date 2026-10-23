@@ -1,3 +1,5 @@
+import { DEFAULT_EVENT_SOUND, SOUNDS, SOUND_EVENT_LABEL, SOUND_IDS, isSoundId, type SoundEvent } from "../../../shared/sounds"
+import { playSound } from "../sound"
 import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
 import { healthText } from "../../../shared/checkout-health"
@@ -18,7 +20,7 @@ function speedLevel(ms: number): number {
   return 2
 }
 
-export function SettingsPage({ tools }: { tools?: ReactNode } = {}) {
+export function SettingsPage({ tools, section = "general" }: { tools?: ReactNode; section?: "general" | "discord" | "imap" } = {}) {
   const [payload, setPayload] = useState<SettingsPayload | null>(null)
   const [form, setForm] = useState<Settings>(DEFAULT_SETTINGS)
   const [advancedOpen, setAdvancedOpen] = useState(() => typeof location !== "undefined" && location.hash === "#settings/advanced")
@@ -102,13 +104,18 @@ export function SettingsPage({ tools }: { tools?: ReactNode } = {}) {
     <section className="page">
       <header className="page-head">
         <div>
-          <h1>Settings</h1>
-          <p>A few basics. Everything else is under Advanced at the bottom.</p>
+          <h1>{section === "discord" ? "Discord & notifications" : section === "imap" ? "IMAP · mail and codes" : "Settings"}</h1>
+          <p>{section === "discord" ? "Webhook, per-event switches and sounds." : section === "imap" ? "Mailbox used to read store sign-in codes and order mail." : "A few basics. Everything else is under Advanced at the bottom."}</p>
         </div>
       </header>
       {error && !/public key/i.test(error) ? <Banner tone="error">{error}</Banner> : null}
       {message ? <Banner tone="info">{message}</Banner> : null}
-      <div className="settings-grid">
+      {section === "imap" ? <MailSettings /> : null}
+      {section === "discord" ? <div className="settings-grid">
+        <NotificationsCard form={form} setForm={setForm} save={save} busy={busy} testWebhook={testWebhook} />
+        <SoundsCard form={form} setForm={setForm} save={save} busy={busy} />
+      </div> : null}
+      {section === "general" ? <><div className="settings-grid">
         <div className="card stack settings-card">
           <h2>Account &amp; License</h2>
           {account?.signedIn ? (
@@ -123,19 +130,11 @@ export function SettingsPage({ tools }: { tools?: ReactNode } = {}) {
             </>
           ) : <p className="hint">Not signed in.</p>}
         </div>
+        
         <form className="card stack settings-card" onSubmit={save}>
-          <h2>Notifications</h2>
-          <Field label="Discord webhook" hint="One webhook for everything. Card data is never sent.">
-            <div className="inline-field">
-              <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
-              <button type="button" onClick={() => void testWebhook()} disabled={busy || !form.discordWebhook.trim()}>Test</button>
-            </div>
-          </Field>
-            <label className="switch-row"><span>Monitor in stock</span><input type="checkbox" role="switch" checked={form.notifyInStock !== false} onChange={(event) => setForm({ ...form, notifyInStock: event.target.checked })} /></label>
-            <label className="switch-row"><span>Back out of stock</span><input type="checkbox" role="switch" checked={form.notifyOutOfStock === true} onChange={(event) => setForm({ ...form, notifyOutOfStock: event.target.checked })} /></label>
-            <label className="switch-row"><span>Checkout success</span><input type="checkbox" role="switch" checked={form.notifySuccess !== false} onChange={(event) => setForm({ ...form, notifySuccess: event.target.checked })} /></label>
-            <label className="switch-row"><span>Checkout failed / declined</span><input type="checkbox" role="switch" checked={form.notifyFailed !== false} onChange={(event) => setForm({ ...form, notifyFailed: event.target.checked })} /></label>
-            <label className="switch-row"><span>Proxy blocked</span><input type="checkbox" role="switch" checked={form.notifyBlocked === true} onChange={(event) => setForm({ ...form, notifyBlocked: event.target.checked })} /></label>
+          <h2>Dry run</h2>
+          <label className="switch-row"><span><strong>Dry run all</strong> <small className="hint">full flow, place order simulated and never sent</small></span><input type="checkbox" role="switch" checked={form.testMode} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} /></label>
+          {form.testMode ? <p><span className="dry-run-badge">DRY RUN</span> Every task is a dry run. Nothing is charged. Each run reports pass/fail/skip per step with timings.</p> : <p className="hint">Off: tasks use their own Dry run switch.</p>}
           <div className="actions"><button className="primary" type="submit" disabled={busy}>Save</button></div>
         </form>
         <form className="card stack settings-card" onSubmit={save}>
@@ -175,10 +174,6 @@ export function SettingsPage({ tools }: { tools?: ReactNode } = {}) {
         </Field>
         {form.logoDataUrl ? <button type="button" onClick={() => setForm({ ...form, logoDataUrl: "" })}>Remove logo</button> : null}
         <label className="check span-2">
-          <input type="checkbox" checked={form.testMode} onChange={(event) => setForm({ ...form, testMode: event.target.checked })} />
-          <span>Test mode for every task. The real flow runs through payment and stops before place order. Nothing is charged.</span>
-        </label>
-        <label className="check span-2">
           <input type="checkbox" checked={form.successSound} onChange={(event) => setForm({ ...form, successSound: event.target.checked })} />
           <span>Play a short sound when a checkout succeeds.</span>
         </label>
@@ -207,6 +202,13 @@ export function SettingsPage({ tools }: { tools?: ReactNode } = {}) {
           <input type="checkbox" checked={form.warmOnStart} onChange={(event) => setForm({ ...form, warmOnStart: event.target.checked })} />
           <span>Warm the account when a monitor or checkout starts, if that session is older than the Session Keeper interval. A scheduled drop still warms the accounts named on the drop, using the drop's warm-up minutes. Nothing is added to cart.</span>
         </label>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.keepWarm === true} onChange={(event) => setForm({ ...form, keepWarm: event.target.checked })} />
+          <span>Keep Target warm between checkouts. A hidden window opens your signed-in Target cart page once per interval (±25% jitter), skips accounts a task is using, and saves the refreshed cookies. If Target shows a check, keep-warm stops for that account and alerts you instead.</span>
+        </label>
+        <Field label="Keep-warm interval (minutes)" hint="10–120. Default 25.">
+          <TextInput type="number" min={10} max={120} value={form.keepWarmMin ?? 25} onChange={(event) => setForm({ ...form, keepWarmMin: Number(event.target.value) })} disabled={form.keepWarm !== true} />
+        </Field>
         <Field label="Session Keeper interval (minutes)" hint="How often each signed-in account is opened. 10–240. An expired session asks you to sign in again.">
           <TextInput type="number" min={10} max={240} value={form.sessionWarmupMin} onChange={(event) => setForm({ ...form, sessionWarmupMin: Number(event.target.value) })} required />
         </Field>
@@ -359,7 +361,6 @@ export function SettingsPage({ tools }: { tools?: ReactNode } = {}) {
         </div>
       </div>
       {payload ? <div className="card security">{payload.security.description}</div> : null}
-      <MailSettings />
       <form className="card stack" onSubmit={(event) => event.preventDefault()}>
         <div>
           <h2>Encrypted backup</h2>
@@ -449,7 +450,67 @@ export function SettingsPage({ tools }: { tools?: ReactNode } = {}) {
           })()}>Download from URL</button>
         </div>
       </form>
-      </details>
+      </details></> : null}
     </section>
+  )
+}
+
+type CardProps = { form: Settings; setForm: (next: Settings) => void; save: (event: React.FormEvent) => void; busy: boolean }
+
+function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (on: boolean) => void }) {
+  return <label className="switch-row"><span>{label}{hint ? <> <small className="hint">{hint}</small></> : null}</span><input type="checkbox" role="switch" checked={checked} onChange={(event) => onChange(event.target.checked)} /></label>
+}
+
+function NotificationsCard({ form, setForm, save, busy, testWebhook }: CardProps & { testWebhook: () => Promise<void> }) {
+  return (
+    <form className="card stack settings-card" onSubmit={save}>
+      <h2>Discord</h2>
+      <Field label="Discord webhook" hint="One webhook for everything. Card data is never sent. Test sends one sample of each switched-on event.">
+        <div className="inline-field">
+          <TextInput value={form.discordWebhook} onChange={(event) => setForm({ ...form, discordWebhook: event.target.value })} placeholder="https://discord.com/api/webhooks/..." />
+          <button type="button" onClick={() => void testWebhook()} disabled={busy || !form.discordWebhook.trim()}>Test</button>
+        </div>
+      </Field>
+      <Toggle label="In stock" hint="image, name, store, price, SKU, link" checked={form.notifyInStock !== false} onChange={(on) => setForm({ ...form, notifyInStock: on })} />
+      <Toggle label="Back out of stock" checked={form.notifyOutOfStock === true} onChange={(on) => setForm({ ...form, notifyOutOfStock: on })} />
+      <Toggle label="Checkout success" checked={form.notifySuccess !== false} onChange={(on) => setForm({ ...form, notifySuccess: on })} />
+      <Toggle label="Checkout failed / declined" checked={form.notifyFailed !== false} onChange={(on) => setForm({ ...form, notifyFailed: on })} />
+      <Toggle label="Dry run results" hint="labeled DRY RUN" checked={form.notifyDryRun !== false} onChange={(on) => setForm({ ...form, notifyDryRun: on })} />
+      <Toggle label="Proxy blocked" checked={form.notifyBlocked === true} onChange={(on) => setForm({ ...form, notifyBlocked: on })} />
+      <Toggle label="Challenge needs you" hint="phone push, desktop alert, Discord ping" checked={form.notifyChallenge !== false} onChange={(on) => setForm({ ...form, notifyChallenge: on })} />
+      <Field label="Discord ping for challenges" hint="Optional: @here, @everyone, <@userId> or <@&roleId>.">
+        <TextInput value={form.discordMention ?? ""} onChange={(event) => setForm({ ...form, discordMention: event.target.value })} placeholder="@here" />
+      </Field>
+      <div className="actions"><button className="primary" type="submit" disabled={busy}>Save</button></div>
+    </form>
+  )
+}
+
+function SoundsCard({ form, setForm, save, busy }: CardProps) {
+  const rows: Array<[SoundEvent, "soundInStock" | "soundSuccess" | "soundFailure"]> = [["instock", "soundInStock"], ["success", "soundSuccess"], ["failure", "soundFailure"]]
+  return (
+    <form className="card stack settings-card" onSubmit={save}>
+      <h2>Sounds</h2>
+      <p className="hint">Plays on this PC and on the paired phone. Dry runs play the success sound. The challenge alert has its own sound and is not listed here.</p>
+      <Toggle label="Sounds on" checked={form.soundsOn !== false} onChange={(on) => setForm({ ...form, soundsOn: on })} />
+      <Field label={`Volume ${form.soundVolume ?? 70}%`}>
+        <input type="range" min={0} max={100} step={5} value={form.soundVolume ?? 70} aria-label="Sound volume" onChange={(event) => setForm({ ...form, soundVolume: Number(event.target.value) })} />
+      </Field>
+      {rows.map(([event, key]) => {
+        const value = form[key] ?? DEFAULT_EVENT_SOUND[event]
+        return (
+          <div key={event} className="sound-row">
+            <Toggle label={SOUND_EVENT_LABEL[event]} checked={value !== "off"} onChange={(on) => setForm({ ...form, [key]: on ? DEFAULT_EVENT_SOUND[event] : "off" })} />
+            <div className="inline-field">
+              <Select aria-label={`${SOUND_EVENT_LABEL[event]} sound`} value={value === "off" ? DEFAULT_EVENT_SOUND[event] : value} disabled={value === "off"} onChange={(e) => setForm({ ...form, [key]: e.target.value })}>
+                {SOUND_IDS.map((id) => <option key={id} value={id}>{SOUNDS[id].label}</option>)}
+              </Select>
+              <button type="button" disabled={value === "off"} onClick={() => { if (isSoundId(value)) playSound(value, form.soundVolume ?? 70) }}>Preview</button>
+            </div>
+          </div>
+        )
+      })}
+      <div className="actions"><button className="primary" type="submit" disabled={busy}>Save</button></div>
+    </form>
   )
 }

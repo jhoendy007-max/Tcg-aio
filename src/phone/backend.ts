@@ -94,7 +94,8 @@ export function createPhoneHost(
         appName: !settings.appName || /^tcg[\s-]?aio$/i.test(settings.appName) ? "Zzz AIO" : settings.appName,
         theme: settings.theme,
         accent: settings.accent,
-        successSound: settings.successSound
+        successSound: settings.successSound,
+        sounds: { on: settings.soundsOn !== false, instock: settings.soundInStock ?? "rise", success: settings.soundSuccess ?? "fanfare", failure: settings.soundFailure ?? "drop" }
       },
       clients: db.listClients().map(projectPhoneClient),
       ledger: db.listLedger().slice(0, 80).map(projectPhoneLedger),

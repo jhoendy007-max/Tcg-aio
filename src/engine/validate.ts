@@ -2,6 +2,7 @@ import { digitsOnly, expiryInFuture, last4, luhnOk, normalizeExp } from "../shar
 import { cleanModules } from "../shared/module-settings"
 import { cleanStoreRoles } from "../shared/store-defaults"
 import { AppError } from "../shared/errors"
+import { isSoundId } from "../shared/sounds"
 import { isStoreId } from "../shared/stores"
 import { assertBackupUrl } from "./backup"
 import { assertLicenseUrl, cleanPublicKey } from "./license"
@@ -135,6 +136,16 @@ export function cleanSettings(input: Settings): Settings {
     notifySuccess: input.notifySuccess !== false,
     notifyFailed: input.notifyFailed !== false,
     notifyBlocked: input.notifyBlocked === true,
+    notifyChallenge: input.notifyChallenge !== false,
+    notifyDryRun: input.notifyDryRun !== false,
+    soundsOn: input.soundsOn !== false,
+    soundVolume: Math.min(100, Math.max(0, Math.round(Number(input.soundVolume ?? 70)) || 0)),
+    soundInStock: cleanSound(input.soundInStock, "rise"),
+    soundSuccess: cleanSound(input.soundSuccess, "fanfare"),
+    soundFailure: cleanSound(input.soundFailure, "drop"),
+    discordMention: cleanMention(input.discordMention),
+    keepWarm: input.keepWarm === true,
+    keepWarmMin: Math.min(120, Math.max(10, Math.round(Number(input.keepWarmMin ?? 25)) || 25)),
     autoUpdateCheck: input.autoUpdateCheck !== false,
     notifyCooldownMin: Math.min(1440, Math.max(0, Math.round(Number(input.notifyCooldownMin ?? 10)) || 0)),
     autopilot: input.autopilot === true,
@@ -308,4 +319,17 @@ export function cleanRelayUrl(value: string): string {
 export function assertStore(value: string) {
   if (!isStoreId(value)) throw new AppError("Choose a store.")
   return value
+}
+
+/** Only a Discord mention token, never free text, so a ping cannot carry anything else. */
+export function cleanMention(value: string | undefined): string {
+  const text = (value ?? "").trim()
+  if (!text) return ""
+  if (/^@(here|everyone)$/.test(text) || /^<@[!&]?\d{5,25}>$/.test(text)) return text
+  throw new AppError("The Discord ping must be @here, @everyone, <@userId> or <@&roleId>.")
+}
+
+function cleanSound(value: string | undefined, fallback: string): string {
+  if (value === "off") return "off"
+  return isSoundId(value) ? value : fallback
 }

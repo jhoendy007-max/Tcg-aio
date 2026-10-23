@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage, screen, session, shell } from "electron"
+import { app, BrowserWindow, Notification, safeStorage, screen, session, shell } from "electron"
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { createAesCipher, createDpapiCipher, type Cipher } from "../engine/cipher"
@@ -11,6 +11,7 @@ import { refreshStoreSession } from "../engine/store-browser"
 import { postDiscord, postGroupDiscord } from "../engine/discord"
 import { migrateTaskWebhook, noticeAllowed } from "../engine/stock-alerts"
 import { ChallengeGate } from "../engine/challenge-gate"
+import { KEEP_WARM_STORES, KeepWarm } from "../engine/keep-warm"
 import { TaskService } from "../engine/task-runner"
 import { channels } from "../shared/ipc"
 import type { Notice, TaskEvent } from "../shared/types"
@@ -174,6 +175,15 @@ if (gotLock) void app.whenReady().then(async () => {
     if (cookie) desktop.pushVaultSession(accountId, cookie)
   })
   const publish = async (notice: Notice) => {
+    // 0.2.40: "Challenge needs you" governs the phone push, the desktop toast and the Discord ping.
+    if (notice.kind === "challenge" && !noticeAllowed(db.getSettings(), notice)) return false
+    if (notice.kind === "challenge") showChallengeToast(notice, () => {
+      if (window) {
+        if (window.isMinimized()) window.restore()
+        window.show()
+      }
+      void challenge.focus().catch(() => undefined)
+    })
     desktop.publishNotice({
       kind: notice.kind === "instock" || notice.kind === "oos" ? "alert" : notice.kind === "blocked" ? "paused" : notice.kind,
       storeName: notice.storeName,
@@ -191,7 +201,7 @@ if (gotLock) void app.whenReady().then(async () => {
     let delivered = false
     if (!noticeAllowed(settings, notice)) return false
     if (settings.discordWebhook) {
-      await postDiscord(settings.discordWebhook, notice)
+      await postDiscord(settings.discordWebhook, notice, undefined, settings.discordMention ?? "")
       delivered = true
     }
     await postGroupDiscord(settings, notice)
@@ -218,6 +228,27 @@ if (gotLock) void app.whenReady().then(async () => {
       await sessions?.warm(accountId)
     }
   )
+  // 0.2.40: keep the person's own signed-in Target session warm between checkouts (Settings > Sessions).
+  const keepWarm = new KeepWarm({
+    settings: () => db.getSettings(),
+    accounts: () => db.listAccounts().map((account) => ({ id: account.id, label: account.label, store: account.store, hasSession: account.hasSession })),
+    busy: (accountId) => db.listTasks().some((task) => task.accountId === accountId && runner?.isRunning(task.id)),
+    warm: async (accountId) => (await sessions?.warm(accountId, { background: true })) ?? { expired: false, detail: "" },
+    log: (message) => console.log(`[keep-warm] ${message}`),
+    alert: (account, message) => {
+      void publish({ kind: "session", storeName: "Target", sku: account.label, profileName: "", detail: message }).catch(() => undefined)
+    }
+  })
+  keepWarm.start()
+  let warmShape = ""
+  setInterval(() => {
+    const settings = db.getSettings()
+    const shape = `${settings.keepWarm === true}:${settings.keepWarmMin}`
+    if (shape !== warmShape) {
+      if (warmShape) keepWarm.reconfigure()
+      warmShape = shape
+    }
+  }, 30_000).unref?.()
   alerts = new AlertService(db, () => runner, publish, defaultHttp)
   desktop.setRestock((authorization, alternate, body) => alerts!.ingestHttp(authorization, alternate, body))
   alerts.onChange(() => {
@@ -485,6 +516,8 @@ async function warmNext(db: Database, publish: (notice: Notice) => Promise<boole
   if (!settings.sessionWarmup || !sessions) return
   const due = db.listAccounts().find((account) => {
     if (!account.hasSession || account.sessionState === "expired") return false
+    // 0.2.40: Target keep-warm owns these accounts when it is on (jittered, hidden, stops on a check).
+    if (settings.keepWarm === true && KEEP_WARM_STORES.includes(account.store)) return false
     const minutes = resolveModule(account.store, moduleScope(settings)).sessionRefreshMin.value
     return warmupDue(account.lastWarmAt, minutes, Date.now())
   })
@@ -504,3 +537,20 @@ async function warmNext(db: Database, publish: (notice: Notice) => Promise<boole
   }
 }
 app.on("window-all-closed", () => app.quit())
+
+/** Desktop notification for a store check that needs a person. Click jumps straight to the solve window. */
+function showChallengeToast(notice: Notice, onClick: () => void): void {
+  try {
+    if (!Notification.isSupported()) return
+    const toast = new Notification({
+      title: `${notice.storeName}: challenge needs you`,
+      body: `${notice.sku} · Clear the check and the task resumes on its own.`,
+      urgency: "critical",
+      timeoutType: "never"
+    })
+    toast.on("click", onClick)
+    toast.show()
+  } catch {
+    // Notifications are best effort.
+  }
+}

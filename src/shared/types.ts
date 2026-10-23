@@ -419,6 +419,22 @@ export interface Settings {
   notifyFailed: boolean
   /** Discord: a proxy or store block. Off by default. */
   notifyBlocked: boolean
+  /** 0.2.40: "Challenge needs you" — phone push, desktop notification and Discord ping when a store check needs a person. On by default. */
+  notifyChallenge: boolean
+  /** Discord/phone: DRY RUN results (per-step summary). */
+  notifyDryRun: boolean
+  /** 0.2.40 sounds (PC and phone). Master switch, volume 0–100, and a sound per event ("off" = silent). */
+  soundsOn: boolean
+  soundVolume: number
+  soundInStock: string
+  soundSuccess: string
+  soundFailure: string
+  /** Optional Discord mention for challenge pings: @here, @everyone, <@userId> or <@&roleId>. Empty = no ping. */
+  discordMention: string
+  /** 0.2.40: keep signed-in store sessions warm between checkouts (Target). Off by default. */
+  keepWarm: boolean
+  /** Minutes between keep-warm refreshes (jittered ±25%). */
+  keepWarmMin: number
   /** Minutes before the same item can send another in-stock alert. */
   notifyCooldownMin: number
   /** Look for new versions on start and every few hours. The popup still asks before installing. */
@@ -522,6 +538,16 @@ export const DEFAULT_SETTINGS: Settings = {
   notifySuccess: true,
   notifyFailed: true,
   notifyBlocked: false,
+  notifyChallenge: true,
+  notifyDryRun: true,
+  soundsOn: true,
+  soundVolume: 70,
+  soundInStock: "rise",
+  soundSuccess: "fanfare",
+  soundFailure: "drop",
+  discordMention: "",
+  keepWarm: false,
+  keepWarmMin: 25,
   notifyCooldownMin: 10,
   autoUpdateCheck: true,
   autopilot: false,

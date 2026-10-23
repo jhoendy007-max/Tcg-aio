@@ -2,6 +2,7 @@ import { app, BrowserWindow, session, type Session } from "electron"
 import type { ChallengeGate } from "../engine/challenge-gate"
 import { chromiumProxyRules } from "../engine/chromium-session"
 import { challengeHost, splitCookieHeader } from "../engine/challenge"
+import { challengeSolved, cookieMap } from "../shared/challenge-solved"
 import type { PublicChallenge } from "../shared/types"
 
 export interface ChallengeController {
@@ -10,6 +11,8 @@ export interface ChallengeController {
   dismiss(): void
   submit(cookie: string): void
   close(): Promise<void>
+  /** Bring the solve window to the front (opens it if it was closed). Used by the desktop notification. */
+  focus(): Promise<void>
   current(): (PublicChallenge & { cookie: string }) | null
 }
 
@@ -21,8 +24,46 @@ export function createChallengeController(gate: ChallengeGate, getParent: () => 
   let window: BrowserWindow | null = null
   let openId: string | null = null
   let unlisten: (() => void) | null = null
+  let watchTimer: ReturnType<typeof setInterval> | null = null
+
+  function stopWatch(): void {
+    if (watchTimer) clearInterval(watchTimer)
+    watchTimer = null
+  }
+
+  /**
+   * 0.2.40: watch (read-only) for the person finishing the check, then hand the cookies back
+   * so the task resumes without anyone clicking Done. Nothing on the page is touched.
+   */
+  function watchSolved(win: BrowserWindow, ses: Session, view: PublicChallenge, seedHeader: string): void {
+    stopWatch()
+    const host = challengeHost(view.store)
+    const seed = cookieMap(seedHeader)
+    let busy = false
+    watchTimer = setInterval(() => {
+      if (busy) return
+      if (win.isDestroyed() || gate.current()?.id !== view.id) {
+        stopWatch()
+        return
+      }
+      busy = true
+      void (async () => {
+        const html = String(await win.webContents.executeJavaScript("(document.documentElement && document.documentElement.outerHTML || '').slice(0, 60000)", false))
+        const list = await ses.cookies.get({ url: `https://${host}/` })
+        const cookies = Object.fromEntries(list.map((cookie) => [cookie.name, cookie.value]))
+        const verdict = challengeSolved(view.store, host, seed, { url: win.webContents.getURL(), html, cookies })
+        if (verdict.solved && gate.current()?.id === view.id) {
+          stopWatch()
+          await complete()
+        }
+      })().catch(() => undefined).finally(() => {
+        busy = false
+      })
+    }, 1500)
+  }
 
   async function close(): Promise<void> {
+    stopWatch()
     unlisten?.()
     unlisten = null
     const id = openId
@@ -105,7 +146,8 @@ export function createChallengeController(gate: ChallengeGate, getParent: () => 
       win.destroy()
       return
     }
-    await win.loadURL(view.url)
+    watchSolved(win, ses, view, request.cookie)
+    await win.loadURL(view.url).catch(() => undefined)
   }
 
   async function complete(): Promise<void> {
@@ -135,6 +177,15 @@ export function createChallengeController(gate: ChallengeGate, getParent: () => 
       gate.submit(view.id, cookie)
     },
     close,
+    async focus() {
+      if (window && !window.isDestroyed()) {
+        if (window.isMinimized()) window.restore()
+        window.show()
+        window.focus()
+        return
+      }
+      if (gate.current()) await open()
+    },
     current: () => gate.phoneView()
   }
 }

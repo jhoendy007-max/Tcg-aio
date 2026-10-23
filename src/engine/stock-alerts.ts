@@ -38,10 +38,11 @@ export function noticeAllowed(settings: Partial<Settings>, notice: Pick<Notice, 
   switch (notice.kind) {
     case "instock": return settings.notifyInStock !== false
     case "oos": return settings.notifyOutOfStock === true
-    case "success":
-    case "tested": return settings.notifySuccess !== false
+    case "success": return settings.notifySuccess !== false
+    case "tested": return settings.notifyDryRun !== false
     case "failure": return settings.notifyFailed !== false
     case "blocked": return settings.notifyBlocked === true
+    case "challenge": return settings.notifyChallenge !== false
     default: return true
   }
 }

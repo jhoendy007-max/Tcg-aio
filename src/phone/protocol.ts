@@ -238,7 +238,7 @@ export interface PhoneSnapshot {
   modules?: Partial<Record<StoreId, ModuleRecord>>
   moduleGlobals?: PhoneModuleGlobals
   autopilot?: boolean
-  brand?: { appName: string; theme: "dark" | "light"; accent: "gold" | "blue" | "green" | "rose"; successSound: boolean }
+  brand?: { appName: string; theme: "dark" | "light"; accent: "gold" | "blue" | "green" | "rose"; successSound: boolean; sounds?: { on: boolean; instock: string; success: string; failure: string } }
   clients?: PhoneClientRow[]
   ledger?: PhoneLedgerRow[]
   desk?: PhoneDeskSettings

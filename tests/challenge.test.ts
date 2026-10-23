@@ -203,6 +203,33 @@ describe("challenge handoff", () => {
     expect(JSON.stringify(notices)).not.toContain("secret")
   })
 
+  it("hands the resume point back so the module continues from the step that paused (0.2.40)", async () => {
+    const { db, task } = setup()
+    const resumes: unknown[] = []
+    let runs = 0
+    const module: StoreModule = {
+      id: "target",
+      displayName: "Target",
+      skuHint: "TCIN",
+      implemented: true,
+      async run(ctx) {
+        runs += 1
+        resumes.push(ctx.resume)
+        if (runs === 1) return { outcome: "paused", reason: TARGET_PAUSE, resume: { step: "checkout", cartId: "cart-9", itemId: "i-9" } }
+        return finishTest(ctx)
+      }
+    }
+    const gate = new ChallengeGate()
+    const service = new TaskService(db, new Map([["target", module]]), () => undefined, async () => true, { async request() { return { status: 200, headers: {}, body: "" } } }, gate)
+    service.start(task.id, { test: true })
+    await vi.waitFor(() => expect(gate.current()).not.toBeNull())
+    expect(db.getTask(task.id).detail).toMatch(/resumes on its own/i)
+    gate.submit(gate.current()!.id, "_px3=solved")
+    await service.wait(task.id)
+    expect(resumes).toEqual([undefined, { step: "checkout", cartId: "cart-9", itemId: "i-9" }])
+    expect(db.getTask(task.id).logs?.some((entry) => entry.message.includes("Resuming at checkout"))).toBe(true)
+  })
+
   it("resumes from the account browser and leaves the separate challenge window closed", async () => {
     const { db, task, account } = setup()
     let runs = 0

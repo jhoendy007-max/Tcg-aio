@@ -79,7 +79,7 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
     notice.kind === "success"
       ? `${notice.storeName} checkout succeeded`
       : notice.kind === "tested"
-        ? `${notice.storeName} test finished`
+        ? `DRY RUN · ${notice.storeName} finished`
         : notice.kind === "alert"
           ? `${notice.storeName} match`
           : notice.kind === "challenge"
@@ -108,6 +108,7 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
     lines.push("Update the account session in Zzz AIO, then resume the task.")
   }
   if (notice.kind === "challenge") {
+    lines.push("What to do: clear the check in the window on your PC, or tap the phone alert. The task resumes on its own.")
     lines.push("A person solves this in Zzz AIO. It is not sent to a solving service.")
   }
   if (notice.kind === "session") {
@@ -117,7 +118,7 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
     lines.push("Times are Atlantic Time (Puerto Rico, UTC−4).")
   }
   if (notice.kind === "tested") {
-    lines.push("Place order was not sent.")
+    lines.push("DRY RUN: place order was simulated and never sent.")
   }
   return {
     embeds: [
@@ -134,10 +135,22 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
   }
 }
 
-export async function postDiscord(webhook: string, notice: Notice, http: HttpClient = defaultHttp): Promise<void> {
+export async function postDiscord(webhook: string, notice: Notice, http: HttpClient = defaultHttp, mention = ""): Promise<void> {
   assertDiscordWebhook(webhook)
   if (!webhook.trim()) return
-  await deliver(webhook, buildDiscordBody(notice), http)
+  await deliver(webhook, withPing(buildDiscordBody(notice), notice, mention), http)
+}
+
+/** 0.2.40: a challenge that needs a person pings the configured mention (only that mention may notify). */
+export function withPing<T extends { embeds: Array<Record<string, unknown>> }>(body: T, notice: Pick<Notice, "kind" | "storeName">, mention: string): T & { content?: string; allowed_mentions?: Record<string, unknown> } {
+  const tag = mention.trim()
+  if (notice.kind !== "challenge" || !tag) return body
+  const allowed = tag === "@here" || tag === "@everyone"
+    ? { parse: ["everyone"] }
+    : tag.startsWith("<@&")
+      ? { roles: [tag.replace(/\D/g, "")] }
+      : { users: [tag.replace(/\D/g, "")] }
+  return { ...body, content: `${tag} ${notice.storeName} needs you to clear a check.`, allowed_mentions: allowed }
 }
 
 export function shouldPostGroup(settings: Pick<Settings, "groupDiscord" | "groupWebhook">, notice: Notice): boolean {
@@ -193,14 +206,43 @@ export async function postGroupDiscord(settings: Pick<Settings, "groupDiscord" |
   return true
 }
 
-async function deliver(webhook: string, body: { embeds: Array<Record<string, unknown>> }, http: HttpClient): Promise<void> {
-  const response = await http.request({
+/** One webhook post at a time, so a burst of alerts queues instead of tripping Discord's rate limit. */
+let discordQueue: Promise<unknown> = Promise.resolve()
+
+/** Seconds Discord asked us to wait (429), from the JSON body or Retry-After header. Capped at 10s. */
+export function retryAfterMs(response: { headers: Record<string, string | string[] | undefined>; body: string }): number {
+  let seconds = Number.NaN
+  try {
+    seconds = Number((JSON.parse(response.body) as { retry_after?: number }).retry_after)
+  } catch {
+    // Not JSON.
+  }
+  if (!Number.isFinite(seconds)) {
+    const header = response.headers["retry-after"] ?? response.headers["Retry-After"]
+    seconds = Number(Array.isArray(header) ? header[0] : header)
+  }
+  if (!Number.isFinite(seconds) || seconds < 0) seconds = 1
+  return Math.min(10_000, Math.ceil(seconds * 1000))
+}
+
+function deliver(webhook: string, body: { embeds: Array<Record<string, unknown>>; content?: string }, http: HttpClient, wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))): Promise<void> {
+  const run = discordQueue.then(() => deliverNow(webhook, body, http, wait))
+  discordQueue = run.catch(() => undefined)
+  return run
+}
+
+async function deliverNow(webhook: string, body: { embeds: Array<Record<string, unknown>>; content?: string }, http: HttpClient, wait: (ms: number) => Promise<void>): Promise<void> {
+  let response = await http.request({
     method: "POST",
     url: webhook.trim(),
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
     timeoutMs: 10000
   })
+  for (let attempt = 0; response.status === 429 && attempt < 3; attempt += 1) {
+    await wait(retryAfterMs(response))
+    response = await http.request({ method: "POST", url: webhook.trim(), headers: { "content-type": "application/json" }, body: JSON.stringify(body), timeoutMs: 10000 })
+  }
   if (response.status < 200 || response.status >= 300) {
     throw new AppError(`Discord returned ${response.status}.`)
   }
@@ -211,4 +253,16 @@ function stripPrivate(value: string): string {
     .replace(/\b[\w.-]+:[^\s@]+@[^\s]+/g, "[proxy]")
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[email]")
     .replace(/\bpassword\s*[:=]?\s*\S+/gi, "password [redacted]")
+}
+
+/** Settings > Discord > Test: one sample of every event that is switched on. */
+export function sampleNotices(settings: { notifyInStock?: boolean; notifySuccess?: boolean; notifyFailed?: boolean; notifyChallenge?: boolean; notifyDryRun?: boolean }): Notice[] {
+  const base = { storeName: "Target", sku: "88897904", profileName: "Home" }
+  const out: Notice[] = []
+  if (settings.notifyInStock !== false) out.push({ ...base, kind: "instock", detail: "Pokémon TCG: Prismatic Evolutions Elite Trainer Box is in stock (sample).", price: 49.99, inStock: true, url: "https://www.target.com/p/-/A-88897904" })
+  if (settings.notifySuccess !== false) out.push({ ...base, kind: "success", detail: "Order 100200300 (sample).", orderId: "100200300", price: 49.99 })
+  if (settings.notifyFailed !== false) out.push({ ...base, kind: "failure", detail: "Card declined (sample)." })
+  if (settings.notifyChallenge !== false) out.push({ ...base, kind: "challenge", detail: "Target presented a challenge (sample)." })
+  if (settings.notifyDryRun !== false) out.push({ ...base, kind: "tested", detail: "DRY RUN passed · 6 pass · 1 skip · place order simulated, not sent (sample)." })
+  return out
 }

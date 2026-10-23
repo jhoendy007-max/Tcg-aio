@@ -1,12 +1,14 @@
 import { StatusBar } from "expo-status-bar"
 import { stockOfLine, stockOfTask, type StockState } from "../src/shared/stock"
 import { useEffect, useMemo, useRef, useState } from "react"
+import * as Notifications from "expo-notifications"
 import { APP_NAME, APP_TAGLINE, brandName } from "./src/brand"
 import { ActivityIndicator, AppState, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
 import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from "../src/phone/client"
 import type { PhoneChallenge, PhoneSnapshot, PhoneTask, PhoneTaskDraft } from "../src/phone/protocol"
 import { ChallengeCard } from "./src/ChallengeCard"
+import { setSoundPrefs } from "./src/notify"
 import type { KeywordWatchInput, RestockRuleInput } from "../src/shared/types"
 import { ensureNotificationPermission, notify } from "./src/notify"
 import { activeLink } from "../src/phone/links"
@@ -47,6 +49,20 @@ export default function App() {
   const [error, setError] = useState("")
   const [health, setHealth] = useState<StoreHealth[] | null>(null)
   const [challenge, setChallenge] = useState<PhoneChallenge | null>(null)
+  // 0.2.40: tapping the challenge push opens the check already loaded.
+  const [openChallenge, setOpenChallenge] = useState(false)
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      if (response.notification.request.content.data?.challenge === true) {
+        setOpenChallenge(true)
+        setScreen("dash")
+      }
+    })
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response?.notification.request.content.data?.challenge === true) setOpenChallenge(true)
+    }).catch(() => undefined)
+    return () => sub.remove()
+  }, [])
   const [now, setNow] = useState(() => Date.now())
   const [deviceName, setDeviceName] = useState("My phone")
   const [paste, setPaste] = useState("")
@@ -87,6 +103,7 @@ export default function App() {
   function applySnapshot(next: PhoneSnapshot) {
     const tasks = asList<PhoneTask>(next?.tasks)
     setSnap({ ...next, tasks })
+    setSoundPrefs(next?.brand?.sounds)
     setPcName(next?.pcName && next.pcName !== "TCGAIO" ? next.pcName : brandName(next?.brand?.appName))
     const active = tasks.filter((task) => isActive(task.status)).length
     updateWidget(next?.analytics?.success ?? 0, active)
@@ -113,8 +130,9 @@ export default function App() {
           ? `${task.storeName} needs a person on the PC. ${task.detail || "Solve the check on the desktop window."}`
           : `${task.storeName} is in a store queue. Open the PC if it asks a person to continue.`
         setBanner(text)
-        void notify({
-          kind: task.status === "challenge" ? "challenge" : "paused",
+        // 0.2.40: the PC sends the challenge push itself (honours "Challenge needs you"), so do not ring twice.
+        if (task.status !== "challenge") void notify({
+          kind: "paused",
           storeName: task.storeName,
           sku: task.sku,
           profileName: task.profileName,
@@ -335,7 +353,7 @@ export default function App() {
             </View>
           ) : null}
           {challenge && screen !== "alerts" ? (
-            <ChallengeCard challenge={challenge} now={now} session={session.current} onRun={run} />
+            <ChallengeCard key={challenge.id} challenge={challenge} now={now} session={session.current} onRun={run} autoOpen={openChallenge} />
           ) : null}
           {screen === "mail" ? (
             <MailPanel snap={snap} session={session.current} onRun={run} onBack={() => setScreen("dash")} />

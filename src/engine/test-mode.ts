@@ -89,7 +89,16 @@ export function note(ctx: StoreRunContext, stage: TestStage, result: CheckResult
 }
 
 export function finishTest(ctx: StoreRunContext): StoreRunResult {
-  note(ctx, "place", "skip", "Test mode stopped before the place-order request. It was not sent.")
-  ctx.log("success", "Test mode finished. The place-order request was not sent.")
-  return { outcome: "tested", detail: ctx.checklistText?.() || "Test passed. Place order was not sent." }
+  note(ctx, "place", "skip", "Simulated: this is where the order would be placed. The request was not sent.")
+  ctx.log("success", "DRY RUN finished. Every step up to place order ran for real; place order was simulated and never sent.")
+  return { outcome: "tested", detail: dryRunSummary(ctx.checklistText?.() ?? "") }
+}
+
+/** One-line summary for the task status, e.g. "DRY RUN passed · 6 pass · 1 skip · place order simulated". */
+export function dryRunSummary(checklist: string): string {
+  const lines = checklist.split("\n").filter(Boolean)
+  const count = (word: string) => lines.filter((line) => line.includes(`${word} `)).length
+  const fails = count("FAIL")
+  const head = fails ? `DRY RUN found ${fails} problem${fails === 1 ? "" : "s"}` : "DRY RUN passed"
+  return `${head} · ${count("PASS")} pass · ${count("SKIP")} skip · place order simulated, not sent`
 }

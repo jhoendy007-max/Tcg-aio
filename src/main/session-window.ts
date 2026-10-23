@@ -5,14 +5,30 @@ import { applySolvedCookies, challengePageUrl, cookieHeader, splitCookieHeader }
 import { looksSignedOut, sessionOrigin, sessionPartition, storeHome } from "../engine/session-care"
 import type { SessionWindowQueue } from "../shared/consistency"
 import { challengeHost } from "../engine/challenge"
+import { pageShowsChallenge } from "../shared/challenge-solved"
 import type { FullAccount, ProxyEndpoint } from "../shared/types"
 
 export interface SessionBrowser {
   open(accountId: string): Promise<void>
   capture(accountId: string): Promise<void>
-  warm(accountId: string): Promise<{ expired: boolean; detail: string }>
+  warm(accountId: string, options?: WarmOptions): Promise<WarmResult>
   close(): Promise<void>
 }
+
+export interface WarmOptions {
+  /** 0.2.40 keep-warm: hidden window, one normal page load of the signed-in cart page. */
+  background?: boolean
+}
+
+export interface WarmResult {
+  expired: boolean
+  detail: string
+  /** The store showed a bot check. Keep-warm stops for this account and alerts instead. */
+  challenged?: boolean
+}
+
+/** Low-rate page a signed-in person would open anyway. */
+const KEEP_WARM_URL: Partial<Record<string, string>> = { target: "https://www.target.com/cart" }
 
 /**
  * A normal Chromium window per account. The person signs in. Zzz AIO reads the
@@ -89,8 +105,8 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
       db.updateSession(account.id, applySolvedCookies(account.session, header))
       db.markSession(account.id, "saved", false)
     },
-    async warm(accountId) {
-      const run = () => warmAccount(accountId)
+    async warm(accountId, options) {
+      const run = () => warmAccount(accountId, options?.background === true)
       if (!queue) return run()
       queue.setCap(db.getSettings().sessionWindowCap)
       return queue.run(run)
@@ -100,13 +116,19 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
     }
   }
 
-  async function warmAccount(accountId: string): Promise<{ expired: boolean; detail: string }> {
+  async function warmAccount(accountId: string, background = false): Promise<WarmResult> {
       if (windows.has(accountId)) return { expired: false, detail: "The sign-in window is already open." }
       const account = db.readAccount(accountId)
-      const { win } = await prepare(account, `Session warm-up · ${account.label}`, true)
+      const { win } = await prepare(account, `Session warm-up · ${account.label}`, !background)
       try {
-        const homeLoaded = await load(win, storeHome(account.store))
-        const task = db.listTasks().find((item) => item.accountId === account.id && item.store === account.store)
+        const homeLoaded = await load(win, background ? KEEP_WARM_URL[account.store] ?? storeHome(account.store) : storeHome(account.store))
+        if (homeLoaded && !win.isDestroyed()) {
+          const html = String(await win.webContents.executeJavaScript("(document.documentElement && document.documentElement.outerHTML || '').slice(0, 60000)", false).catch(() => ""))
+          if (pageShowsChallenge(html)) {
+            return { expired: false, challenged: true, detail: `${account.label}: the store showed a check during keep-warm. Nothing was saved.` }
+          }
+        }
+        const task = background ? undefined : db.listTasks().find((item) => item.accountId === account.id && item.store === account.store)
         const productLoaded = task ? await load(win, challengePageUrl(account.store, task.sku)) : false
         if (!homeLoaded && !productLoaded) {
           const current = db.listAccounts().find((item) => item.id === account.id)

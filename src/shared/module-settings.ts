@@ -283,7 +283,7 @@ const TEXT = {
     soldBy: "Sold by",
     sessionRefreshMin: "Session refresh (minutes)",
     maxRetries: "Max retries",
-    testMode: "Test mode default",
+    testMode: "Dry run default",
     blockBackoffMs: "Block backoff (ms)",
     wait: "Wait in line",
     skip: "Skip the queue",
