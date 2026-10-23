@@ -32,6 +32,9 @@ export interface PhoneHost {
   pcName: string
   relayUrl(): string
   provisionRelay?(): Promise<{ url: string; channel: string; pcToken: string; inviteToken: string }>
+  /** True when a hosted relay channel was saved and this PC is signed in, so it can rejoin without a new invite. */
+  canResumeRelay?(): boolean
+  log?(line: string): void
   issueRelayDevice?(deviceId: string): Promise<string | undefined>
   revokeRelayDevice?(deviceId: string): Promise<void> | void
   snapshot(): PhoneSnapshot
@@ -131,6 +134,9 @@ export class PhoneServer {
   private hosted: { url: string; channel: string; pcToken: string; inviteToken: string } | null = null
   private hostedSocket: WebSocket | null = null
   private hostedTimer: ReturnType<typeof setTimeout> | null = null
+  private resumeTimer: ReturnType<typeof setTimeout> | null = null
+  private resumeAttempt = 0
+  private relayStopped = false
   private readonly bindHost: string
   private readonly advertiseHost: string
   private readonly now: () => number
@@ -183,6 +189,7 @@ export class PhoneServer {
         const address = http.address()
         this.port = typeof address === "object" && address ? address.port : this.port
         this.reconnectRelay()
+        this.resumeRelay()
         resolve()
       })
     })
@@ -191,10 +198,35 @@ export class PhoneServer {
   async prepareRelay(): Promise<void> {
     if (!this.host.provisionRelay) return
     this.hosted = await this.host.provisionRelay()
+    this.relayStopped = false
+    this.resumeAttempt = 0
     this.reconnectHosted()
   }
 
+  /**
+   * Rejoin the saved hosted relay channel in the background (startup, sign-in, license refresh).
+   * Before 0.2.36 only the pairing screen did this, so after a PC restart the phone saw "The PC did not answer."
+   * Retries with backoff: 2s, 4s, 8s ... up to 5 min.
+   */
+  resumeRelay(force = false): void {
+    if (force) this.relayStopped = false
+    if (this.relayStopped) return
+    if (!this.http || !this.host.provisionRelay || !this.host.canResumeRelay?.()) return
+    if (this.hostedSocket || this.resumeTimer) return
+    void this.prepareRelay().catch((error: unknown) => {
+      const delay = Math.min(300_000, 2000 * 2 ** this.resumeAttempt)
+      this.resumeAttempt += 1
+      this.host.log?.(`[relay] pc resume failed (${error instanceof Error ? error.message : String(error)}); retry in ${Math.round(delay / 1000)}s`)
+      this.resumeTimer = setTimeout(() => {
+        this.resumeTimer = null
+        this.resumeRelay()
+      }, delay)
+    })
+  }
+
   async stop(): Promise<void> {
+    if (this.resumeTimer) clearTimeout(this.resumeTimer)
+    this.resumeTimer = null
     if (this.relayTimer) clearTimeout(this.relayTimer)
     this.relayTimer = null
     this.relaySocket?.close()
@@ -306,12 +338,30 @@ export class PhoneServer {
     this.hostedSocket = socket
     socket.on("open", () => {
       socket.send(JSON.stringify({ op: "join", role: "pc", channel: hosted.channel, token: hosted.pcToken, pc: this.host.pcId }))
+      this.host.log?.(`[relay] pc joined channel ${hosted.channel.slice(0, 8)}`)
     })
     socket.on("message", (data) => this.onRelay(data.toString(), "hosted"))
-    socket.on("close", () => {
+    socket.on("close", (code: number) => {
       if (this.hostedSocket !== socket) return
       this.hostedSocket = null
+      this.host.log?.(`[relay] pc left channel ${hosted.channel.slice(0, 8)} code ${code}`)
       if (!this.hosted || !this.http) return
+      if (code === 4001) {
+        // The relay refused this PC for good (signed out / revoked). Wait for a new invite or sign-in.
+        this.relayStopped = true
+        this.hosted = null
+        return
+      }
+      if (code === 4003) {
+        // Channel token no longer valid: ask the license server for a fresh one.
+        this.hosted = null
+        this.resumeAttempt = 0
+        this.hostedTimer = setTimeout(() => {
+          this.hostedTimer = null
+          this.resumeRelay()
+        }, 1000)
+        return
+      }
       this.hostedTimer = setTimeout(() => this.reconnectHosted(), 3000)
     })
     socket.on("error", () => socket.close())

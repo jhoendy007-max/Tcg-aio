@@ -2,13 +2,13 @@
   "expo": {
     "name": "Zzz AP",
     "slug": "tcgaio-admin",
-    "version": "0.2.35",
+    "version": "0.2.36",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.tcgaio.admin",
-      "versionCode": 235,
+      "versionCode": 236,
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.INTERNET",

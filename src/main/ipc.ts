@@ -332,18 +332,20 @@ export function registerIpc(
     onSettings?.(db.getSettings())
     return { restored: true as const }
   })
+  // 0.2.36: rejoin the saved phone relay after sign-in or a license refresh, not only from the pairing screen.
+  const resumePhone = <T>(result: T): T => { phone.resumeRelay(true); return result }
   handle(channels.accountStatus, async () => {
     const fingerprint = machineFingerprint()
-    try { return await heartbeatAccount(db, fingerprint) } catch { return db.accountView() }
+    try { return resumePhone(await heartbeatAccount(db, fingerprint)) } catch { return db.accountView() }
   })
-  handle(channels.accountSignIn, (input: { email?: string; password?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/login", { email: input?.email ?? "", password: input?.password ?? "" }))
-  handle(channels.accountSignUp, (input: { email?: string; password?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/signup", { email: input?.email ?? "", password: input?.password ?? "" }))
-  handle(channels.accountRedeem, (input: { key?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/redeem", { token: db.sessionToken(), key: input?.key ?? "" }))
+  handle(channels.accountSignIn, (input: { email?: string; password?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/login", { email: input?.email ?? "", password: input?.password ?? "" }).then(resumePhone))
+  handle(channels.accountSignUp, (input: { email?: string; password?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/signup", { email: input?.email ?? "", password: input?.password ?? "" }).then(resumePhone))
+  handle(channels.accountRedeem, (input: { key?: string }) => syncAccount(db, machineFingerprint(), "/v1/account/redeem", { token: db.sessionToken(), key: input?.key ?? "" }).then(resumePhone))
   handle(channels.accountSignOut, () => {
     db.clearAccountSession()
     return db.accountView()
   })
-  handle(channels.accountTransfer, () => syncAccount(db, machineFingerprint(), "/v1/session/transfer", { token: db.sessionToken() }))
+  handle(channels.accountTransfer, () => syncAccount(db, machineFingerprint(), "/v1/session/transfer", { token: db.sessionToken() }).then(resumePhone))
   handle(channels.accountOpenAdmin, async () => {
     const fingerprint = machineFingerprint()
     db.refreshAccess(fingerprint)

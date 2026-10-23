@@ -128,9 +128,13 @@ export class PhoneRelayHub {
       wss.handleUpgrade(req, socket as never, head, (ws) => {
         this.sockets += 1
         ws.on("message", (data) => this.onMessage(ws, data.toString()))
-        ws.on("close", () => {
+        ws.on("close", (code: number) => {
+          const peer = this.peers.get(ws)
           this.peers.delete(ws)
           this.sockets = Math.max(0, this.sockets - 1)
+          if (!peer) return
+          relayLog(`leave ${peer.role} ${peer.channel.slice(0, 8)} code ${code}`)
+          if (peer.role === "pc" && !this.hasPc(peer.channel)) this.presence(peer.channel, false)
         })
         ws.on("error", () => ws.close())
       })
@@ -180,7 +184,13 @@ export class PhoneRelayHub {
       this.seq += 1
       const id = `r${this.seq.toString(36)}`
       this.peers.set(socket, { role: join.role, channel: join.channel, id, deviceId: join.deviceId })
-      socket.send(JSON.stringify({ op: "joined", id }))
+      relayLog(`join ${join.role} ${join.channel.slice(0, 8)}`)
+      if (join.role === "phone") {
+        socket.send(JSON.stringify({ op: "joined", id, pc: this.hasPc(join.channel) }))
+      } else {
+        socket.send(JSON.stringify({ op: "joined", id }))
+        this.presence(join.channel, true)
+      }
       return
     }
     const peer = this.peers.get(socket)
@@ -194,6 +204,20 @@ export class PhoneRelayHub {
     }
     if (typeof value.to !== "string" || !value.to) return
     this.deliver(peer.channel, "phone", value.to, value.body, peer.id)
+  }
+
+  /** True when a desktop is connected on this channel. */
+  hasPc(channel: string): boolean {
+    for (const peer of this.peers.values()) if (peer.role === "pc" && peer.channel === channel) return true
+    return false
+  }
+
+  /** Tell every phone on the channel whether the PC is there, so the phone can say so instead of timing out. */
+  private presence(channel: string, pc: boolean): void {
+    const frame = JSON.stringify({ op: "presence", pc })
+    for (const [socket, peer] of this.peers) {
+      if (peer.role === "phone" && peer.channel === channel && socket.readyState === WebSocket.OPEN) socket.send(frame)
+    }
   }
 
   private deliver(channel: string, role: Peer["role"], id: string | undefined, body: string, from: string): void {
@@ -214,4 +238,9 @@ function dropChannel(db: DatabaseSync, channel: string): void {
 
 function sha(value: string): string {
   return createHash("sha256").update(value).digest("hex")
+}
+
+function relayLog(line: string): void {
+  if (process.env.RELAY_QUIET === "1") return
+  console.log(`[relay] ${line}`)
 }

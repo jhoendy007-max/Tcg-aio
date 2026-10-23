@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { StoreLogo } from "../components/StoreLogo"
 import { StoreSelect } from "../components/StoreSelect"
+import { RowMenu } from "../components/RowMenu"
 import { stockOfLine, stockOfTask } from "../../../shared/stock"
 import { issueText, type HealthIssue } from "../../../shared/checkout-health"
 import { clientIdOf, clientText, ME_CLIENT_ID, type Client } from "../../../shared/clients"
@@ -45,6 +46,16 @@ const emptyForm = (): TaskInput => ({
 
 export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
   const [tasks, setTasks] = useState<PublicTask[]>([])
+  const [titles, setTitles] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    let live = true
+    unwrap(window.aio.analytics.get()).then((report) => {
+      const map = new Map<string, string>()
+      for (const row of Array.isArray(report?.stockLog) ? report.stockLog : []) if (row.title) map.set(`${row.store}|${row.sku}`, row.title)
+      if (live) setTitles(map)
+    }).catch(() => undefined)
+    return () => { live = false }
+  }, [])
   const [profiles, setProfiles] = useState<PublicProfile[]>([])
   const [accounts, setAccounts] = useState<PublicAccount[]>([])
   const [groups, setGroups] = useState<ProxyGroup[]>([])
@@ -428,6 +439,7 @@ export function TasksPage({ lockedKind = "" }: { lockedKind?: TaskKind | "" }) {
                   <TaskRow
                     key={task.id}
                     task={task}
+                    title={titles.get(`${task.store}|${task.sku}`)}
                     expanded={task.id === selectedId}
                     selectMode={selectMode}
                     picked={picked.includes(task.id)}
@@ -582,8 +594,9 @@ export function friendlyStatus(status: TaskStatus): string {
   return FRIENDLY_STATUS[status] ?? status
 }
 
-function TaskRow({ task, expanded, selectMode, picked, globalTest, names, accounts, groups, lang, issues, onExpand, onToggle, onStart, onStop, onTest, onEdit, onDuplicate, onDelete }: {
+function TaskRow({ task, title, expanded, selectMode, picked, globalTest, names, accounts, groups, lang, issues, onExpand, onToggle, onStart, onStop, onTest, onEdit, onDuplicate, onDelete }: {
   task: PublicTask
+  title?: string
   expanded: boolean
   selectMode: boolean
   picked: boolean
@@ -613,7 +626,7 @@ function TaskRow({ task, expanded, selectMode, picked, globalTest, names, accoun
       <tr className={expanded ? "selected task-row" : "task-row"} onClick={onExpand} aria-expanded={expanded}>
         {selectMode ? <td className="sel"><input type="checkbox" aria-label={task.sku} checked={picked} onClick={(event) => event.stopPropagation()} onChange={onToggle} /></td> : null}
         <td><StoreLogo store={task.store} withName /></td>
-        <td><div className="product-name" title={task.sku}>{product}</div>{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</td>
+        <td className="col-product">{title ? <div className="product-name" title={`${title} · ${task.sku}`}>{title}</div> : <div className="product-name" title={task.sku}><span className="sku-tag">SKU</span>{product}</div>}{task.testMode || globalTest ? <span className="pill test">TEST</span> : null}</td>
         <td><span className={`mode-badge ${monitor ? "monitor" : "checkout"}`}>{monitor ? "Monitor" : "Checkout"}</span></td>
         <td><span className={`status-pill s-${task.status}${stock ? ` stock-${stock}` : ""}`}>{stock === "in" ? "In stock" : stock === "out" ? "Out of stock" : friendlyStatus(task.status)}</span></td>
         <td className="row-actions" onClick={(event) => event.stopPropagation()}>
@@ -622,15 +635,12 @@ function TaskRow({ task, expanded, selectMode, picked, globalTest, names, accoun
           ) : (
             <button type="button" className="toggle-btn start" aria-label={`Start ${task.sku}`} disabled={!task.confirmPurchase && !task.testMode && !monitor && !globalTest} title={!task.confirmPurchase && !task.testMode && !monitor && !globalTest ? "Edit the task and confirm real orders, or turn on test mode" : undefined} onClick={onStart}>▶ Start</button>
           )}
-          <details className="row-menu">
-            <summary aria-label={`More actions for ${task.sku}`}>⋯</summary>
-            <div className="row-menu-list">
-              <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); onEdit() }}>Edit</button>
-              <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); onDuplicate() }}>Duplicate</button>
-              {!live && !monitor ? <button type="button" onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); onTest() }}>Test run</button> : null}
-              <button type="button" className="danger" disabled={live} onClick={(event) => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); onDelete() }}>Delete</button>
-            </div>
-          </details>
+          <RowMenu label={task.sku} items={[
+            { label: "Edit", run: onEdit },
+            { label: "Duplicate", run: onDuplicate },
+            ...(!live && !monitor ? [{ label: "Test run", run: onTest }] : []),
+            { label: "Delete", run: onDelete, danger: true, disabled: live }
+          ]} />
         </td>
       </tr>
       {expanded ? (
