@@ -27,6 +27,7 @@
     "license-server/**/*"
   ],
   "exclude": [
+    "src/stores/target/bypass.ts",
     "tests/fixtures/**/*.tsx"
   ]
 }

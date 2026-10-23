@@ -1,3 +1,4 @@
+// UNUSED / NOT WIRED: kept at the owner's request. Not imported anywhere and excluded from the build. Do not wire in (no bot-check bypass/solver/UA rotation).
 // src/target/bypass.ts
 /** 
  * Módulo AIO Completo: Bypass Anti-Bot, Solver Captcha Integrado y Login Automático Robusto.
@@ -122,7 +123,7 @@ export async function handleChallenge(ctx: StoreRunContext, response: HttpRespon
 async function solveVisualChallenge(ctx: StoreRunContext, page: any): Promise<boolean> {
    ctx.log("info", "Solver processing visual challenge..."); 
   
-   // Aquí iría la llamada a tus servicios de solver externos (ej: 2Captcha API local/remote) 
+   // Aquí iría la llamada a tus servicios de solver externos 
    // O la lógica de inyección JS local para simular clicks/hover.
    
    // Simulación simple: Esperar un poco y asumir éxito por ahora, luego devolver true.
