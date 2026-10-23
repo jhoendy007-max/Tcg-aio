@@ -2,7 +2,7 @@
   "expo": {
     "name": "Zzz APP",
     "slug": "tcgaio",
-    "version": "0.2.34",
+    "version": "0.2.35",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "com.tcgaio.phone",
-      "versionCode": 234,
+      "versionCode": 235,
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.CAMERA",

@@ -21,6 +21,7 @@ import { updateWidget } from "./src/widget"
 import { colors, isActive, palette, STATUS_LABEL } from "./src/theme"
 import { ThemeContext, useTheme } from "./src/theme-context"
 import { DeskPanel, LogsPanel, PhoneSettingsForm } from "./src/Desk"
+import { LogsToggle } from "./src/LogsToggle"
 import { PhoneUpdateCard } from "./src/PhoneUpdateCard"
 import { PhoneUpdatePrompt } from "./src/UpdatePrompt"
 import { countdown } from "../src/shared/clock"
@@ -709,9 +710,11 @@ function TaskDetail({ task, onRun, session, onEdit }: {
         <Pressable style={styles.secondary} onPress={onEdit}><Text style={styles.secondaryText}>Edit</Text></Pressable>
         <Pressable style={styles.secondary} onPress={() => void onRun(() => session!.deleteTask(task.id))}><Text style={styles.secondaryText}>Delete</Text></Pressable>
       </View>
+      <LogsToggle count={asList<PhoneTask["logs"][number]>(task.logs).length}>
       {asList<PhoneTask["logs"][number]>(task.logs).map((line, index) => (
-        <Text key={`${line.ts}-${index}`} style={[styles.log, stockOfLine(line.message) ? { color: stockColor(stockOfLine(line.message)) } : null]}>{line.message}</Text>
-      ))}
+          <Text key={`${line.ts}-${index}`} style={[styles.log, stockOfLine(line.message) ? { color: stockColor(stockOfLine(line.message)) } : null]}>{line.message}</Text>
+        ))}
+      </LogsToggle>
     </View>
   )
 }
