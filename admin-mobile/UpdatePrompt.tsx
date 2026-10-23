@@ -115,7 +115,7 @@ export function AdminUpdatePrompt({ base, token, onAuthError }: { base: string; 
         }
         const done = await apkInstaller.install(result.uri)
         move("available")
-        setMessage(done === "cancelled" ? "Install cancelled. Tap Install to try again." : "Installed. Reopen Zzz AP if it did not restart.")
+        setMessage(done === "cancelled" ? "Install cancelled. Tap Install to try again." : "Installed. Reopen Zzz AIO Admin if it did not restart.")
         return
       }
       const content = await FileSystem.getContentUriAsync(result.uri)

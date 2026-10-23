@@ -53,7 +53,7 @@ export function PhoneUpdateCard() {
       {state.notes && (state.phase === "available" || state.phase === "ready") ? <Text style={styles.log}>{state.notes.slice(0, 500)}</Text> : null}
       {needsPermission ? (
         <View style={{ gap: 6 }}>
-          <Text style={styles.p}>One-time step: allow Zzz APP to install updates. Tap Open settings, turn on "Allow from this source", then come back and tap Download again.</Text>
+          <Text style={styles.p}>One-time step: allow Zzz AIO to install updates. Tap Open settings, turn on "Allow from this source", then come back and tap Download again.</Text>
           <Pressable style={styles.secondary} onPress={() => openInstallSettings()}><Text style={styles.secondaryText}>Open settings</Text></Pressable>
         </View>
       ) : null}

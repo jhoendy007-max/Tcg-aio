@@ -1,6 +1,7 @@
 import { StatusBar } from "expo-status-bar"
 import { stockOfLine, stockOfTask, type StockState } from "../src/shared/stock"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { APP_NAME, APP_TAGLINE, brandName } from "./src/brand"
 import { ActivityIndicator, AppState, Image, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native"
 import { CameraView, useCameraPermissions } from "expo-camera"
 import { PhoneRevoked, PhoneSession, payloadFromScan, type SavedPhoneLink } from "../src/phone/client"
@@ -86,7 +87,7 @@ export default function App() {
   function applySnapshot(next: PhoneSnapshot) {
     const tasks = asList<PhoneTask>(next?.tasks)
     setSnap({ ...next, tasks })
-    setPcName(next?.brand?.appName || next?.pcName || "Zzz AIO")
+    setPcName(next?.pcName && next.pcName !== "TCGAIO" ? next.pcName : brandName(next?.brand?.appName))
     const active = tasks.filter((task) => isActive(task.status)).length
     updateWidget(next?.analytics?.success ?? 0, active)
   }
@@ -280,7 +281,8 @@ export default function App() {
       {screen === "pair" ? (
         <ScrollView contentContainerStyle={styles.pad}>
           <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginBottom: 8 }} accessibilityLabel="Zzz logo" />
-          <Text style={styles.brand}>Zzz APP</Text>
+          <Text style={styles.brand}>{APP_NAME}</Text>
+          <Text style={styles.tagline}>{APP_TAGLINE}</Text>
           <Text style={styles.h1}>Pair this phone</Text>
           <Text style={styles.p}>On the PC, open Phone and choose Pair device. Scan that QR code. The PC keeps the card and passwords.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
@@ -318,11 +320,12 @@ export default function App() {
           <View style={styles.row}>
             <Image source={require("./assets/icon.png")} style={{ width: 40, height: 40, borderRadius: 10, marginRight: 10 }} accessibilityLabel="Zzz logo" />
             <View style={{ flex: 1 }}>
-              <Text style={styles.brand}>{snap?.brand?.appName || "Zzz APP"}</Text>
+              <Text style={styles.brand}>{brandName(snap?.brand?.appName)}</Text>
               <Text style={styles.h1}>{pcName}</Text>
             </View>
             <Text style={[styles.pill, online ? styles.pillOn : styles.pillOff]}>{online ? "PC online" : reconnecting ? "Reconnecting…" : "PC offline"}</Text>
           </View>
+          <Text style={styles.tagline}>{APP_TAGLINE}</Text>
           <Text style={styles.p}>Tasks run on the PC. This phone starts, stops, and watches them.</Text>
           {error ? <Text style={styles.err}>{error}</Text> : null}
           {banner ? (
@@ -912,6 +915,7 @@ function createStyles(c: typeof colors) {
     boot: { marginTop: 80 },
     pad: { padding: 16, paddingTop: 48, paddingBottom: 24, gap: 10 },
     brand: { color: c.accent, letterSpacing: 2, fontSize: 12, fontWeight: "700" },
+    tagline: { color: c.muted, fontSize: 12, fontStyle: "italic", marginTop: 2, marginBottom: 6 },
     h1: { color: c.text, fontSize: 22, fontWeight: "700" },
     h2: { color: c.text, fontSize: 16, fontWeight: "700" },
     p: { color: c.muted, fontSize: 14, flexShrink: 1 },

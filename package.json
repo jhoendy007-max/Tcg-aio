@@ -65,6 +65,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "Zzz AIO",
+      "uninstallDisplayName": "Zzz AIO",
+      "include": "build/installer.nsh",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico"

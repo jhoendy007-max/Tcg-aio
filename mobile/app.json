@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Zzz APP",
+    "name": "Zzz AIO",
     "slug": "tcgaio",
     "version": "0.2.38",
     "orientation": "portrait",
@@ -11,8 +11,8 @@
       "bundleIdentifier": "com.tcgaio.phone",
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Zzz APP scans the pairing QR code shown on your PC.",
-        "NSLocalNetworkUsageDescription": "Zzz APP connects to the desktop app on your Wi-Fi.",
+        "NSCameraUsageDescription": "Zzz AIO scans the pairing QR code shown on your PC.",
+        "NSLocalNetworkUsageDescription": "Zzz AIO connects to the desktop app on your Wi-Fi.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -38,7 +38,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Zzz APP scans the pairing QR code shown on your PC."
+          "cameraPermission": "Zzz AIO scans the pairing QR code shown on your PC."
         }
       ],
       [

@@ -185,7 +185,7 @@ function cleanClientId(value: string | undefined): string {
 
 function cleanAppName(value: string | undefined): string {
   const name = (value ?? "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, 24)
-  return name || "TCGAIO"
+  return !name || /^tcg[\s-]?aio$/i.test(name) ? "Zzz AIO" : name
 }
 
 function cleanLogo(value: string | undefined): string {
