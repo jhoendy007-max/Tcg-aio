@@ -1,4 +1,5 @@
 import { defineConfig, externalizeDepsPlugin } from "electron-vite"
+import { resolve } from "node:path"
 import react from "@vitejs/plugin-react"
 import { normalizeLicenseKey, normalizeLicenseUrl } from "./scripts/license-build-values.mjs"
 
@@ -19,7 +20,15 @@ export default defineConfig({
     define: licenseDefine
   },
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, "src/preload/index.ts"),
+          "signin-bar": resolve(__dirname, "src/preload/signin-bar.ts")
+        }
+      }
+    }
   },
   renderer: {
     plugins: [react()],

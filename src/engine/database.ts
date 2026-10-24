@@ -1,3 +1,4 @@
+import { browserProxyView } from "./account-proxy"
 import { grantFeatures, type FeatureId } from "../shared/entitlements"
 import { randomUUID } from "node:crypto"
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -504,6 +505,12 @@ export class Database {
       const proxy = pin ? proxies.find((item) => item.id === pin.proxyId) : undefined
       return {
         ...account,
+        browserProxy: browserProxyView(
+          { id: account.id, proxyGroupId: record.proxyGroupId ?? null },
+          this.data.tasks.map((task) => ({ id: task.id, accountId: task.accountId, proxyGroupId: task.proxyGroupId ?? null, kind: task.kind, monitorOnly: task.monitorOnly })),
+          this.data.proxyGroups,
+          pin?.proxyId
+        ),
         stickyProxyId: pin?.proxyId ?? null,
         stickyProxyLabel: proxy ? `${proxy.host}:${proxy.port}` : null,
         profilePartition: accountPartition(account.id),

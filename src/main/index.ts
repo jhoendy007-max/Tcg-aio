@@ -224,8 +224,8 @@ if (gotLock) void app.whenReady().then(async () => {
       return sessionWindows.run(() => refreshStoreSession(input))
     },
     (store) => readStoreCode(db, openMailbox, store),
-    async (accountId) => {
-      await sessions?.warm(accountId)
+    async (accountId, taskId) => {
+      await sessions?.warm(accountId, { taskId })
     }
   )
   // 0.2.40: keep the person's own signed-in Target session warm between checkouts (Settings > Sessions).

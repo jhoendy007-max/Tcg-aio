@@ -152,9 +152,9 @@ export function AccountsPage() {
       ) : null}
       <div className="table-wrap card manager">
         <table>
-          <thead><tr><th>Store</th><th>Client</th><th>Label</th><th>Username</th><th>Password</th><th>{consistencyText(lang, "freshness")}</th><th>{consistencyText(lang, "profile")}</th><th>{consistencyText(lang, "stickyProxy")}</th><th></th></tr></thead>
+          <thead><tr><th>Store</th><th>Client</th><th>Label</th><th>Username</th><th>Password</th><th>{consistencyText(lang, "freshness")}</th><th>{consistencyText(lang, "profile")}</th><th>{consistencyText(lang, "stickyProxy")}</th><th>{lang === "es" ? "Proxy del navegador" : "Browser proxy"}</th><th></th></tr></thead>
           <tbody>
-            {accounts.length === 0 ? <tr><td colSpan={9} className="empty">No accounts yet.</td></tr> : accounts.map((account) => (
+            {accounts.length === 0 ? <tr><td colSpan={10} className="empty">No accounts yet.</td></tr> : accounts.map((account) => (
               <tr key={account.id}>
                 <td>{storeName.get(account.store) ?? account.store}</td>
                 <td>{clients.find((client) => client.id === (account.clientId || ME_CLIENT_ID))?.name ?? "Me"}</td>
@@ -164,6 +164,15 @@ export function AccountsPage() {
                 <td>{consistencyText(lang, account.freshness ?? "missing")}{account.lastWarmAt ? <div className="detail">{new Date(account.lastWarmAt).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}</div> : null}</td>
                 <td>{account.profilePartition ?? ""}</td>
                 <td>{account.stickyProxyLabel || "—"}</td>
+                <td className="browser-proxy" data-status={account.browserProxy?.status ?? "direct"}>
+                  {account.browserProxy ? (
+                    <>
+                      <span className={`pill bp-${account.browserProxy.status}`}>{bindingText(lang, account.browserProxy.status)}</span>
+                      <div className="detail">{account.browserProxy.label ?? account.browserProxy.groupName ?? ""}</div>
+                      {account.browserProxy.status === "direct-warning" || account.browserProxy.status === "conflict" ? <div className="detail bp-warn">{account.browserProxy.note}</div> : null}
+                    </>
+                  ) : "—"}
+                </td>
                 <td className="row-actions">
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.openBrowser(account.id)).catch((err) => setError(errorText(err)))}>Sign in</button>
                   <button type="button" title="Target rejected the window? Sign in with your own browser, then use Session-Sync or Save cookies." onClick={() => void unwrap(window.aio.accounts.openInMyBrowser(account.id)).catch((err) => setError(errorText(err)))}>Open in my browser</button>
@@ -178,4 +187,10 @@ export function AccountsPage() {
       </div>
     </section>
   )
+}
+
+function bindingText(lang: string, status: string): string {
+  const es: Record<string, string> = { bound: "Atado al proxy", pending: "Se ata al primer uso", direct: "Directo", "direct-warning": "Saldría directo", conflict: "Conflicto de proxy" }
+  const en: Record<string, string> = { bound: "Bound to proxy", pending: "Binds on first use", direct: "Direct (no proxy)", "direct-warning": "Would run direct", conflict: "Proxy conflict" }
+  return (lang === "es" ? es : en)[status] ?? status
 }

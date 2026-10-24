@@ -787,3 +787,7 @@ td.empty { text-align: center; padding: 56px 12px !important; color: var(--muted
 .settings-tabs a.active { color: #fff; background: linear-gradient(90deg, #8b5cf6, #22d3ee); box-shadow: 0 0 18px rgba(139, 92, 246, 0.45); }
 .sound-row { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .dry-run-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; color: #111; background: #fbbf24; margin-left: 6px; }
+.pill.bp-bound { background: #16362b; color: #b7f0d6; }
+.pill.bp-pending, .pill.bp-direct { background: var(--pill-bg); color: var(--muted); }
+.pill.bp-direct-warning, .pill.bp-conflict { background: #3d3118; color: #ffe1a8; }
+.bp-warn { color: #ffe1a8; }
