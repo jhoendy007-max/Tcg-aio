@@ -1,15 +1,16 @@
-import { app, BrowserWindow, session, type Session, type WebContents } from "electron"
+import { app, BrowserWindow, dialog, session, shell, type Session, type WebContents } from "electron"
 import { chromiumProxyRules } from "../engine/chromium-session"
 import type { Database } from "../engine/database"
 import { applySolvedCookies, challengePageUrl, cookieHeader, splitCookieHeader } from "../engine/challenge"
-import { looksSignedOut, sessionOrigin, sessionPartition, storeHome } from "../engine/session-care"
+import { looksSignedOut, pageShowsStoreError, sessionOrigin, sessionPartition, signInRejectedMessage, storeHome, storeSignInUrl } from "../engine/session-care"
+import { forgetProxyBinding } from "./chromium-http"
 import type { SessionWindowQueue } from "../shared/consistency"
 import { challengeHost } from "../engine/challenge"
 import { pageShowsChallenge } from "../shared/challenge-solved"
 import type { FullAccount, ProxyEndpoint } from "../shared/types"
 
 export interface SessionBrowser {
-  open(accountId: string): Promise<void>
+  open(accountId: string, options?: { fresh?: boolean }): Promise<void>
   capture(accountId: string): Promise<void>
   warm(accountId: string, options?: WarmOptions): Promise<WarmResult>
   close(): Promise<void>
@@ -37,20 +38,34 @@ const KEEP_WARM_URL: Partial<Record<string, string>> = { target: "https://www.ta
 export function createSessionBrowser(db: Database, getParent: () => BrowserWindow | null, queue?: SessionWindowQueue): SessionBrowser {
   const windows = new Map<string, BrowserWindow>()
   const unlistens = new Map<string, () => void>()
+  const watchers = new Map<string, ReturnType<typeof setInterval>>()
+  /** Accounts whose stale browser storage was already cleared once in this run. */
+  const cleaned = new Set<string>()
 
   async function closeOne(accountId: string): Promise<void> {
     unlistens.get(accountId)?.()
     unlistens.delete(accountId)
+    const watcher = watchers.get(accountId)
+    if (watcher) clearInterval(watcher)
+    watchers.delete(accountId)
     const current = windows.get(accountId)
     windows.delete(accountId)
     if (current && !current.isDestroyed()) current.destroy()
+    // The window pointed this partition at the account's proxy. Let the HTTP path re-apply its own.
+    forgetProxyBinding(sessionPartition(accountId))
   }
 
-  async function prepare(account: FullAccount, title: string, show: boolean): Promise<{ win: BrowserWindow; ses: Session }> {
+  async function prepare(account: FullAccount, title: string, show: boolean, fresh = false): Promise<{ win: BrowserWindow; ses: Session }> {
     await closeOne(account.id)
     const ses = session.fromPartition(sessionPartition(account.id))
+    if (fresh) {
+      cleaned.add(account.id)
+      await ses.clearStorageData().catch(() => undefined)
+      await ses.clearCache().catch(() => undefined)
+    }
     const proxy = proxyFor(db, account)
     await bindProxy(ses, proxy)
+    forgetProxyBinding(sessionPartition(account.id))
     unlistens.set(account.id, watchProxyLogin(ses, proxy))
     const parent = getParent()
     const win = new BrowserWindow({
@@ -93,9 +108,12 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
   }
 
   return {
-    async open(accountId) {
+    async open(accountId, options) {
       const account = db.readAccount(accountId)
-      const { win } = await prepare(account, `Sign in · ${account.label}`, true)
+      // A profile with no saved session may hold leftovers from earlier blocked page loads. Start it clean once per run, or whenever asked.
+      const fresh = options?.fresh === true || (!account.session && !cleaned.has(account.id))
+      const { win } = await prepare(account, `Sign in · ${account.label}`, true, fresh)
+      watchStoreError(account, win)
       await win.loadURL(storeHome(account.store))
     },
     async capture(accountId) {
@@ -114,6 +132,50 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
     async close() {
       for (const id of [...windows.keys()]) await closeOne(id)
     }
+  }
+
+  /**
+   * Read-only: if the store's own error banner shows in the sign-in window, say what it means and offer the
+   * person's own browser. Nothing on the page is clicked, filled or changed.
+   */
+  function watchStoreError(account: FullAccount, win: BrowserWindow): void {
+    let asked = false
+    const timer = setInterval(() => {
+      if (asked) return
+      if (win.isDestroyed()) {
+        clearInterval(timer)
+        return
+      }
+      void (async () => {
+        const text = String(await win.webContents.executeJavaScript("(document.body && document.body.innerText || '').slice(0, 4000)", false).catch(() => ""))
+        if (asked || win.isDestroyed() || !pageShowsStoreError(account.store, text)) return
+        asked = true
+        const words = signInRejectedMessage(db.getSettings().language === "es" ? "es" : "en")
+        const pick = await dialog.showMessageBox(win, {
+          type: "info",
+          title: words.title,
+          message: words.title,
+          detail: words.detail,
+          buttons: [words.browser, words.fresh, words.keep],
+          defaultId: 0,
+          cancelId: 2
+        })
+        if (pick.response === 0) await shell.openExternal(storeSignInUrl(account.store))
+        if (pick.response === 1) {
+          await closeOne(account.id)
+          await openFresh(account.id)
+        }
+      })().catch(() => undefined)
+    }, 2000)
+    watchers.set(account.id, timer)
+  }
+
+  function openFresh(accountId: string): Promise<void> {
+    const account = db.readAccount(accountId)
+    return prepare(account, `Sign in · ${account.label}`, true, true).then(async ({ win }) => {
+      watchStoreError(account, win)
+      await win.loadURL(storeHome(account.store))
+    })
   }
 
   async function warmAccount(accountId: string, background = false): Promise<WarmResult> {

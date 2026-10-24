@@ -21,6 +21,11 @@ const prepared = new Set<string>()
 const proxyBound = new Map<string, string>()
 const proxyGate = new Map<string, Promise<void>>()
 
+/** A sign-in window changed this partition's proxy. Re-apply the real one before the next request. */
+export function forgetProxyBinding(partition: string): void {
+  proxyBound.delete(partition)
+}
+
 /**
  * Store and monitor HTTP through the Chromium network stack Electron ships.
  * Each account uses persist:account-${id}. A monitor with no account uses an

@@ -166,6 +166,7 @@ export function AccountsPage() {
                 <td>{account.stickyProxyLabel || "—"}</td>
                 <td className="row-actions">
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.openBrowser(account.id)).catch((err) => setError(errorText(err)))}>Sign in</button>
+                  <button type="button" title="Target rejected the window? Sign in with your own browser, then use Session-Sync or Save cookies." onClick={() => void unwrap(window.aio.accounts.openInMyBrowser(account.id)).catch((err) => setError(errorText(err)))}>Open in my browser</button>
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.captureBrowser(account.id)).then(() => reload()).catch((err) => setError(errorText(err)))}>Save cookies</button>
                   <button type="button" onClick={() => setForm({ id: account.id, store: account.store, label: account.label, username: account.username, password: "", session: "", clearSession: false, proxyGroupId: account.proxyGroupId ?? "", clientId: account.clientId || ME_CLIENT_ID })}>Edit</button>
                   <button type="button" className="danger" onClick={() => void remove(account.id)}>Delete</button>

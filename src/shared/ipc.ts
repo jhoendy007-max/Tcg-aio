@@ -61,6 +61,7 @@ export const channels = {
   challengeDismiss: "challenge:dismiss",
   challengeEvent: "challenge:event",
   sessionOpen: "session:open",
+  sessionOpenExternal: "session:open-external",
   sessionCapture: "session:capture",
   sessionWarm: "session:warm",
   schedulesList: "schedules:list",

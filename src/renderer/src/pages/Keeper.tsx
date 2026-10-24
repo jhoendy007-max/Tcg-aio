@@ -80,6 +80,7 @@ export function KeeperPage() {
                 <td>{consistencyText(form.language === "es" ? "es" : "en", account.freshness ?? "missing")}{account.lastWarmAt ? <div className="detail">{new Date(account.lastWarmAt).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit" })}</div> : null}</td>
                 <td className="row-actions">
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.openBrowser(account.id)).catch((err) => setError(errorText(err)))}>Sign in</button>
+                  <button type="button" title="Target rejected the window? Sign in with your own browser, then use Session-Sync or Save cookies." onClick={() => void unwrap(window.aio.accounts.openInMyBrowser(account.id)).catch((err) => setError(errorText(err)))}>Open in my browser</button>
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.captureBrowser(account.id)).then(() => reload()).catch((err) => setError(errorText(err)))}>Save cookies</button>
                   <button type="button" onClick={() => void unwrap(window.aio.accounts.warm(account.id)).then((result) => { setMessage(result.detail); return reload() }).catch((err) => setError(errorText(err)))}>Warm now</button>
                 </td>

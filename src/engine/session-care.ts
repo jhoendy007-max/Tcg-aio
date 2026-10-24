@@ -23,6 +23,38 @@ export function storeHome(store: StoreId): string {
   return HOMES[store]
 }
 
+/** Page to open in the person's own default browser when the in-app window is rejected. */
+export function storeSignInUrl(store: StoreId): string {
+  return store === "target" ? "https://www.target.com/login" : HOMES[store]
+}
+
+/** The store's own error banner on a sign-in page (read-only text check, nothing is clicked or changed). */
+export function pageShowsStoreError(store: StoreId, text: string): boolean {
+  if (store !== "target") return false
+  return /something went wrong on our end/i.test(text)
+}
+
+export function signInRejectedMessage(lang: "en" | "es"): { title: string; detail: string; browser: string; fresh: string; keep: string } {
+  if (lang === "es") {
+    return {
+      title: "Target rechazó esta ventana",
+      detail:
+        "Target mostró \"Something went wrong on our end\". Eso viene de Target, no de tu contraseña. Inicia sesión con tu propio Chrome y usa Session-Sync o Guardar cookies, o empieza de cero con un perfil limpio.",
+      browser: "Abrir en mi navegador",
+      fresh: "Empezar de cero",
+      keep: "Seguir aquí"
+    }
+  }
+  return {
+    title: "Target rejected this window",
+    detail:
+      "Target showed \"Something went wrong on our end\". That comes from Target, not from your password. Sign in with your own Chrome and use Session-Sync or Save cookies, or start over with a clean profile.",
+    browser: "Open in my browser",
+    fresh: "Start fresh",
+    keep: "Keep waiting here"
+  }
+}
+
 export function warmupDue(lastWarmAt: number | null, intervalMin: number, now: number): boolean {
   if (!lastWarmAt) return true
   return now - lastWarmAt >= intervalMin * 60_000
