@@ -222,6 +222,13 @@ export function SettingsPage({ tools, section = "general" }: { tools?: ReactNode
         <Field label="Monitor jitter (%)" hint="Random spread around each monitor wait. 0–40. Blocks (403, 412, 429, 435) also back off.">
           <TextInput type="number" min={0} max={40} value={form.monitorJitterPct} onChange={(event) => setForm({ ...form, monitorJitterPct: Number(event.target.value) })} required />
         </Field>
+        <label className="check span-2">
+          <input type="checkbox" checked={form.rotateProxyOnFailure !== false} onChange={(event) => setForm({ ...form, rotateProxyOnFailure: event.target.checked })} />
+          <span>{form.language === "es" ? "Rotar proxy si una tarea falla por el proxy (conexión, tiempo agotado, 407, bloqueo 403/429). El proxy fallido descansa 5, 10, 20 y luego 30 minutos. Nunca después de enviar el pedido. Cada tarea puede cambiarlo." : "Rotate the proxy when a task fails for a proxy reason (connection, timeout, 407, 403/429 block). The failed proxy rests 5, 10, 20, then 30 minutes. Never after a place-order request. Each task can override this."}</span>
+        </label>
+        <Field label={form.language === "es" ? "Máx. rotaciones de proxy por corrida" : "Max proxy rotations per run"} hint={form.language === "es" ? "1–10. Cuando se agotan, la tarea se detiene con un mensaje claro." : "1–10. When they run out the task stops with a clear message."}>
+          <TextInput type="number" min={1} max={10} value={form.maxProxyRotations ?? 3} onChange={(event) => setForm({ ...form, maxProxyRotations: Number(event.target.value) })} required />
+        </Field>
         <Field label="Challenge timeout (seconds)" hint="How long a person has to solve a store challenge before the task pauses. 30–600.">
           <TextInput type="number" min={30} max={600} value={form.challengeTimeoutSec} onChange={(event) => setForm({ ...form, challengeTimeoutSec: Number(event.target.value) })} required />
         </Field>

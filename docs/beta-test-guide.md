@@ -11,7 +11,7 @@ No build has placed a real order on a live store from the build box. Your live r
 **Start every store with Dry run on.** Only turn Dry run off for a real order once that store's dry run passes.
 
 ## Before you start (5 min)
-1. Install `TCGAIO-Setup-0.2.44.exe` from the v0.2.44-beta release, or let the app auto-update. Sign in.
+1. Install `TCGAIO-Setup-0.2.45.exe` from the v0.2.45-beta release, or let the app auto-update. Sign in.
 2. Go to **Settings → General → Dry run** and turn on **Dry run all**. Every task row now shows a yellow **DRY RUN** badge.
 3. Add a profile (Profiles) and at least one proxy list (Proxies). Use the proxy **Test** button.
 4. **Settings → Discord**: paste your webhook, switch on every event, and press **Test**. You should get one sample post per switched-on event.
@@ -156,3 +156,13 @@ The task log (Logs page → Copy) and the store name. A screenshot of the step r
 - If a task has a proxy group but no proxy can be chosen, Zzz AIO will not open that browser direct. Warm-ups are skipped and Sign in asks first.
 - Limit: the challenge page opened on the phone loads on the phone's own network, not through the task proxy. Use "Open on PC" for a proxied solve.
 - Sign in window: a bar at the top shows the account email and a masked password with Copy buttons. The password is copied through the PC clipboard and cleared after 30 s if it is still there. Nothing is typed into the store page.
+
+## Proxy rotation when a task fails (0.2.45)
+
+- Settings → Advanced has **Rotate proxy on failure** (on by default) and **Max proxy rotations per run** (1–10, default 3). Each task can follow Settings, force On or Off, and set its own max in the task form (Advanced).
+- A run rotates only for proxy reasons: connection refused, timeout, tunnel failure, proxy sign-in 407, an HTTP 403/429/412/435 block, or a store challenge that cannot be handed to a person. Card declined, out of stock, bad login and form errors never rotate.
+- The failed proxy rests 5, then 10, 20 and 30 minutes on repeat failures. The next healthy proxy in the group is chosen in group order. The account's pin moves with it, so HTTP and later browser windows use the same proxy. The pin never moves otherwise.
+- The task log shows `Proxy rotation 1/3: host:port (1 of 3) → host:port (2 of 3)`. Only host and port are shown, never credentials.
+- Once a place-order request has gone out, Zzz AIO does not rotate or retry that checkout, so an order cannot be placed twice. Dry run still rotates, since nothing is ever placed.
+- If the group has no healthy proxy left, the task stops with a message and sends the **Proxy blocked** Discord notice, even when that toggle is off, because a stopped task needs an alert.
+- Limits: a sign-in window that is already open keeps its old proxy until you reopen it. Mid-run rotation after a 407 or repeated block needs at least 2 proxies in the group; a monitor with one proxy keeps its normal backoff. The phone app's task form does not carry the new fields yet (the PC settings apply).

@@ -145,6 +145,8 @@ export function cleanSettings(input: Settings): Settings {
     soundFailure: cleanSound(input.soundFailure, "drop"),
     discordMention: cleanMention(input.discordMention),
     keepWarm: input.keepWarm === true,
+    rotateProxyOnFailure: input.rotateProxyOnFailure !== false,
+    maxProxyRotations: Math.min(10, Math.max(1, Math.round(Number(input.maxProxyRotations ?? 3)) || 3)),
     keepWarmMin: Math.min(120, Math.max(10, Math.round(Number(input.keepWarmMin ?? 25)) || 25)),
     autoUpdateCheck: input.autoUpdateCheck !== false,
     notifyCooldownMin: Math.min(1440, Math.max(0, Math.round(Number(input.notifyCooldownMin ?? 10)) || 0)),

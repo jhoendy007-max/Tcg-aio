@@ -39,7 +39,9 @@ export function clonedTaskInputs(task: PublicTask, accounts: CloneAccount[]): { 
       maxPrice: task.maxPrice ?? null,
       startMode: "manual",
       linkedMonitorId: null,
-      jitterPct: task.jitterPct ?? null
+      jitterPct: task.jitterPct ?? null,
+      rotateProxy: task.rotateProxy ?? null,
+      maxRotations: task.maxRotations ?? null
     })
   }
   return { inputs, skipped }

@@ -169,6 +169,9 @@ export interface ProxyScore {
   blocks: number
   benchedUntil: number
   lastStatus: number | null
+  /** Proxy failures in a row. Each one doubles the cooldown. A good response resets it. */
+  failures?: number
+  lastFailKind?: string
 }
 
 export interface StoreBlockRate {
@@ -273,6 +276,10 @@ export interface TaskRole {
   startMode: StartMode
   linkedMonitorId: string | null
   jitterPct: number | null
+  /** Rotate to the next healthy proxy in the group when a run fails for a proxy reason. null follows Settings. */
+  rotateProxy: boolean | null
+  /** Most rotations in one run. null follows Settings. */
+  maxRotations: number | null
 }
 
 export interface PublicTask {
@@ -308,6 +315,8 @@ export interface PublicTask {
   startMode?: StartMode
   linkedMonitorId?: string | null
   jitterPct?: number | null
+  rotateProxy?: boolean | null
+  maxRotations?: number | null
   /** Owner of this task. A checkout uses the account's client. */
   clientId?: string
   /** Last shared stock-read time, in milliseconds. */
@@ -348,6 +357,8 @@ export interface TaskInput {
   startMode?: StartMode
   linkedMonitorId?: string | null
   jitterPct?: number | null
+  rotateProxy?: boolean | null
+  maxRotations?: number | null
   clientId?: string
 }
 
@@ -441,6 +452,10 @@ export interface Settings {
   discordMention: string
   /** 0.2.40: keep signed-in store sessions warm between checkouts (Target). Off by default. */
   keepWarm: boolean
+  /** 0.2.45: when a run fails for a proxy reason, cool that proxy down and move the task to the next healthy one. */
+  rotateProxyOnFailure: boolean
+  /** Most proxy rotations in one run (1 to 10). */
+  maxProxyRotations: number
   /** Minutes between keep-warm refreshes (jittered ±25%). */
   keepWarmMin: number
   /** Minutes before the same item can send another in-stock alert. */
@@ -555,6 +570,8 @@ export const DEFAULT_SETTINGS: Settings = {
   soundFailure: "drop",
   discordMention: "",
   keepWarm: false,
+  rotateProxyOnFailure: true,
+  maxProxyRotations: 3,
   keepWarmMin: 25,
   notifyCooldownMin: 10,
   autoUpdateCheck: true,
@@ -1178,6 +1195,8 @@ export interface BulkEdit {
   checkoutDelayMs?: number | null
   maxPrice?: number | null
   jitterPct?: number | null
+  rotateProxy?: boolean | null
+  maxRotations?: number | null
   monitorDelayMs?: number | null
   retryDelayMs?: number | null
 }
