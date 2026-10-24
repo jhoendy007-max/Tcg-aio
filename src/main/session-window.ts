@@ -1,9 +1,11 @@
-import { app, BrowserWindow, dialog, session, shell, type Session, type WebContents } from "electron"
+import { app, BrowserWindow, dialog, session, shell, WebContentsView, type Session, type WebContents } from "electron"
 import { chromiumProxyRules } from "../engine/chromium-session"
 import type { Database } from "../engine/database"
 import { applySolvedCookies, challengePageUrl, cookieHeader, splitCookieHeader } from "../engine/challenge"
 import { looksSignedOut, pageShowsStoreError, sessionOrigin, sessionPartition, signInRejectedMessage, storeHome, storeSignInUrl } from "../engine/session-care"
 import { forgetProxyBinding } from "./chromium-http"
+import { proxyForAccountTask } from "../engine/account-proxy"
+import { attachSigninBar, barWindowPreferences, type SigninBar } from "./signin-bar"
 import type { SessionWindowQueue } from "../shared/consistency"
 import { challengeHost } from "../engine/challenge"
 import { pageShowsChallenge } from "../shared/challenge-solved"
@@ -17,6 +19,8 @@ export interface SessionBrowser {
 }
 
 export interface WarmOptions {
+  /** The task asking. Its proxy group decides the proxy, the same one its HTTP path uses. */
+  taskId?: string
   /** 0.2.40 keep-warm: hidden window, one normal page load of the signed-in cart page. */
   background?: boolean
 }
@@ -38,6 +42,7 @@ const KEEP_WARM_URL: Partial<Record<string, string>> = { target: "https://www.ta
 export function createSessionBrowser(db: Database, getParent: () => BrowserWindow | null, queue?: SessionWindowQueue): SessionBrowser {
   const windows = new Map<string, BrowserWindow>()
   const unlistens = new Map<string, () => void>()
+  const bars = new Map<string, SigninBar>()
   const watchers = new Map<string, ReturnType<typeof setInterval>>()
   /** Accounts whose stale browser storage was already cleared once in this run. */
   const cleaned = new Set<string>()
@@ -50,24 +55,42 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
     watchers.delete(accountId)
     const current = windows.get(accountId)
     windows.delete(accountId)
+    bars.get(accountId)?.dispose()
+    bars.delete(accountId)
     if (current && !current.isDestroyed()) current.destroy()
     // The window pointed this partition at the account's proxy. Let the HTTP path re-apply its own.
     forgetProxyBinding(sessionPartition(accountId))
   }
 
-  async function prepare(account: FullAccount, title: string, show: boolean, fresh = false): Promise<{ win: BrowserWindow; ses: Session }> {
+  /** Why a window must not open: its task or account has a proxy group but no proxy could be chosen. */
+  function directBlock(account: FullAccount, taskId?: string): { proxy?: ProxyEndpoint; blocked: string | null } {
+    const resolved = proxyForAccountTask(db, account.id, taskId)
+    if (resolved.directWithGroup) {
+      const name = resolved.groupName ? ` (${resolved.groupName})` : ""
+      return { blocked: `This account's proxy group${name} has no proxy available, so its browser would run direct and show your real IP. ${resolved.notes.join(" ")}`.trim() }
+    }
+    return { proxy: resolved.proxy, blocked: null }
+  }
+
+  async function prepare(
+    account: FullAccount,
+    title: string,
+    show: boolean,
+    options: { fresh?: boolean; taskId?: string; proxy?: ProxyEndpoint; bar?: { lang: "en" | "es" } } = {}
+  ): Promise<{ win: BrowserWindow; ses: Session; page: WebContents }> {
     await closeOne(account.id)
     const ses = session.fromPartition(sessionPartition(account.id))
-    if (fresh) {
+    if (options.fresh) {
       cleaned.add(account.id)
       await ses.clearStorageData().catch(() => undefined)
       await ses.clearCache().catch(() => undefined)
     }
-    const proxy = proxyFor(db, account)
+    const proxy = options.proxy ?? proxyFor(db, account, options.taskId)
     await bindProxy(ses, proxy)
     forgetProxyBinding(sessionPartition(account.id))
     unlistens.set(account.id, watchProxyLogin(ses, proxy))
     const parent = getParent()
+    const bar = options.bar
     const win = new BrowserWindow({
       width: 1100,
       height: 820,
@@ -75,19 +98,29 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
       parent: parent ?? undefined,
       title,
       autoHideMenuBar: true,
-      webPreferences: {
-        session: ses,
-        sandbox: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-        nodeIntegrationInSubFrames: false
-      }
+      webPreferences: bar
+        ? { ...barWindowPreferences(), sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false }
+        : { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false }
     })
     windows.set(account.id, win)
+    let pageContents: WebContents = win.webContents
+    if (bar) {
+      const view = new WebContentsView({
+        webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false }
+      })
+      pageContents = view.webContents
+      // 0.2.44: a trusted bar above the page with the email and a masked password. Copy only, nothing is typed into the store.
+      bars.set(account.id, attachSigninBar(win, view, { label: account.label, username: account.username, password: account.password, lang: bar.lang }))
+      pageContents.on("page-title-updated", (_event, pageTitle) => {
+        if (!win.isDestroyed()) win.setTitle(`${pageTitle} · ${account.label}`)
+      })
+    }
     win.on("closed", () => {
       if (windows.get(account.id) === win) windows.delete(account.id)
+      bars.get(account.id)?.dispose()
+      bars.delete(account.id)
     })
-    win.webContents.setWindowOpenHandler(({ url }) => {
+    pageContents.setWindowOpenHandler(({ url }) => {
       if (!url.startsWith("https:")) return { action: "deny" }
       return {
         action: "allow",
@@ -104,17 +137,28 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
       }
     })
     await seed(ses, account)
-    return { win, ses }
+    return { win, ses, page: pageContents }
   }
 
   return {
     async open(accountId, options) {
       const account = db.readAccount(accountId)
-      // A profile with no saved session may hold leftovers from earlier blocked page loads. Start it clean once per run, or whenever asked.
-      const fresh = options?.fresh === true || (!account.session && !cleaned.has(account.id))
-      const { win } = await prepare(account, `Sign in · ${account.label}`, true, fresh)
-      watchStoreError(account, win)
-      await win.loadURL(storeHome(account.store))
+      const lang = db.getSettings().language === "es" ? "es" : "en"
+      // A task's proxy group with no usable proxy would send this window direct. Ask first, never do it silently.
+      const direct = directBlock(account)
+      if (direct.blocked) {
+        const pick = await dialog.showMessageBox({
+          type: "warning",
+          title: lang === "es" ? "Sin proxy disponible" : "No proxy available",
+          message: lang === "es" ? "Esta ventana saldría sin proxy" : "This window would run without a proxy",
+          detail: direct.blocked,
+          buttons: lang === "es" ? ["Cancelar", "Abrir sin proxy"] : ["Cancel", "Open without proxy"],
+          defaultId: 0,
+          cancelId: 0
+        })
+        if (pick.response !== 1) throw new Error(lang === "es" ? "No se abrió la ventana: el grupo de proxy no tiene proxy disponible." : "The window was not opened: the proxy group has no proxy available.")
+      }
+      await openSignIn(account, options?.fresh === true, direct.blocked ? undefined : direct.proxy, lang)
     },
     async capture(accountId) {
       const account = db.readAccount(accountId)
@@ -124,7 +168,7 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
       db.markSession(account.id, "saved", false)
     },
     async warm(accountId, options) {
-      const run = () => warmAccount(accountId, options?.background === true)
+      const run = () => warmAccount(accountId, options?.background === true, options?.taskId)
       if (!queue) return run()
       queue.setCap(db.getSettings().sessionWindowCap)
       return queue.run(run)
@@ -134,23 +178,33 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
     }
   }
 
+  async function openSignIn(account: FullAccount, fresh: boolean, proxy: ProxyEndpoint | undefined, lang: "en" | "es"): Promise<void> {
+    // A profile with no saved session may hold leftovers from earlier blocked page loads. Start it clean once per run, or whenever asked.
+    const clean = fresh || (!account.session && !cleaned.has(account.id))
+    const { page } = await prepare(account, `Sign in · ${account.label}`, true, { fresh: clean, proxy, bar: { lang } })
+    watchStoreError(account, page, proxy)
+    await page.loadURL(storeHome(account.store)).catch(() => undefined)
+  }
+
   /**
    * Read-only: if the store's own error banner shows in the sign-in window, say what it means and offer the
    * person's own browser. Nothing on the page is clicked, filled or changed.
    */
-  function watchStoreError(account: FullAccount, win: BrowserWindow): void {
+  function watchStoreError(account: FullAccount, page: WebContents, proxy: ProxyEndpoint | undefined): void {
     let asked = false
     const timer = setInterval(() => {
       if (asked) return
-      if (win.isDestroyed()) {
+      const win = windows.get(account.id)
+      if (!win || win.isDestroyed() || page.isDestroyed()) {
         clearInterval(timer)
         return
       }
       void (async () => {
-        const text = String(await win.webContents.executeJavaScript("(document.body && document.body.innerText || '').slice(0, 4000)", false).catch(() => ""))
+        const text = String(await page.executeJavaScript("(document.body && document.body.innerText || '').slice(0, 4000)", false).catch(() => ""))
         if (asked || win.isDestroyed() || !pageShowsStoreError(account.store, text)) return
         asked = true
-        const words = signInRejectedMessage(db.getSettings().language === "es" ? "es" : "en")
+        const lang = db.getSettings().language === "es" ? "es" : "en"
+        const words = signInRejectedMessage(lang)
         const pick = await dialog.showMessageBox(win, {
           type: "info",
           title: words.title,
@@ -162,26 +216,21 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
         })
         if (pick.response === 0) await shell.openExternal(storeSignInUrl(account.store))
         if (pick.response === 1) {
+          const again = db.readAccount(account.id)
           await closeOne(account.id)
-          await openFresh(account.id)
+          await openSignIn(again, true, proxy, lang)
         }
       })().catch(() => undefined)
     }, 2000)
     watchers.set(account.id, timer)
   }
 
-  function openFresh(accountId: string): Promise<void> {
-    const account = db.readAccount(accountId)
-    return prepare(account, `Sign in · ${account.label}`, true, true).then(async ({ win }) => {
-      watchStoreError(account, win)
-      await win.loadURL(storeHome(account.store))
-    })
-  }
-
-  async function warmAccount(accountId: string, background = false): Promise<WarmResult> {
+  async function warmAccount(accountId: string, background = false, taskId?: string): Promise<WarmResult> {
       if (windows.has(accountId)) return { expired: false, detail: "The sign-in window is already open." }
       const account = db.readAccount(accountId)
-      const { win } = await prepare(account, `Session warm-up · ${account.label}`, !background)
+      const direct = directBlock(account, taskId)
+      if (direct.blocked) return { expired: false, detail: `${account.label}: not opened. ${direct.blocked}` }
+      const { win } = await prepare(account, `Session warm-up · ${account.label}`, !background, { taskId, proxy: direct.proxy })
       try {
         const homeLoaded = await load(win, background ? KEEP_WARM_URL[account.store] ?? storeHome(account.store) : storeHome(account.store))
         if (homeLoaded && !win.isDestroyed()) {
@@ -212,17 +261,8 @@ export function createSessionBrowser(db: Database, getParent: () => BrowserWindo
   }
 }
 
-function proxyFor(db: Database, account: FullAccount): ProxyEndpoint | undefined {
-  const fromAccount = account.proxyGroupId
-  const fromTask = db.listTasks().find((task) => task.accountId === account.id)?.proxyGroupId ?? null
-  const groupId = fromAccount || fromTask
-  if (!groupId) return undefined
-  try {
-    const group = db.getProxyGroup(groupId)
-    return db.assignProxy(account.id, group.id, group.proxies).proxy
-  } catch {
-    return undefined
-  }
+function proxyFor(db: Database, account: FullAccount, taskId?: string): ProxyEndpoint | undefined {
+  return proxyForAccountTask(db, account.id, taskId).proxy
 }
 
 async function seed(ses: Session, account: FullAccount): Promise<void> {

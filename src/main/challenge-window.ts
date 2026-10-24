@@ -89,7 +89,7 @@ export function createChallengeController(gate: ChallengeGate, getParent: () => 
     const ses = session.fromPartition(partition(view.id))
     await ses.clearStorageData()
     await bindProxy(ses, request.proxy)
-    unlisten = watchProxyLogin(request.proxy)
+    unlisten = watchProxyLogin(ses, request.proxy)
     const origin = `https://${challengeHost(view.store)}/`
     for (const cookie of splitCookieHeader(request.cookie)) {
       try {
@@ -202,12 +202,13 @@ async function bindProxy(ses: Session, proxy: { host: string; port: number; user
   await ses.setProxy({ proxyRules: chromiumProxyRules(proxy) })
 }
 
-function watchProxyLogin(proxy: { username?: string; password?: string } | undefined): () => void {
+/** Answer proxy sign-in only for this window's own session, so another account's window never gets this proxy's login. */
+function watchProxyLogin(ses: Session, proxy: { username?: string; password?: string } | undefined): () => void {
   if (!proxy?.username) return () => undefined
   const username = proxy.username
   const password = proxy.password ?? ""
-  const listener = (event: Electron.Event, _webContents: Electron.WebContents, _details: Electron.AuthenticationResponseDetails, authInfo: Electron.AuthInfo, callback: (username?: string, password?: string) => void) => {
-    if (!authInfo.isProxy) return
+  const listener = (event: Electron.Event, webContents: Electron.WebContents, _details: Electron.AuthenticationResponseDetails, authInfo: Electron.AuthInfo, callback: (username?: string, password?: string) => void) => {
+    if (!authInfo.isProxy || webContents.session !== ses) return
     event.preventDefault()
     callback(username, password)
   }

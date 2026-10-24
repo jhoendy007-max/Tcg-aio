@@ -11,7 +11,7 @@ No build has placed a real order on a live store from the build box. Your live r
 **Start every store with Dry run on.** Only turn Dry run off for a real order once that store's dry run passes.
 
 ## Before you start (5 min)
-1. Install `TCGAIO-Setup-0.2.43.exe` from the v0.2.43-beta release, or let the app auto-update. Sign in.
+1. Install `TCGAIO-Setup-0.2.44.exe` from the v0.2.44-beta release, or let the app auto-update. Sign in.
 2. Go to **Settings → General → Dry run** and turn on **Dry run all**. Every task row now shows a yellow **DRY RUN** badge.
 3. Add a profile (Profiles) and at least one proxy list (Proxies). Use the proxy **Test** button.
 4. **Settings → Discord**: paste your webhook, switch on every event, and press **Test**. You should get one sample post per switched-on event.
@@ -148,3 +148,11 @@ How it behaves:
 
 ## What to send me if something fails
 The task log (Logs page → Copy) and the store name. A screenshot of the step report helps.
+
+## Proxies and account browsers (0.2.44)
+
+- Every account browser (Sign in, session warm-up, keep-warm, the challenge window opened with "Open on PC") uses the same proxy its task uses. The account's own proxy group wins, otherwise the task's group. The account is pinned to one proxy and stays on it.
+- The Accounts page shows "Browser proxy" for each account: bound to a proxy (host:port), binds on first use, direct, would run direct (its proxy group is empty or gone), or conflict (its tasks use different proxy groups).
+- If a task has a proxy group but no proxy can be chosen, Zzz AIO will not open that browser direct. Warm-ups are skipped and Sign in asks first.
+- Limit: the challenge page opened on the phone loads on the phone's own network, not through the task proxy. Use "Open on PC" for a proxied solve.
+- Sign in window: a bar at the top shows the account email and a masked password with Copy buttons. The password is copied through the PC clipboard and cleared after 30 s if it is still there. Nothing is typed into the store page.

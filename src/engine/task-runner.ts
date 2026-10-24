@@ -20,6 +20,7 @@ import { accountsToWarm, storeHome } from "./session-care"
 import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
 import { guardTestMode, isFinalSubmit, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
 import { proxyLabel } from "../shared/proxy"
+import { planAccountProxy } from "./account-proxy"
 import { redact } from "../shared/redact"
 import { isAbortError, sleep } from "./sleep"
 import type { Database } from "./database"
@@ -45,7 +46,7 @@ export class TaskService {
     private readonly challenges?: ChallengeGate,
     private readonly sessionRefresh?: SessionRefresher,
     private readonly readCode?: (store: StoreId) => Promise<string | null>,
-    private readonly warmAccount?: (accountId: string) => Promise<void>
+    private readonly warmAccount?: (accountId: string, taskId?: string) => Promise<void>
   ) {}
 
   isRunning(id: string): boolean {
@@ -199,7 +200,8 @@ export class TaskService {
       let monitorProxies: ProxyEndpoint[] | undefined
       if (account.id) {
         update({ log: line("info", `Using browser profile ${accountPartition(account.id)} for ${account.label}. Session cookies already saved for this account stay in that profile.`) })
-        const preferredGroup = account.proxyGroupId || task.proxyGroupId
+        // 0.2.44: one rule for the HTTP path and every browser window of this account (see account-proxy.ts).
+        const preferredGroup = planAccountProxy(account, this.db.listTasks(), task.id).groupId
         if (task.proxyGroupId && account.proxyGroupId && task.proxyGroupId !== account.proxyGroupId) {
           update({ log: line("warn", "This task's proxy group does not override the account's sticky proxy.") })
         }
@@ -785,7 +787,7 @@ export class TaskService {
         log: line("info", "Warming the account session. Nothing is added to cart.")
       })
       try {
-        await this.warmAccount(accountId)
+        await this.warmAccount(accountId, task.id)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         update({ log: line("warn", `Session warm-up did not finish (${message}). Continuing.`) })

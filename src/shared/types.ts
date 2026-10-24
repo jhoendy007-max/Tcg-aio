@@ -100,6 +100,14 @@ export interface PublicAccount {
   /** Host:port of the proxy pinned to this account. Empty until the first task start. */
   stickyProxyId?: string | null
   stickyProxyLabel?: string | null
+  /** Which proxy this account's browser profile is bound to (host:port only, never credentials). */
+  browserProxy?: {
+    status: "bound" | "pending" | "direct" | "direct-warning" | "conflict"
+    label: string | null
+    groupName: string | null
+    source: "account" | "task" | "none"
+    note: string
+  }
   /** Persistent Chromium partition. One per account, so clients do not share cookies. */
   profilePartition?: string
   /** Owner of this store login. Missing values are the default Me client. */
