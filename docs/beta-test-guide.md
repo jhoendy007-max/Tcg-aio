@@ -11,7 +11,7 @@ No build has placed a real order on a live store from the build box. Your live r
 **Start every store with Dry run on.** Only turn Dry run off for a real order once that store's dry run passes.
 
 ## Before you start (5 min)
-1. Install `TCGAIO-Setup-0.2.42.exe` from the v0.2.42-beta release, or let the app auto-update. Sign in.
+1. Install `TCGAIO-Setup-0.2.43.exe` from the v0.2.43-beta release, or let the app auto-update. Sign in.
 2. Go to **Settings → General → Dry run** and turn on **Dry run all**. Every task row now shows a yellow **DRY RUN** badge.
 3. Add a profile (Profiles) and at least one proxy list (Proxies). Use the proxy **Test** button.
 4. **Settings → Discord**: paste your webhook, switch on every event, and press **Test**. You should get one sample post per switched-on event.

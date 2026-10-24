@@ -42,6 +42,7 @@ const api: AioApi = {
     save: (input) => ipcRenderer.invoke(channels.accountsSave, input),
     delete: (id) => ipcRenderer.invoke(channels.accountsDelete, id),
     openBrowser: (id) => ipcRenderer.invoke(channels.sessionOpen, id),
+    openInMyBrowser: (id) => ipcRenderer.invoke(channels.sessionOpenExternal, id),
     captureBrowser: (id) => ipcRenderer.invoke(channels.sessionCapture, id),
     warm: (id) => ipcRenderer.invoke(channels.sessionWarm, id)
   },

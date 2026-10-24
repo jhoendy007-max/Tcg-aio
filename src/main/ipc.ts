@@ -8,6 +8,7 @@ import { testMonitorOnProxies, testProxiesOnSite } from "../engine/site-test"
 import { cleanSiteUrl } from "../shared/store-sites"
 import { STORE_IDS } from "../shared/types"
 import type { SessionBrowser } from "./session-window"
+import { storeSignInUrl } from "../engine/session-care"
 import type { UpdateController } from "./auto-update"
 import { parseBulkTasks } from "../engine/bulk"
 import { defaultHttp } from "../engine/http"
@@ -142,6 +143,10 @@ export function registerIpc(
   handle(channels.checkoutHealthTasks, () => db.listTaskHealth())
   handle(channels.sessionOpen, async (id: string) => {
     await sessions.open(id)
+    return { opened: true as const }
+  })
+  handle(channels.sessionOpenExternal, async (id: string) => {
+    await shell.openExternal(storeSignInUrl(db.readAccount(id).store))
     return { opened: true as const }
   })
   handle(channels.sessionCapture, async (id: string) => {

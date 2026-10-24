@@ -87,6 +87,8 @@ export interface AioApi {
     save: (input: AccountInput) => Promise<Result<PublicAccount>>
     delete: (id: string) => Promise<Result<{ id: string }>>
     openBrowser: (id: string) => Promise<Result<{ opened: true }>>
+    /** Open the store sign-in page in the person's default browser. */
+    openInMyBrowser: (id: string) => Promise<Result<{ opened: true }>>
     captureBrowser: (id: string) => Promise<Result<{ saved: true }>>
     warm: (id: string) => Promise<Result<{ expired: boolean; detail: string }>>
   }
