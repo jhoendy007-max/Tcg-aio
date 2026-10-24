@@ -71,7 +71,9 @@ export function normalizeRole(task: Partial<PublicTask> | undefined): TaskRole {
     maxPrice: softMoney(task?.maxPrice),
     startMode,
     linkedMonitorId: task?.linkedMonitorId ? String(task.linkedMonitorId).slice(0, 80) : null,
-    jitterPct: softPct(task?.jitterPct)
+    jitterPct: softPct(task?.jitterPct),
+    rotateProxy: typeof task?.rotateProxy === "boolean" ? task.rotateProxy : null,
+    maxRotations: softRotations(task?.maxRotations)
   }
 }
 
@@ -96,12 +98,14 @@ export function cleanRole(input: TaskInput, existing?: PublicTask): TaskRole {
     maxPrice: input.maxPrice === undefined ? moneyOrNull(existing?.maxPrice) : moneyOrNull(input.maxPrice),
     startMode: kind === "monitor" && startMode !== "manual" && startMode !== "scheduled" ? "manual" : startMode,
     linkedMonitorId: input.linkedMonitorId === undefined ? existing?.linkedMonitorId ?? null : input.linkedMonitorId || null,
-    jitterPct: input.jitterPct === undefined ? pctOrNull(existing?.jitterPct) : pctOrNull(input.jitterPct)
+    jitterPct: input.jitterPct === undefined ? pctOrNull(existing?.jitterPct) : pctOrNull(input.jitterPct),
+    rotateProxy: input.rotateProxy === undefined ? (typeof existing?.rotateProxy === "boolean" ? existing.rotateProxy : null) : typeof input.rotateProxy === "boolean" ? input.rotateProxy : null,
+    maxRotations: input.maxRotations === undefined ? softRotations(existing?.maxRotations) : softRotations(input.maxRotations)
   }
 }
 
 /** Fields that can change while a task is running. Store, SKU, account, and payment consent cannot. */
-export const LIVE_KEYS = ["keywords", "priceCap", "webhook", "activeHours", "linkedCheckoutIds", "checkoutDelayMs", "maxPrice", "jitterPct", "linkedMonitorId", "overrides", "group"] as const
+export const LIVE_KEYS = ["keywords", "priceCap", "webhook", "activeHours", "linkedCheckoutIds", "checkoutDelayMs", "maxPrice", "jitterPct", "rotateProxy", "maxRotations", "linkedMonitorId", "overrides", "group"] as const
 
 export function structuralChange(existing: PublicTask, input: TaskInput): string | null {
   const nextKind = kindFrom(input, existing)
@@ -198,6 +202,13 @@ const TEXT = {
     retryDelay: "Error / retry delay (ms)",
     jitter: "Jitter (%)",
     jitterHint: "Blank uses the global jitter. A number here applies only to this task.",
+    rotateProxy: "Rotate proxy on failure",
+    rotateProxyHint: "When a run fails for a proxy reason, rest that proxy and move to the next healthy one in the group. Never after a place-order request.",
+    rotateFollow: "Follow Settings",
+    rotateOn: "On",
+    rotateOff: "Off",
+    maxRotations: "Max rotations per run",
+    rotationState: "Proxy rotation",
     proxy: "Proxy group",
     zip: "ZIP / location",
     priceCap: "Price cap",
@@ -279,6 +290,13 @@ const TEXT = {
     retryDelay: "Espera de error / reintento (ms)",
     jitter: "Variación (%)",
     jitterHint: "Vacío usa la variación global. Un número aquí vale solo para esta tarea.",
+    rotateProxy: "Rotar proxy si falla",
+    rotateProxyHint: "Si una corrida falla por el proxy, ese proxy descansa y la tarea pasa al siguiente sano del grupo. Nunca después de enviar el pedido.",
+    rotateFollow: "Seguir Ajustes",
+    rotateOn: "Activado",
+    rotateOff: "Desactivado",
+    maxRotations: "Máx. rotaciones por corrida",
+    rotationState: "Rotación de proxy",
     proxy: "Grupo de proxy",
     zip: "ZIP / ubicación",
     priceCap: "Tope de precio",
@@ -451,4 +469,10 @@ function minutesInAtlantic(now: number): number {
   const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0")
   const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0")
   return hour * 60 + minute
+}
+
+/** 1 to 10 rotations in one run. Anything else follows the Settings value. */
+export function softRotations(value: unknown): number | null {
+  const n = Math.round(Number(value))
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(n) && n >= 1 && n <= 10 ? n : null
 }

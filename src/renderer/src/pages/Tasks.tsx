@@ -41,6 +41,8 @@ const emptyForm = (): TaskInput => ({
   maxPrice: null,
   startMode: "builtin",
   jitterPct: null,
+  rotateProxy: null,
+  maxRotations: null,
   clientId: ME_CLIENT_ID
 })
 
@@ -653,6 +655,7 @@ function TaskRow({ task, title, expanded, selectMode, picked, globalTest, names,
               <div><span>Account</span><strong>{binding.account}</strong></div>
               <div><span>Proxy</span><strong>{monitor ? names.group.get(task.monitorProxyGroupId ?? "") ?? "Direct connection" : binding.proxy}</strong></div>
               <div><span>Group</span><strong>{task.group || "—"}</strong></div>
+              <div><span>{taskText(lang, "rotationState")}</span><strong>{typeof task.rotateProxy === "boolean" ? (task.rotateProxy ? `${taskText(lang, "rotateOn")} · max ${task.maxRotations ?? "—"}` : taskText(lang, "rotateOff")) : taskText(lang, "rotateFollow")}</strong></div>
               {typeof task.monitorMs === "number" ? <div><span>Last read</span><strong>{task.monitorMs} ms</strong></div> : null}
               <div><span>Client</span><strong>{names.client.get(clientIdOf(task.clientId)) ?? clientText(lang, "me")}</strong></div>
             </div>
@@ -738,6 +741,8 @@ function toInput(task: PublicTask): TaskInput {
     startMode: task.startMode ?? (task.kind === "monitor" ? "manual" : "builtin"),
     linkedMonitorId: task.linkedMonitorId ?? null,
     jitterPct: task.jitterPct ?? null,
+    rotateProxy: task.rotateProxy ?? null,
+    maxRotations: task.maxRotations ?? null,
     clientId: task.clientId || ME_CLIENT_ID,
     overrides: task.overrides
   }
@@ -1013,6 +1018,16 @@ function TaskOverrides({ form, settings, onChange }: { form: TaskInput; settings
         </Field>
         <Field label={taskText(lang, "jitter")} hint={taskText(lang, "jitterHint")}>
           <TextInput type="number" min={0} max={40} value={form.jitterPct ?? ""} placeholder={String(settings.monitorJitterPct)} onChange={(event) => onChange({ ...form, jitterPct: event.target.value === "" ? null : Number(event.target.value) })} />
+        </Field>
+        <Field label={taskText(lang, "rotateProxy")} hint={taskText(lang, "rotateProxyHint")}>
+          <Select value={form.rotateProxy === null || form.rotateProxy === undefined ? "" : form.rotateProxy ? "on" : "off"} onChange={(event) => onChange({ ...form, rotateProxy: event.target.value === "" ? null : event.target.value === "on" })}>
+            <option value="">{taskText(lang, "rotateFollow")} ({settings.rotateProxyOnFailure !== false ? taskText(lang, "rotateOn") : taskText(lang, "rotateOff")})</option>
+            <option value="on">{taskText(lang, "rotateOn")}</option>
+            <option value="off">{taskText(lang, "rotateOff")}</option>
+          </Select>
+        </Field>
+        <Field label={taskText(lang, "maxRotations")}>
+          <TextInput type="number" min={1} max={10} value={form.maxRotations ?? ""} placeholder={String(settings.maxProxyRotations ?? 3)} onChange={(event) => onChange({ ...form, maxRotations: event.target.value === "" ? null : Number(event.target.value) })} />
         </Field>
         <Field label={taskText(lang, "zip")}>
           <TextInput value={form.overrides?.zips ?? ""} placeholder={resolved.zips.value || taskText(lang, "inherit")} onChange={(event) => {

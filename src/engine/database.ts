@@ -19,7 +19,7 @@ import { clientIdOf, clientSummary, feeOwed, ledgerCsv as ledgerCsvText, ME_CLIE
 import { assessCheckout, assessClient, startOfLocalDay, type CardDecline, type CheckoutSubject, type HealthIssue, type HealthReport, type HealthWorld } from "../shared/checkout-health"
 import { activeDropStart } from "./limits"
 import { assertDiscordWebhook } from "./discord"
-import { blockRate as tallyRate, chooseSticky, noteBlock, noteScore, type BlockTally, type StickyPin } from "./proxy-hygiene"
+import { blockRate as tallyRate, chooseSticky, failProxy, noteBlock, noteScore, rotateSticky, type BlockTally, type Rotation, type StickyPin } from "./proxy-hygiene"
 import { checkoutCsv, priceFromDetail, summarize } from "./analytics"
 import { openBackup, sealBackup, type BackupAccount, type BackupDocument, type BackupProfile } from "./backup"
 import { assertLicenseAllowed, bindMachine, createLicenseIdentity, readLicense, signLicense, type IssuedLicense, type LicenseStatus } from "./license"
@@ -647,6 +647,21 @@ export class Database {
     return result.choice
   }
 
+  /**
+   * 0.2.45 failover. Cool the failed proxy down, then move this owner's pin to the next healthy proxy in the group.
+   * The pin only moves here, on failure. Nothing is moved when no healthy proxy is left.
+   */
+  rotateProxy(input: { ownerId: string; groupId: string; proxies: ProxyEndpoint[]; failedId: string; kind: string; exclusive?: boolean; now?: number }): Rotation & { cooldownMs: number } {
+    const hygiene = this.hygiene()
+    const now = input.now ?? Date.now()
+    const failed = failProxy(hygiene.scores, input.failedId, input.kind, now)
+    hygiene.scores = failed.scores
+    const rotation = rotateSticky(input.proxies, hygiene.pins, hygiene.scores, input.ownerId, input.groupId, input.failedId, now, input.exclusive !== false)
+    hygiene.pins = rotation.pins
+    this.flush()
+    return { ...rotation, cooldownMs: failed.cooldownMs }
+  }
+
   findProxy(id: string): ProxyEndpoint | undefined {
     for (const group of this.data.proxyGroups) {
       const proxy = group.proxies.find((item) => item.id === id)
@@ -874,7 +889,9 @@ export class Database {
           activeHours: input.activeHours === undefined ? task.activeHours : input.activeHours,
           checkoutDelayMs: input.checkoutDelayMs === undefined ? task.checkoutDelayMs : input.checkoutDelayMs,
           maxPrice: input.maxPrice === undefined ? task.maxPrice : input.maxPrice,
-          jitterPct: input.jitterPct === undefined ? task.jitterPct : input.jitterPct
+          jitterPct: input.jitterPct === undefined ? task.jitterPct : input.jitterPct,
+          rotateProxy: input.rotateProxy === undefined ? task.rotateProxy : input.rotateProxy,
+          maxRotations: input.maxRotations === undefined ? task.maxRotations : input.maxRotations
         }, task)
         let overrides = task.overrides
         if (input.monitorDelayMs !== undefined || input.retryDelayMs !== undefined) {
@@ -3248,6 +3265,8 @@ function taskInputFromBackup(task: PublicTask): TaskInput {
     startMode: task.startMode,
     linkedMonitorId: task.linkedMonitorId,
     jitterPct: task.jitterPct,
+    rotateProxy: task.rotateProxy,
+    maxRotations: task.maxRotations,
     clientId: task.clientId
   }
 }

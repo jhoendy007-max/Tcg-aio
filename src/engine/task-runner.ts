@@ -1,6 +1,6 @@
 import { applySolvedCookies, challengePageUrl, classifyChallenge, cookieHeader } from "./challenge"
 import type { ChallengeGate } from "./challenge-gate"
-import { isBlockStatus as blockStatus, sendWithRecovery, SINGLE_PROXY_WARNING, type SessionRefresher } from "./block-recovery"
+import { blockRetryBudget, isBlockStatus as blockStatus, sendWithRecovery, SINGLE_PROXY_WARNING, type SessionRefresher } from "./block-recovery"
 import { classifyTraffic, pollQueue } from "./traffic"
 import { plainNetworkError } from "./chromium-session"
 import { adaptiveDelay, detectChanges, MonitorHub, stockCheckLine, type WatchSnapshot } from "./monitor"
@@ -21,6 +21,7 @@ import { activeDropStart, allowCheckout, SpendLimitError } from "./limits"
 import { guardTestMode, isFinalSubmit, STAGE_LABEL, type CheckResult, type TestStage } from "./test-mode"
 import { proxyLabel } from "../shared/proxy"
 import { planAccountProxy } from "./account-proxy"
+import { classifyFailure, failoverPolicy, mayRotate, rotationLine, type FailureVerdict } from "./proxy-failover"
 import { redact } from "../shared/redact"
 import { isAbortError, sleep } from "./sleep"
 import type { Database } from "./database"
@@ -198,6 +199,8 @@ export class TaskService {
       if (!monitorTask && task.accountId) account = this.db.readAccount(task.accountId)
       let monitorProxy: ProxyEndpoint | undefined
       let monitorProxies: ProxyEndpoint[] | undefined
+      /** Who owns the proxy pin for failover: the account, or the task when it has no account. */
+      let rot: { ownerId: string; groupId: string; groupName: string; proxies: ProxyEndpoint[]; exclusive: boolean } | null = null
       if (account.id) {
         update({ log: line("info", `Using browser profile ${accountPartition(account.id)} for ${account.label}. Session cookies already saved for this account stay in that profile.`) })
         // 0.2.44: one rule for the HTTP path and every browser window of this account (see account-proxy.ts).
@@ -210,6 +213,7 @@ export class TaskService {
         }
         if (preferredGroup) {
           const group = this.db.getProxyGroup(preferredGroup)
+          rot = { ownerId: account.id, groupId: group.id, groupName: group.name, proxies: group.proxies, exclusive: true }
           const choice = this.db.assignProxy(account.id, group.id, group.proxies)
           if (choice.stickyOutside && choice.heldProxyId) {
             proxy = this.db.findProxy(choice.heldProxyId)
@@ -235,6 +239,7 @@ export class TaskService {
           const group = this.db.getProxyGroup(task.monitorProxyGroupId)
           monitorProxies = group.proxies
           const choice = this.db.assignProxy(task.id, group.id, group.proxies, Date.now(), false)
+          if (monitorTask) rot = { ownerId: task.id, groupId: group.id, groupName: group.name, proxies: group.proxies, exclusive: false }
           monitorProxy = choice.proxy
           const network = group.network === "residential" ? "residential" : "datacenter"
           const detail = !monitorProxy
@@ -246,6 +251,7 @@ export class TaskService {
           const group = this.db.getProxyGroup(task.proxyGroupId)
           proxies = group.proxies
           const choice = this.db.assignProxy(`${task.id}:checkout`, group.id, group.proxies, Date.now(), false)
+          if (!rot) rot = { ownerId: `${task.id}:checkout`, groupId: group.id, groupName: group.name, proxies: group.proxies, exclusive: false }
           proxy = choice.proxy
           const network = group.network === "residential" ? "residential" : "datacenter"
           const samePool = !task.monitorProxyGroupId || task.monitorProxyGroupId === task.proxyGroupId
@@ -531,6 +537,85 @@ export class TaskService {
           })
           : undefined
       }
+      // 0.2.45 proxy failover. One rotation moves this task (and its account's browser profile) to the next healthy proxy in the group.
+      const policy = failoverPolicy(this.db.getTask(id), loaded)
+      let rotations = 0
+      let orderSent = false
+      let blockStreak = 0
+      let exhaustedMessage = ""
+      const currentProxy = () => ctx.proxy ?? proxy ?? monitorProxy
+      const rotateNow = (verdict: FailureVerdict): "rotated" | "exhausted" => {
+        const failed = currentProxy()
+        if (!rot || !failed) return "exhausted"
+        const moved = this.db.rotateProxy({ ownerId: rot.ownerId, groupId: rot.groupId, proxies: rot.proxies, failedId: failed.id, kind: verdict.kind, exclusive: rot.exclusive })
+        if (moved.exhausted || !moved.proxy) {
+          exhaustedMessage = `No healthy proxy is left in ${rot.groupName}. Every proxy there is resting after a failure (${verdict.why.replace(/\.$/, "")}). Add proxies or try again in ${Math.round(moved.cooldownMs / 60_000)} min.`
+          update({ log: line("error", exhaustedMessage) })
+          return "exhausted"
+        }
+        rotations += 1
+        const next = moved.proxy
+        const before = rot.proxies.findIndex((item) => item.id === failed.id) + 1
+        if (monitorProxy?.id === failed.id) monitorProxy = next
+        if (proxy?.id === failed.id) proxy = next
+        if (account.id) {
+          proxies = [next]
+          monitorProxies = [next]
+        }
+        ctx.proxy = next
+        if (account.id) ctx.proxies = [next]
+        blockStreak = 0
+        update({
+          log: line("warn", rotationLine({ fromLabel: proxyLabel(failed), fromIndex: before || undefined, toLabel: proxyLabel(next), toIndex: moved.index, total: moved.total, n: rotations, max: policy.maxRotations, cooldownMs: moved.cooldownMs, why: verdict.why })),
+          detail: `Rotated to proxy ${moved.index ?? "?"} of ${moved.total} (${rotations}/${policy.maxRotations}).`
+        })
+        return "rotated"
+      }
+      /** "retry": the proxy moved, run again. "exhausted": no healthy proxy is left. "none": leave the failure as it is. */
+      const tryFailover = async (verdict: FailureVerdict): Promise<"retry" | "exhausted" | "none"> => {
+        const decision = mayRotate({ verdict, policy, rotations, orderSent, hasProxy: Boolean(rot && currentProxy()) })
+        if (!decision.ok) {
+          if (decision.reason === "limit") update({ log: line("warn", `Proxy rotation limit reached (${policy.maxRotations} this run). Not rotating again.`) })
+          if (decision.reason === "order-sent") update({ log: line("warn", "A place-order request was already sent, so Zzz AIO will not rotate the proxy or retry this checkout. Check your orders before running it again.") })
+          return "none"
+        }
+        const outcome = rotateNow(verdict)
+        if (outcome === "exhausted") return "exhausted"
+        await sleep(pace.retryDelayMs, controller.signal).catch(() => undefined)
+        return "retry"
+      }
+      /**
+       * Mid-run: a 407, or a run of store blocks that spent the block budget, moves to the next proxy. A monitor that
+       * has no other proxy keeps going on its backoff, as before. A checkout with none left stops.
+       */
+      let warnedNoSpare = false
+      const rotateMidRun = (verdict: FailureVerdict): void => {
+        if (!rot || rot.proxies.length < 2) return
+        if (!mayRotate({ verdict, policy, rotations, orderSent, hasProxy: Boolean(currentProxy()) }).ok) return
+        if (rotateNow(verdict) !== "exhausted") return
+        if (monitorTask) {
+          if (!warnedNoSpare) {
+            warnedNoSpare = true
+            update({ log: line("warn", `${exhaustedMessage} This monitor keeps watching on its backoff.`) })
+          }
+          exhaustedMessage = ""
+          return
+        }
+        controller.abort()
+      }
+      const noteOutcome = (status: number): void => {
+        if (status === 407) {
+          rotateMidRun({ rotate: true, kind: "proxy-auth", why: "The proxy refused its login (407)." })
+          return
+        }
+        if (blockStatus(status)) {
+          blockStreak += 1
+          if (blockStreak >= blockRetryBudget(loaded)) {
+            blockStreak = 0
+            rotateMidRun({ rotate: true, kind: "blocked", why: `The store answered ${status} to this proxy.` })
+          }
+        } else if (status < 400) blockStreak = 0
+      }
       ctx.http = {
         request: async (input) => {
           if (monitorTask && !announcedStock) {
@@ -562,6 +647,7 @@ export class TaskService {
               })
               if (!decision.ok) throw new SpendLimitError(decision.reason)
             }
+            if (!testMode) orderSent = true
             return guarded.request(stamped)
           }
           const recovered = () => sendWithRecovery(ctx, stamped, {
@@ -570,6 +656,7 @@ export class TaskService {
             blocked: (response) => blockStatus(response.status, response)
           })
           const response = await recovered()
+          noteOutcome(response.status)
           if (module.handlesQueue) return response
           const queued = classifyTraffic(response) === "queue"
           const before = this.db.getTask(id).status
@@ -592,8 +679,49 @@ export class TaskService {
           return finished
         }
       }
+      const stopOrExhausted = async (): Promise<boolean> => {
+        if (!exhaustedMessage) return false
+        finish(update, "failed", exhaustedMessage, "error")
+        // "Proxy blocked" is the existing Discord event for a proxy the store or the network will not accept.
+        // A stopped task is worth an alert even if the routine "Proxy blocked" toggle is off, so this one is sent directly.
+        try {
+          const delivered = await this.notify({
+            kind: "blocked",
+            store: task.store,
+            storeName: module.displayName,
+            sku: task.sku,
+            profileName: profileName(),
+            detail: exhaustedMessage,
+            at: Date.now()
+          })
+          update({ log: line("info", delivered ? "Discord notification sent." : "Discord webhook is not set.") })
+        } catch (err) {
+          update({ log: line("warn", `Discord notification failed: ${err instanceof Error ? err.message : String(err)}`) })
+        }
+        return true
+      }
       while (true) {
-        const result = await module.run(ctx)
+        let result: StoreRunResult
+        try {
+          result = await module.run(ctx)
+        } catch (err) {
+          if (exhaustedMessage) {
+            await stopOrExhausted()
+            return
+          }
+          if (controller.signal.aborted || isAbortError(err) || err instanceof SpendLimitError) throw err
+          const step = await tryFailover(classifyFailure({ error: plainNetworkError(err) }))
+          if (step === "retry") continue
+          if (step === "exhausted") {
+            await stopOrExhausted()
+            return
+          }
+          throw err
+        }
+        if (exhaustedMessage) {
+          await stopOrExhausted()
+          return
+        }
         if (controller.signal.aborted || result.outcome === "stopped") {
           finish(update, "stopped", "Stopped", "info")
           return
@@ -612,6 +740,15 @@ export class TaskService {
             continue
           }
           return
+        }
+        // 0.2.45: a failed run, or a store check that cannot be handed to a person here, may be the proxy's fault.
+        if (result.outcome === "failed" || (result.outcome === "paused" && classifyChallenge(result.reason))) {
+          const step = await tryFailover(classifyFailure({ reason: result.reason, canHandoff: false }))
+          if (step === "retry") continue
+          if (step === "exhausted") {
+            await stopOrExhausted()
+            return
+          }
         }
         await this.finishResult(update, result, { id, store: task.store, sku: task.sku, accountId: task.accountId, profileId: task.profileId, quantity: task.quantity, last4: profile.last4, clientId: task.clientId }, module.displayName, profileName())
         return
