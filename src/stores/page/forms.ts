@@ -11,7 +11,7 @@ export interface FormChoice {
 export interface StoreForm {
   action: string
   method: "GET" | "POST"
-  kind: "cart" | "address" | "shipping" | "payment" | "token" | "place"
+  kind: "cart" | "address" | "shipping" | "payment" | "token" | "place" | "remove"
   fields: { name: string; value: string }[]
   choices: FormChoice[]
 }
@@ -131,6 +131,7 @@ export function checkoutBody(input: {
     }
     return { ok: true, fields, shipping: false }
   }
+  if (input.mode === "remove") return { ok: true, fields: baseFields(input.form, false), shipping: false }
   if (input.mode === "address") {
     fillAddress(fields, input.form, input.profile)
     const shipping = applyShipping(fields, input.form)
@@ -195,6 +196,7 @@ function classify(
   const path = pathname(action)
   const cardField = fields.some((field) => isCardSecret(field.name))
   if (method === "POST" && /token/i.test(path) && cardField) return "token"
+  if (method === "POST" && /(?:remove|delete)[-_/]?(?:product|item|line|from[-_]?cart)|cart[-_/]remove|removefromcart/i.test(path) && !/add/i.test(path)) return "remove"
   if (hasAddControl(inner) || /cart-addproduct|add-to-cart|addtocart|\/cart\/add/i.test(path)) return "cart"
   if (method !== "POST") return null
   if (addressCount(fields) >= 2) return "address"

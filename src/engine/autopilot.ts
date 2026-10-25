@@ -1,5 +1,5 @@
 import { keywordsAllow } from "./keywords"
-import { astHour, type RestockHint } from "./monitor"
+import { easternHour, type RestockHint } from "./monitor"
 import { allowCheckout, dayKey, storeLimits } from "./limits"
 import type { CheckoutRecord, PublicAccount, PublicTask, Settings, StoreId, TaskInput, TaskTemplate } from "../shared/types"
 import { isActiveStatus } from "../shared/types"
@@ -119,11 +119,11 @@ export function learnedDue(input: {
   globalCap: number
   priceFor?: (hint: RestockHint) => number | null
 }): { template: TaskTemplate; hint: RestockHint; key: string }[] {
-  const hour = astHour(input.now)
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Puerto_Rico", year: "numeric", month: "2-digit", day: "2-digit" }).format(input.now)
+  const hour = easternHour(input.now)
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(input.now)
   const due: { template: TaskTemplate; hint: RestockHint; key: string }[] = []
   for (const hint of input.hints) {
-    if (hint.samples < 2 || hint.hourAst !== hour) continue
+    if (hint.samples < 2 || hint.hourEt !== hour) continue
     const key = `${hint.store}:${hint.sku}:${day}`
     if (input.fired.includes(key)) continue
     if (input.tasks.some((task) => task.store === hint.store && task.sku === hint.sku && isActiveStatus(task.status))) continue

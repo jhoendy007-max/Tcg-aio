@@ -54,6 +54,8 @@ export interface StoreRunContext {
   /** Set for a test run. The HTTP client also refuses place-order requests. */
   testMode?: boolean
   clearCartAfterTest?: boolean
+  /** A module sets this once it removed the test item it added. A dry run that did not warns the owner. */
+  cartRemoved?: boolean
   mark?: (stage: TestStage, result: CheckResult, detail: string) => void
   checklistText?: () => string
 }

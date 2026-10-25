@@ -1,3 +1,4 @@
+import { expectDryRunReport, recorder } from "./helpers/dry-run"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
@@ -288,10 +289,34 @@ describe("target module", () => {
 
   it("runs payment and never sends place order in test mode", async () => {
     const fake = client((req) => happy(req))
-    const result = await createTargetModule().run(ctx(fake.http, { testMode: true }))
+    const rec = recorder()
+    const result = await createTargetModule().run(ctx(fake.http, { testMode: true, ...rec.part }))
+    expectDryRunReport(rec, result, { stages: ["monitor","cart","address","shipping","payment","place"], cart: "left" })
     expect(result.outcome).toBe("tested")
     expect(fake.calls.some((call) => call.url.includes("payment_instructions"))).toBe(true)
     expect(fake.calls.some((call) => isFinalSubmit("target", call))).toBe(false)
+  })
+})
+
+describe("Dry run cart cleanup (0.2.46)", () => {
+  it("removes the test line when the setting is on and reports it, with no leftover warning", async () => {
+    const fake = client((req) => happy(req))
+    const rec = recorder()
+    const result = await createTargetModule().run(ctx(fake.http, { testMode: true, clearCartAfterTest: true, ...rec.part }))
+    expectDryRunReport(rec, result, { stages: ["monitor", "cart", "address", "shipping", "payment", "place"], cart: "removed" })
+    const removal = fake.calls.filter((call) => call.method === "PUT" && call.url.includes("/cart_items/item-1")).at(-1)
+    expect(JSON.parse(removal?.body ?? "{}").cart_item.quantity).toBe(0)
+    expect(rec.marks.some((mark) => mark.stage === "cart" && mark.result === "pass" && /removed/i.test(mark.detail))).toBe(true)
+  })
+
+  it("says so when the test line could not be removed, and still warns", async () => {
+    let puts = 0
+    const fake = client((req) => req.method === "PUT" && req.url.includes("/cart_items/item-1") && (puts += 1) > 1 ? json(500, "no") : happy(req))
+    const rec = recorder()
+    const result = await createTargetModule().run(ctx(fake.http, { testMode: true, clearCartAfterTest: true, ...rec.part }))
+    expect(result.outcome).toBe("tested")
+    expect(rec.marks.some((mark) => mark.stage === "cart" && mark.result === "fail" && /by hand/i.test(mark.detail))).toBe(true)
+    expect(rec.logs.some((entry) => entry.level === "warn" && /still in your cart/i.test(entry.message))).toBe(true)
   })
 })
 

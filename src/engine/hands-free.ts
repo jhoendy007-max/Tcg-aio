@@ -151,7 +151,7 @@ export class HandsFree {
         storeName: item.hint.store,
         sku: item.hint.sku,
         profileName: "Autopilot",
-        detail: `Learned restock hour ${item.hint.hourAst}:00. Started ${item.template.name}.`
+        detail: `Learned restock hour ${item.hint.hourEt}:00. Started ${item.template.name}.`
       })
     }
   }

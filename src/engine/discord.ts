@@ -115,7 +115,7 @@ export function buildDiscordBody(notice: Notice): { embeds: Array<Record<string,
     lines.push("Open the account browser and sign in again. Zzz AIO does not create a session for you.")
   }
   if (notice.kind === "drop") {
-    lines.push("Times are Atlantic Time (Puerto Rico, UTC−4).")
+    lines.push("Times are Eastern Time.")
   }
   if (notice.kind === "tested") {
     lines.push("DRY RUN: place order was simulated and never sent.")

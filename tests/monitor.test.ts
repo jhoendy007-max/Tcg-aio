@@ -82,7 +82,7 @@ describe("stock changes and restock memory", () => {
     ])
     expect(hints).toHaveLength(1)
     expect(hints[0]?.warmupMin).toBe(15)
-    expect(hints[0]?.hourAst).toBe(9)
+    expect(hints[0]?.hourEt).toBe(9)
     expect(suggestWarmups([{ store: "target", sku: "1", at, price: null, title: "" }])).toEqual([])
     expect(suggestWarmups(undefined)).toEqual([])
   })

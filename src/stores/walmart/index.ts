@@ -187,8 +187,9 @@ async function runWalmart(ctx: StoreRunContext): Promise<StoreRunResult> {
     if (contract.kind !== "ok") return asResult(contract)
     if (ctx.testMode) {
       if (ctx.clearCartAfterTest) {
-        await clearLine(ctx, jar, cart.value, reading)
-        note(ctx, "cart", "pass", "Cleared the test line from the cart.")
+        const cleared = await clearLine(ctx, jar, cart.value, reading)
+        ctx.cartRemoved = cleared
+        note(ctx, "cart", cleared ? "pass" : "fail", cleared ? "Cleared the test line from the cart." : "The test line could not be removed from the Walmart cart. Remove it by hand.")
       }
       return finishTest(ctx)
     }
@@ -459,11 +460,13 @@ async function placeOrder(ctx: StoreRunContext, jar: CookieJar, contractId: stri
   return { kind: "failed", reason: `Checkout failed (${response.value.status}): ${snippet(response.value.body)}` }
 }
 
-async function clearLine(ctx: StoreRunContext, jar: CookieJar, cartId: string, reading: StockReading): Promise<void> {
+async function clearLine(ctx: StoreRunContext, jar: CookieJar, cartId: string, reading: StockReading): Promise<boolean> {
   const response = await gql(ctx, jar, "home", "updateItems", UPDATE_ITEMS_HASH, "mutation", itemVariables(cartId, reading, 0))
-  if (response.kind === "ok" && response.value.status >= 200 && response.value.status < 300) {
+  if (response.kind === "ok" && response.value.status >= 200 && response.value.status < 300 && !/"errors"\s*:\s*\[\s*\{/.test(response.value.body)) {
     ctx.log("info", "Cleared the cart line after checkout.")
+    return true
   }
+  return false
 }
 
 function placeVariables(ctx: StoreRunContext, contractId: string): Record<string, unknown> {

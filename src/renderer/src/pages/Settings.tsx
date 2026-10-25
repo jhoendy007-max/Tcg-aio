@@ -196,7 +196,7 @@ export function SettingsPage({ tools, section = "general" }: { tools?: ReactNode
         </Field>
         <label className="check span-2">
           <input type="checkbox" checked={form.clearCartAfterTest} onChange={(event) => setForm({ ...form, clearCartAfterTest: event.target.checked })} />
-          <span>After a passed test, remove the test line from the Target or Walmart cart. Other stores leave the cart for you.</span>
+          <span>After a passed test, remove the test line from the cart (Target, Walmart, Bandai, TCGplayer and the page stores). Best Buy, Amazon, Pokémon Center and Crunchyroll leave it, and the report says so.</span>
         </label>
         <label className="check span-2">
           <input type="checkbox" checked={form.sessionWarmup} onChange={(event) => setForm({ ...form, sessionWarmup: event.target.checked })} />
@@ -238,7 +238,7 @@ export function SettingsPage({ tools, section = "general" }: { tools?: ReactNode
         <Field label="Block retries" hint="HTTP 429 waits and retries on the same connection. Checkout: HTTP 403, 412, or 435 reloads the account browser on the same sticky proxy. Monitors never use a browser: they move to the next proxy, or wait longer with a single proxy. A challenge page waits for you in the account browser. 1–8.">
           <TextInput type="number" min={1} max={8} value={form.blockRetries} onChange={(event) => setForm({ ...form, blockRetries: Number(event.target.value) })} required />
         </Field>
-        <Field className="span-2" label="Drop windows" hint="Atlantic Time, one range per line, like 09:00-09:20. Scheduled drops are windows too.">
+        <Field className="span-2" label="Drop windows" hint="Eastern Time, one range per line, like 09:00-09:20. Scheduled drops are windows too.">
           <TextInput value={form.dropWindows} onChange={(event) => setForm({ ...form, dropWindows: event.target.value })} placeholder="09:00-09:20" />
         </Field>
         <Field label="Extra monitor ZIPs" hint="Target checks each ZIP. Other stores use the signed-in location.">

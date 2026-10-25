@@ -689,7 +689,7 @@ function DropsPanel({ snap, now, session, onRun, onBack }: {
   return (
     <View style={styles.card}>
       <Text style={styles.h2}>Drops</Text>
-      <Text style={styles.p}>Times are Atlantic Time (Puerto Rico, UTC−4), like 2026-11-13T09:00. Session Keeper warms accounts before the start. The phone is notified.</Text>
+      <Text style={styles.p}>Times are Eastern Time (follows daylight saving), like 2026-11-13T09:00. Session Keeper warms accounts before the start. The phone is notified.</Text>
       {(snap?.schedules ?? []).map((schedule) => (
         <View key={schedule.id} style={styles.card}>
           <Text style={styles.h2}>{schedule.name}</Text>

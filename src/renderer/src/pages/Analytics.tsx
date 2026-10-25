@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { clientIdOf, clientText, type Client } from "../../../shared/clients"
 import type { AnalyticsReport, CheckoutRecord, InventoryReport, ResaleQuote } from "../../../shared/types"
-import { formatAst } from "../../../engine/time"
+import { formatEastern } from "../../../engine/time"
 import { SpeedChart, SpendChart, WinChart } from "../components/charts"
 import { Banner, Field, Select } from "../components/ui"
 import { errorText, unwrap } from "../lib"
@@ -94,7 +94,7 @@ export function AnalyticsPage() {
           <p key={row.store} className="hint">{row.store} · {row.samples} reads · {Math.round(row.blockRate * 100)}% blocked · avg {row.avgMs} ms · p50 {row.p50Ms} ms · p95 {row.p95Ms} ms</p>
         ))}
         {report.restockHints.length === 0 ? <p className="hint">Restock times show up here after the same SKU comes back at least twice in the same hour.</p> : report.restockHints.map((hint) => (
-          <p key={`${hint.store}:${hint.sku}:${hint.hourAst}`} className="hint">{hint.detail}</p>
+          <p key={`${hint.store}:${hint.sku}:${hint.hourEt}`} className="hint">{hint.detail}</p>
         ))}
       </div>
       <div className="chart-grid">
@@ -119,7 +119,7 @@ export function AnalyticsPage() {
             <tbody>
               {report.stockLog.map((row, index) => (
                 <tr key={`${row.at}-${row.sku}-${index}`}>
-                  <td>{formatAst(row.at)}</td>
+                  <td>{formatEastern(row.at)}</td>
                   <td>{row.store}</td>
                   <td className="sku">{row.sku}</td>
                   <td>{row.kind ?? "restock"}{row.title ? ` · ${row.title}` : ""}</td>
@@ -174,7 +174,7 @@ export function AnalyticsPage() {
           <thead><tr><th>When</th><th>{clientText(lang, "filter")}</th><th>Store</th><th>Product</th><th>Price</th><th>Result</th></tr></thead>
           <tbody>
             {recent.length === 0 ? <tr><td colSpan={6} className="empty">History appears after a task finishes.</td></tr> : recent.map((row) => (
-              <tr key={row.id}><td>{formatAst(row.at)}</td><td>{clientName.get(clientIdOf(row.clientId)) ?? clientText(lang, "me")}</td><td>{row.store}</td><td className="sku">{row.sku}</td><td>{row.price === null ? "—" : `$${row.price.toFixed(2)}`}</td><td>{row.outcome}</td></tr>
+              <tr key={row.id}><td>{formatEastern(row.at)}</td><td>{clientName.get(clientIdOf(row.clientId)) ?? clientText(lang, "me")}</td><td>{row.store}</td><td className="sku">{row.sku}</td><td>{row.price === null ? "—" : `$${row.price.toFixed(2)}`}</td><td>{row.outcome}</td></tr>
             ))}
           </tbody>
         </table>

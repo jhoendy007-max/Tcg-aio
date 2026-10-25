@@ -9,18 +9,38 @@ import { Database } from "../src/engine/database"
 import { planDrops, scheduleAction } from "../src/engine/drops"
 import { compareVersions, pickRelease, readReleases } from "../src/engine/releases"
 import { countdown } from "../src/shared/clock"
-import { astDay, formatAst, parseAstLocal, toAstInput } from "../src/engine/time"
+import { easternDay, formatEastern, parseEasternLocal, toEasternInput } from "../src/engine/time"
 import type { CheckoutRecord } from "../src/shared/types"
 
-describe("Atlantic time", () => {
-  it("treats a wall clock as Puerto Rico, UTC-4, with no daylight shift", () => {
-    const morning = parseAstLocal("2026-11-13T09:00")
-    const summer = parseAstLocal("2026-07-13T09:00")
-    expect(new Date(morning).toISOString()).toBe("2026-11-13T13:00:00.000Z")
+describe("Eastern time", () => {
+  it("reads a wall clock as New York time and follows daylight saving", () => {
+    const winter = parseEasternLocal("2026-11-13T09:00")
+    const summer = parseEasternLocal("2026-07-13T09:00")
+    expect(new Date(winter).toISOString()).toBe("2026-11-13T14:00:00.000Z")
     expect(new Date(summer).toISOString()).toBe("2026-07-13T13:00:00.000Z")
-    expect(toAstInput(morning)).toBe("2026-11-13T09:00")
-    expect(astDay(morning - 60_000)).toBe("2026-11-13")
-    expect(formatAst(morning)).toContain("09:00")
+    expect(toEasternInput(winter)).toBe("2026-11-13T09:00")
+    expect(toEasternInput(summer)).toBe("2026-07-13T09:00")
+    expect(easternDay(winter - 60_000)).toBe("2026-11-13")
+    expect(formatEastern(winter)).toContain("09:00")
+    expect(formatEastern(winter)).toContain("EST")
+    expect(formatEastern(summer)).toContain("EDT")
+  })
+
+  it("handles the daylight-saving change days", () => {
+    // 2026-11-01 01:30 happens twice. The first one (EDT) wins.
+    expect(new Date(parseEasternLocal("2026-11-01T01:30")).toISOString()).toBe("2026-11-01T05:30:00.000Z")
+    // 2026-03-08 02:30 does not exist. It lands right after the gap.
+    expect(new Date(parseEasternLocal("2026-03-08T02:30")).toISOString()).toBe("2026-03-08T07:30:00.000Z")
+    // Round trip through the form field never changes the instant.
+    for (const text of ["2026-03-08T01:59", "2026-03-08T03:00", "2026-11-01T00:59", "2026-11-01T02:00", "2026-12-24T18:45"]) {
+      expect(toEasternInput(parseEasternLocal(text))).toBe(text)
+    }
+  })
+
+  it("keeps saved epoch times valid: a drop saved while the label said Atlantic fires at the same instant", () => {
+    const saved = Date.UTC(2026, 10, 13, 13, 0) // what 09:00 "Atlantic" stored
+    expect(toEasternInput(saved)).toBe("2026-11-13T08:00")
+    expect(parseEasternLocal(toEasternInput(saved))).toBe(saved)
   })
 
   it("counts a drop down from an absolute timestamp", () => {
@@ -54,10 +74,10 @@ describe("drop scheduler", () => {
 describe("analytics", () => {
   it("totals wins, spend, and a daily timeline without leaking a password", () => {
     const records: CheckoutRecord[] = [
-      row("success", 49.99, parseAstLocal("2026-11-13T09:00")),
-      row("failure", null, parseAstLocal("2026-11-13T10:00")),
-      row("paused", null, parseAstLocal("2026-11-14T09:00")),
-      row("tested", 10, parseAstLocal("2026-11-14T11:00"))
+      row("success", 49.99, parseEasternLocal("2026-11-13T09:00")),
+      row("failure", null, parseEasternLocal("2026-11-13T10:00")),
+      row("paused", null, parseEasternLocal("2026-11-14T09:00")),
+      row("tested", 10, parseEasternLocal("2026-11-14T11:00"))
     ]
     const report = summarize(records)
     expect(report.success).toBe(1)
@@ -139,7 +159,7 @@ describe("saved desk data", () => {
     expect(copy[0]?.id).not.toBe(task.id)
     expect(copy[0]?.group).toBe("etb")
     const schedule = db.saveSchedule({ name: "Friday", enabled: true, startAt: "2026-11-13T09:00", stopAt: "2026-11-13T09:05", warmupMin: 15, taskIds: [task.id], group: "etb" })
-    expect(schedule.startAt).toBe(parseAstLocal("2026-11-13T09:00"))
+    expect(schedule.startAt).toBe(parseEasternLocal("2026-11-13T09:00"))
     db.recordCheckout({ store: "target", sku: task.sku, product: task.sku, outcome: "success", profileName: "Ada", detail: "Order 1 for $12.00", orderId: "1" })
     expect(db.analytics().spend).toBe(12)
     db.setUpdateToken("replace", "github_pat_secret_value")

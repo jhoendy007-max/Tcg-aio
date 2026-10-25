@@ -1,3 +1,4 @@
+import { expectDryRunReport, recorder } from "./helpers/dry-run"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
@@ -342,7 +343,9 @@ describe("amazon checkout", () => {
 
   it("reads checkout and never submits place order in test mode", async () => {
     const fake = client((req) => happy(req))
-    const result = await createAmazonModule().run(ctx(fake.http, { testMode: true }))
+    const rec = recorder()
+    const result = await createAmazonModule().run(ctx(fake.http, { testMode: true, ...rec.part }))
+    expectDryRunReport(rec, result, { stages: ["monitor","cart","place"], cart: "left" })
     expect(result.outcome).toBe("tested")
     expect(fake.calls.some((call) => call.url.includes("/checkout/entry/"))).toBe(true)
     expect(fake.calls.some((call) => isFinalSubmit("amazon", call))).toBe(false)

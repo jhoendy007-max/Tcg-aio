@@ -277,13 +277,13 @@ function parseWindowLines(text: string): void {
     const line = raw.trim()
     if (!line) continue
     const match = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(line)
-    if (!match) throw new AppError("Drop windows use Atlantic Time like 09:00-09:30, one per line.")
+    if (!match) throw new AppError("Drop windows use Eastern Time like 09:00-09:30, one per line.")
     const startH = Number(match[1])
     const startM = Number(match[2])
     const endH = Number(match[3])
     const endM = Number(match[4])
     if (startH > 23 || endH > 23 || startM > 59 || endM > 59 || startH * 60 + startM === endH * 60 + endM) {
-      throw new AppError("Drop windows use Atlantic Time like 09:00-09:30, one per line.")
+      throw new AppError("Drop windows use Eastern Time like 09:00-09:30, one per line.")
     }
   }
 }

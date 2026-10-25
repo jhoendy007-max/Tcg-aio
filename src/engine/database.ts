@@ -25,7 +25,7 @@ import { openBackup, sealBackup, type BackupAccount, type BackupDocument, type B
 import { assertLicenseAllowed, bindMachine, createLicenseIdentity, readLicense, signLicense, type IssuedLicense, type LicenseStatus } from "./license"
 import { suggestWarmups, summarizeMonitor, type MonitorSample, type RestockEvent } from "./monitor"
 import { vaultFlag } from "./vault"
-import { parseAstLocal } from "./time"
+import { parseEasternLocal } from "./time"
 import { calendarTaskInputs, gameOf, parseCalendar } from "./calendar"
 import { clonedTaskInputs } from "./clone-task"
 import { channelIdsFrom } from "./discord-gate"
@@ -1002,10 +1002,10 @@ export class Database {
   saveSchedule(input: DropScheduleInput): DropSchedule {
     const name = input.name.trim()
     if (!name) throw new AppError("Schedule name is required.")
-    const startAt = typeof input.startAt === "number" ? input.startAt : parseAstLocal(String(input.startAt))
+    const startAt = typeof input.startAt === "number" ? input.startAt : parseEasternLocal(String(input.startAt))
     if (!Number.isFinite(startAt)) throw new AppError("Start time is required.")
     const stopRaw = input.stopAt
-    const stopAt = stopRaw === null || stopRaw === undefined || stopRaw === "" ? null : typeof stopRaw === "number" ? stopRaw : parseAstLocal(String(stopRaw))
+    const stopAt = stopRaw === null || stopRaw === undefined || stopRaw === "" ? null : typeof stopRaw === "number" ? stopRaw : parseEasternLocal(String(stopRaw))
     if (stopAt !== null && (!Number.isFinite(stopAt) || stopAt <= startAt)) throw new AppError("Stop time has to be after the start time.")
     const warmupMin = Math.round(Number(input.warmupMin))
     if (!Number.isInteger(warmupMin) || warmupMin < 0 || warmupMin > 180) throw new AppError("Warm-up has to be from 0 to 180 minutes.")
@@ -1067,7 +1067,7 @@ export class Database {
     if (!game) throw new AppError("The calendar only accepts Pokémon and One Piece.")
     const name = input.name.trim()
     if (!name) throw new AppError("Release name is required.")
-    const startAt = typeof input.startAt === "number" ? input.startAt : parseAstLocal(String(input.startAt))
+    const startAt = typeof input.startAt === "number" ? input.startAt : parseEasternLocal(String(input.startAt))
     if (!Number.isFinite(startAt)) throw new AppError("Start time is required.")
     const store = assertStore(input.store)
     const sku = input.sku.trim()

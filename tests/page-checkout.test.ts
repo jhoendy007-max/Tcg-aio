@@ -1,3 +1,4 @@
+import { expectDryRunReport, recorder } from "./helpers/dry-run"
 import { describe, expect, it } from "vitest"
 import { classifyChallenge } from "../src/engine/challenge"
 import { storeProbe } from "../src/engine/health"
@@ -125,6 +126,76 @@ function scripted(entry: (typeof modules)[number], mode: "saved" | "token" | "no
     return json(404, `unexpected ${url.pathname}`)
   }
 }
+
+function removeForm(host: string): string {
+  return `<form action="https://${host}/cart/remove-product" method="post"><input type="hidden" name="csrf_token" value="csrf-rm"><input type="hidden" name="uuid" value="line-1"><button type="submit">Remove</button></form>`
+}
+
+describe("page store Dry run report and cart cleanup (0.2.46)", () => {
+  it("lists every step, warns that the test item is still in the cart when the setting is off", async () => {
+    for (const entry of modules) {
+      const fake = client(scripted(entry, "saved"))
+      const rec = recorder()
+      const result = await entry.module.run(runCtx(entry.id, entry.sku, fake.http, { testMode: true, ...rec.part }))
+      expectDryRunReport(rec, result, { stages: ["session", "monitor", "cart", "address", "shipping", "payment", "place"], cart: "left" })
+    }
+  })
+
+  it("removes the test item through the store's own remove form when the setting is on", async () => {
+    for (const entry of modules) {
+      const base = scripted(entry, "saved")
+      const fake = client((req) => {
+        const url = new URL(req.url)
+        if (url.pathname === "/cart/remove-product") return json(200, JSON.stringify({ ok: true }))
+        const res = base(req)
+        return url.pathname === "/cart/add" ? { ...res, body: res.body.replace("</body>", `${removeForm(entry.host)}</body>`) } : res
+      })
+      const rec = recorder()
+      const result = await entry.module.run(runCtx(entry.id, entry.sku, fake.http, { testMode: true, clearCartAfterTest: true, ...rec.part }))
+      expectDryRunReport(rec, result, { stages: ["monitor", "cart", "address", "shipping", "payment", "place"], cart: "removed" })
+      const removal = fake.calls.find((call) => call.url.endsWith("/cart/remove-product"))
+      expect(removal?.method, entry.id).toBe("POST")
+      expect(new URLSearchParams(removal?.body ?? "").get("uuid"), entry.id).toBe("line-1")
+      expect(fake.calls.some((call) => isFinalSubmit(entry.id, call)), entry.id).toBe(false)
+    }
+  })
+
+  it("says so, and still warns, when the store shows no remove control or refuses it", async () => {
+    const entry = modules[0]
+    const none = client(scripted(entry, "saved"))
+    const first = recorder()
+    const a = await entry.module.run(runCtx(entry.id, entry.sku, none.http, { testMode: true, clearCartAfterTest: true, ...first.part }))
+    expect(a.outcome).toBe("tested")
+    expect(first.marks.some((mark) => mark.stage === "cart" && mark.result === "skip" && /by hand/i.test(mark.detail))).toBe(true)
+    expect(first.logs.some((entry2) => entry2.level === "warn" && /still in your cart/i.test(entry2.message))).toBe(true)
+
+    const base = scripted(entry, "saved")
+    const refuse = client((req) => {
+      const url = new URL(req.url)
+      if (url.pathname === "/cart/remove-product") return json(500, "no")
+      const res = base(req)
+      return url.pathname === "/cart/add" ? { ...res, body: res.body.replace("</body>", `${removeForm(entry.host)}</body>`) } : res
+    })
+    const second = recorder()
+    const b = await entry.module.run(runCtx(entry.id, entry.sku, refuse.http, { testMode: true, clearCartAfterTest: true, ...second.part }))
+    expect(b.outcome).toBe("tested")
+    expect(second.marks.some((mark) => mark.stage === "cart" && mark.result === "fail" && /by hand/i.test(mark.detail))).toBe(true)
+    expect(second.logs.some((entry2) => entry2.level === "warn" && /still in your cart/i.test(entry2.message))).toBe(true)
+  })
+
+  it("tells the owner exactly which step is theirs when the page has no cart form", async () => {
+    for (const entry of modules) {
+      const fake = client((req) => new URL(req.url).pathname === new URL(entry.sku).pathname ? json(200, page("<p>Add to Cart is drawn by scripts</p>")) : json(404, "x"))
+      const rec = recorder()
+      const result = await entry.module.run(runCtx(entry.id, entry.sku, fake.http, { testMode: true, ...rec.part }))
+      expect(result.outcome, entry.id).toBe("paused")
+      const cart = rec.marks.find((mark) => mark.stage === "cart")
+      expect(cart?.result, entry.id).toBe("skip")
+      expect(cart?.detail, entry.id).toMatch(/Add the item and check out in the account window/)
+      expect(rec.logs.some((item) => item.level === "warn" && /account window/.test(item.message)), entry.id).toBe(true)
+    }
+  })
+})
 
 describe("page store checkout", () => {
   it("walks the store's own forms and stops before place order in test mode", async () => {
