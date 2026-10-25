@@ -1,3 +1,4 @@
+import { expectDryRunReport, recorder } from "./helpers/dry-run"
 import { createDecipheriv, createPrivateKey, constants, generateKeyPairSync, privateDecrypt } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
@@ -410,7 +411,9 @@ describe("pokémon center checkout", () => {
 
   it("tokenizes the card and never sends place order in test mode", async () => {
     const fake = client((req) => happy(req))
-    const result = await createPokemonCenterModule().run(ctx(fake.http, { testMode: true }))
+    const rec = recorder()
+    const result = await createPokemonCenterModule().run(ctx(fake.http, { testMode: true, ...rec.part }))
+    expectDryRunReport(rec, result, { stages: ["monitor","cart","place"], cart: "left" })
     expect(result.outcome).toBe("tested")
     expect(fake.calls.some((call) => call.url.includes("flex.cybersource.com"))).toBe(true)
     expect(fake.calls.some((call) => isFinalSubmit("pokemon-center", call))).toBe(false)

@@ -88,17 +88,27 @@ export function note(ctx: StoreRunContext, stage: TestStage, result: CheckResult
   ctx.mark?.(stage, result, detail)
 }
 
+/** True when the dry run added the test item to a real cart and nothing took it out again. */
+export function testItemLeftInCart(ctx: StoreRunContext): boolean {
+  if (ctx.cartRemoved) return false
+  return /PASS Add to cart/.test(ctx.checklistText?.() ?? "")
+}
+
+export const CART_LEFT_WARNING = "The test item is still in your cart on this store. Remove it by hand before a real run."
+
 export function finishTest(ctx: StoreRunContext): StoreRunResult {
   note(ctx, "place", "skip", "Simulated: this is where the order would be placed. The request was not sent.")
   ctx.log("success", "DRY RUN finished. Every step up to place order ran for real; place order was simulated and never sent.")
-  return { outcome: "tested", detail: dryRunSummary(ctx.checklistText?.() ?? "") }
+  const left = testItemLeftInCart(ctx)
+  if (left) ctx.log("warn", `Heads up: ${CART_LEFT_WARNING}`)
+  return { outcome: "tested", detail: dryRunSummary(ctx.checklistText?.() ?? "", left) }
 }
 
 /** One-line summary for the task status, e.g. "DRY RUN passed · 6 pass · 1 skip · place order simulated". */
-export function dryRunSummary(checklist: string): string {
+export function dryRunSummary(checklist: string, cartLeft = false): string {
   const lines = checklist.split("\n").filter(Boolean)
   const count = (word: string) => lines.filter((line) => line.includes(`${word} `)).length
   const fails = count("FAIL")
   const head = fails ? `DRY RUN found ${fails} problem${fails === 1 ? "" : "s"}` : "DRY RUN passed"
-  return `${head} · ${count("PASS")} pass · ${count("SKIP")} skip · place order simulated, not sent`
+  return `${head} · ${count("PASS")} pass · ${count("SKIP")} skip · place order simulated, not sent${cartLeft ? " · test item left in the cart" : ""}`
 }

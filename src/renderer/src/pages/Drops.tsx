@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { dropOpsText, type DropLang } from "../../../shared/drop-ops"
 import { STORE_IDS, type AnalyticsReport, type CalendarEvent, type DropSchedule, type PublicAccount, type PublicProfile, type PublicTask, type StoreId } from "../../../shared/types"
-import { countdown, formatAst, toAstInput } from "../../../engine/time"
+import { countdown, formatEastern, toEasternInput } from "../../../engine/time"
 import { Banner, Field, Select, TextInput } from "../components/ui"
 import { errorText, unwrap } from "../lib"
 
@@ -80,14 +80,14 @@ export function DropsPage() {
       <header className="page-head">
         <div>
           <h1>Drops</h1>
-          <p>Start and stop tasks at a clock time in Atlantic Time (Puerto Rico, UTC−4). Session Keeper warms the accounts that many minutes before the start. The phone gets a notification.</p>
+          <p>Start and stop tasks at a clock time in Eastern Time (New York / Florida, follows daylight saving). Session Keeper warms the accounts that many minutes before the start. The phone gets a notification.</p>
         </div>
       </header>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {hints.length ? (
         <div className="card">
           <h2>Learned restock times</h2>
-          {hints.map((hint) => <p key={`${hint.store}:${hint.sku}:${hint.hourAst}`} className="hint">{hint.detail}</p>)}
+          {hints.map((hint) => <p key={`${hint.store}:${hint.sku}:${hint.hourEt}`} className="hint">{hint.detail}</p>)}
         </div>
       ) : null}
       <form className="card form-grid" onSubmit={save}>
@@ -98,7 +98,7 @@ export function DropsPage() {
         <Field label={dropOpsText(lang, "rehearsal")} hint={dropOpsText(lang, "rehearsalHint")}>
           <TextInput type="number" min={0} max={180} value={form.rehearsalMin} onChange={(event) => setForm({ ...form, rehearsalMin: Number(event.target.value) })} required />
         </Field>
-        <Field label="Start (Atlantic Time)"><TextInput type="datetime-local" value={form.startAt} onChange={(event) => setForm({ ...form, startAt: event.target.value })} required /></Field>
+        <Field label="Start (Eastern Time)"><TextInput type="datetime-local" value={form.startAt} onChange={(event) => setForm({ ...form, startAt: event.target.value })} required /></Field>
         <Field label="Stop (optional)"><TextInput type="datetime-local" value={form.stopAt} onChange={(event) => setForm({ ...form, stopAt: event.target.value })} /></Field>
         <Field label="Task group" hint="Every task with this group label is included, plus any you check.">
           <TextInput value={form.group} onChange={(event) => setForm({ ...form, group: event.target.value })} placeholder="ETB" />
@@ -119,13 +119,13 @@ export function DropsPage() {
             <div className="proxy-head">
               <div>
                 <h2>{schedule.name}</h2>
-                <span>{formatAst(schedule.startAt)} · {schedule.phase} · {schedule.taskIds.length} tasks{schedule.group ? ` · group ${schedule.group}` : ""}</span>
+                <span>{formatEastern(schedule.startAt)} · {schedule.phase} · {schedule.taskIds.length} tasks{schedule.group ? ` · group ${schedule.group}` : ""}</span>
               </div>
               <div className="countdown">{schedule.phase === "started" || schedule.phase === "stopped" ? schedule.phase : countdown(schedule.startAt, now)}</div>
             </div>
-            <p className="hint">Session Keeper {schedule.warmupMin} min before{schedule.rehearsalMin ? ` · rehearsal ${schedule.rehearsalMin} min before` : ""}{schedule.stopAt ? ` · stops ${formatAst(schedule.stopAt)}` : ""}.</p>
+            <p className="hint">Session Keeper {schedule.warmupMin} min before{schedule.rehearsalMin ? ` · rehearsal ${schedule.rehearsalMin} min before` : ""}{schedule.stopAt ? ` · stops ${formatEastern(schedule.stopAt)}` : ""}.</p>
             <div className="actions">
-              <button type="button" onClick={() => setForm({ id: schedule.id, name: schedule.name, startAt: toAstInput(schedule.startAt), stopAt: schedule.stopAt ? toAstInput(schedule.stopAt) : "", warmupMin: schedule.warmupMin, rehearsalMin: schedule.rehearsalMin, group: schedule.group, taskIds: schedule.taskIds, enabled: schedule.enabled })}>Edit times</button>
+              <button type="button" onClick={() => setForm({ id: schedule.id, name: schedule.name, startAt: toEasternInput(schedule.startAt), stopAt: schedule.stopAt ? toEasternInput(schedule.stopAt) : "", warmupMin: schedule.warmupMin, rehearsalMin: schedule.rehearsalMin, group: schedule.group, taskIds: schedule.taskIds, enabled: schedule.enabled })}>Edit times</button>
               <button type="button" className="danger" onClick={() => void unwrap(window.aio.schedules.delete(schedule.id)).then(() => reload()).catch((err) => setError(errorText(err)))}>Delete</button>
             </div>
           </article>
@@ -229,7 +229,7 @@ function CalendarCard({ lang, events, accounts, profiles, feed, release, onFeed,
           </Select>
         </Field>
         <Field label="Name"><TextInput value={release.name} onChange={(event) => onRelease({ ...release, name: event.target.value })} required /></Field>
-        <Field label="Start (Atlantic Time)"><TextInput type="datetime-local" value={release.startAt} onChange={(event) => onRelease({ ...release, startAt: event.target.value })} required /></Field>
+        <Field label="Start (Eastern Time)"><TextInput type="datetime-local" value={release.startAt} onChange={(event) => onRelease({ ...release, startAt: event.target.value })} required /></Field>
         <Field label="Store">
           <Select value={release.store} onChange={(event) => onRelease({ ...release, store: event.target.value as StoreId })}>
             {STORE_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
@@ -257,7 +257,7 @@ function CalendarCard({ lang, events, accounts, profiles, feed, release, onFeed,
         return (
           <article key={item.id} className="stack">
             <h2>{item.name}</h2>
-            <p className="hint">{item.game === "pokemon" ? t("pokemon") : t("onepiece")} · {item.store} · {item.sku} · {formatAst(item.startAt)}</p>
+            <p className="hint">{item.game === "pokemon" ? t("pokemon") : t("onepiece")} · {item.store} · {item.sku} · {formatEastern(item.startAt)}</p>
             <div className="choices">
               {matches.map((account) => (
                 <label key={account.id} className="check">

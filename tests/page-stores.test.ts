@@ -97,7 +97,7 @@ describe("product page parsers", () => {
   it("reads a product URL and a bare id", () => {
     expect(parsePageTarget(GAMESTOP, modules[0].sku)?.sku).toBe("436435")
     expect(parsePageTarget(GAMESTOP, "436435")?.url).toBe("https://www.gamestop.com/products/436435.html")
-    expect(parsePageTarget(BARNES_NOBLE, "9781465481234")?.url).toBe("https://www.barnesandnoble.com/w/9781465481234")
+    expect(parsePageTarget(BARNES_NOBLE, "9781465481234")?.url).toBe("https://www.barnesandnoble.com/w/?ean=9781465481234")
     expect(parsePageTarget(COSTCO, "https://www.costco.com/.product.100000001.html")?.sku).toBe("100000001")
     expect(parsePageTarget(SAMS, "980000001")?.url).toBe("https://www.samsclub.com/ip/980000001")
     expect(parsePageTarget(GAMESTOP, "https://example.com/products/1/436435.html")).toBeNull()

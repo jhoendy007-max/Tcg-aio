@@ -1,5 +1,5 @@
 import { parseDiscordContent, storeFromName } from "./restock-parse"
-import { parseAstLocal } from "./time"
+import { parseEasternLocal } from "./time"
 import type { CalendarDraft, CalendarGame, StoreId, TaskInput } from "../shared/types"
 
 export type { CalendarDraft }
@@ -136,7 +136,7 @@ function readStart(value: unknown): number | null {
   const text = value.trim()
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) {
     try {
-      return parseAstLocal(text)
+      return parseEasternLocal(text)
     } catch {
       return null
     }
@@ -152,7 +152,7 @@ function readIcsStart(value: string): number | null {
   const local = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(stamp)
   if (local) {
     try {
-      return parseAstLocal(`${local[1]}-${local[2]}-${local[3]}T${local[4]}:${local[5]}`)
+      return parseEasternLocal(`${local[1]}-${local[2]}-${local[3]}T${local[4]}:${local[5]}`)
     } catch {
       return null
     }
@@ -160,7 +160,7 @@ function readIcsStart(value: string): number | null {
   const day = /^(\d{4})(\d{2})(\d{2})$/.exec(stamp)
   if (!day) return null
   try {
-    return parseAstLocal(`${day[1]}-${day[2]}-${day[3]}T09:00`)
+    return parseEasternLocal(`${day[1]}-${day[2]}-${day[3]}T09:00`)
   } catch {
     return null
   }

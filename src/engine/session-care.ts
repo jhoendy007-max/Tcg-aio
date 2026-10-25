@@ -17,7 +17,7 @@ const HOMES: Record<StoreId, string> = {
   tcgplayer: "https://www.tcgplayer.com/"
 }
 
-const LOGIN_URL = /\/(?:login|signin|sign-in|ap\/signin|identity\/signin|account\/login)(?:[/?#]|$)/i
+const LOGIN_URL = /\/(?:login|signin|sign-in|ap\/signin|identity\/signin|account\/login|LogonForm)(?:[/?#]|$)|^https:\/\/signin\.costco\.com\/|^https:\/\/shopify\.com\/authentication\//i
 
 export function storeHome(store: StoreId): string {
   return HOMES[store]
@@ -25,7 +25,12 @@ export function storeHome(store: StoreId): string {
 
 /** Page to open in the person's own default browser when the in-app window is rejected. */
 export function storeSignInUrl(store: StoreId): string {
-  return store === "target" ? "https://www.target.com/login" : HOMES[store]
+  if (store === "target") return "https://www.target.com/login"
+  // Checked 2026-10: these three go to the store's own sign-in. GameStop stays on its home page.
+  if (store === "costco") return "https://www.costco.com/LogonForm"
+  if (store === "sams") return "https://www.samsclub.com/login"
+  if (store === "barnes-noble") return "https://www.barnesandnoble.com/account/login"
+  return HOMES[store]
 }
 
 /** The store's own error banner on a sign-in page (read-only text check, nothing is clicked or changed). */

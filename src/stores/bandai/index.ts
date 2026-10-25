@@ -175,7 +175,11 @@ async function runBandai(ctx: StoreRunContext): Promise<StoreRunResult> {
     note(ctx, "shipping", "pass", `Checkout ${started.value.checkoutSn} is ready.`)
     note(ctx, "payment", "skip", "Global-e collects the card on the order page. The card number was not sent.")
     if (ctx.testMode) {
-      if (ctx.clearCartAfterTest) await clearLines(ctx, jar, started.value.lines, page)
+      if (ctx.clearCartAfterTest) {
+        const cleared = await clearLines(ctx, jar, started.value.lines, page)
+        ctx.cartRemoved = cleared
+        note(ctx, "cart", cleared ? "pass" : "fail", cleared ? "Removed the test line from the cart." : "The test line could not be removed from the Premium Bandai cart. Remove it by hand.")
+      }
       return finishTest(ctx)
     }
     return pause(`${PAYMENT_PAUSE} Checkout ${started.value.checkoutSn}.`)
@@ -258,16 +262,17 @@ async function startCheckout(ctx: StoreRunContext, jar: CookieJar): Promise<Step
   return { kind: "ok", value: { checkoutSn, lines: cart.lines } }
 }
 
-async function clearLines(ctx: StoreRunContext, jar: CookieJar, lines: CartReading["lines"], page: string): Promise<void> {
+async function clearLines(ctx: StoreRunContext, jar: CookieJar, lines: CartReading["lines"], page: string): Promise<boolean> {
   const ids = lines.map((line) => line.cartItemSn).filter(Boolean)
-  if (!ids.length) return
+  if (!ids.length) return false
   const params = new URLSearchParams()
   for (const id of ids) params.append("cartLineItemSns", id)
-  await store(ctx, jar, {
+  const response = await store(ctx, jar, {
     method: "DELETE",
     url: `${ORIGIN}/api/cart/removeCartLineItems?${params.toString()}`,
     headers: apiHeaders(jar, page, true)
   })
+  return response.kind === "ok" && response.value.status >= 200 && response.value.status < 300
 }
 
 async function store(ctx: StoreRunContext, jar: CookieJar, request: HttpRequest): Promise<Step<HttpResponse>> {

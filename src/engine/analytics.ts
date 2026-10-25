@@ -1,4 +1,4 @@
-import { astDay } from "./time"
+import { easternDay } from "./time"
 import { storeName } from "../shared/stores"
 import type { AnalyticsReport, CheckoutOutcome, CheckoutRecord, ProductAnalytics, StoreAnalytics, StoreId, TimelinePoint } from "../shared/types"
 
@@ -36,7 +36,7 @@ export function summarize(records: CheckoutRecord[] | null | undefined): Analyti
     if (record.outcome === "success" && record.price !== null) product.spend += record.price
     byProduct.set(key, product)
     if (record.outcome !== "tested") {
-      const day = astDay(record.at)
+      const day = easternDay(record.at)
       const point = days.get(day) ?? { day, success: 0, failure: 0, paused: 0 }
       if (record.outcome === "success") point.success += 1
       else if (record.outcome === "failure") point.failure += 1

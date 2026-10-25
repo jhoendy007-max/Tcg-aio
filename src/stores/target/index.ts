@@ -199,7 +199,8 @@ async function checkoutFrom(ctx: StoreRunContext, jar: CookieJar, key: string, t
   if (ctx.testMode) {
     if (ctx.clearCartAfterTest && cart.itemId) {
       const cleared = await clearTargetLine(ctx, jar, key, tcin, cart.itemId)
-      note(ctx, "cart", cleared ? "pass" : "fail", cleared ? "Removed the test line from the cart." : "The test line could not be removed.")
+      ctx.cartRemoved = cleared
+      note(ctx, "cart", cleared ? "pass" : "fail", cleared ? "Removed the test line from the cart." : "The test line could not be removed. Remove it from the Target cart by hand.")
     } else if (ctx.clearCartAfterTest) {
       note(ctx, "cart", "skip", "Target did not return a cart line id, so the cart was left as-is.")
     }

@@ -8,7 +8,7 @@ import { applyBlockRates } from "../src/engine/health"
 import { backoffDelay, isBlockStatus, jitterDelay, PoliteLimiter, STORE_GAP_MS } from "../src/engine/polite"
 import { healthScore } from "../src/shared/consistency"
 import { BENCH_AFTER, chooseSticky, noteBlock, noteScore } from "../src/engine/proxy-hygiene"
-import { looksSignedOut, storeHome, warmupDue } from "../src/engine/session-care"
+import { looksSignedOut, storeHome, storeSignInUrl, warmupDue } from "../src/engine/session-care"
 import type { ProxyEndpoint, StoreId } from "../src/shared/types"
 
 const proxies: ProxyEndpoint[] = [
@@ -110,6 +110,14 @@ describe("session care", () => {
     expect(looksSignedOut("https://www.target.com/account/login", "accessToken=1")).toBe(true)
     expect(looksSignedOut("https://www.walmart.com/", "")).toBe(true)
     expect(looksSignedOut("https://www.bestbuy.com/", "at=token")).toBe(false)
+    // Costco signs in on its own B2C host, Barnes & Noble on a Shopify page, Sam's on /login (0.2.46).
+    expect(looksSignedOut("https://signin.costco.com/e0714dd4/B2C_1A_SSO_WCS_signup_signin_214/oauth2/v2.0/authorize?x=1", "a=1")).toBe(true)
+    expect(looksSignedOut("https://www.costco.com/LogonForm", "a=1")).toBe(true)
+    expect(looksSignedOut("https://shopify.com/authentication/67454337265/oauth/authorize?client_id=x", "a=1")).toBe(true)
+    expect(looksSignedOut("https://www.samsclub.com/login", "a=1")).toBe(true)
+    expect(looksSignedOut("https://www.costco.com/p/-/mega/4000200441", "a=1")).toBe(false)
+    expect(storeSignInUrl("costco")).toBe("https://www.costco.com/LogonForm")
+    expect(storeSignInUrl("gamestop")).toBe("https://www.gamestop.com/")
     expect(warmupDue(null, 30, 1_000)).toBe(true)
     expect(warmupDue(1_000, 30, 1_000 + 29 * 60_000)).toBe(false)
     expect(warmupDue(1_000, 30, 1_000 + 30 * 60_000)).toBe(true)

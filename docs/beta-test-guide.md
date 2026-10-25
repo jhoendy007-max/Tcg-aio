@@ -1,4 +1,4 @@
-# Zzz AIO v0.2.40-beta: manual test guide
+# Zzz AIO v0.2.46-beta: manual test guide
 
 This is a hands-on beta test of every module. Status meanings:
 
@@ -11,7 +11,7 @@ No build has placed a real order on a live store from the build box. Your live r
 **Start every store with Dry run on.** Only turn Dry run off for a real order once that store's dry run passes.
 
 ## Before you start (5 min)
-1. Install `TCGAIO-Setup-0.2.45.exe` from the v0.2.45-beta release, or let the app auto-update. Sign in.
+1. Install `TCGAIO-Setup-0.2.46.exe` from the v0.2.46-beta release, or let the app auto-update. Sign in.
 2. Go to **Settings → General → Dry run** and turn on **Dry run all**. Every task row now shows a yellow **DRY RUN** badge.
 3. Add a profile (Profiles) and at least one proxy list (Proxies). Use the proxy **Test** button.
 4. **Settings → Discord**: paste your webhook, switch on every event, and press **Test**. You should get one sample post per switched-on event.
@@ -32,7 +32,7 @@ No build has placed a real order on a live store from the build box. Your live r
   - It plays the **success** sound.
   - Discord posts it under the "Dry run results" switch with the title **DRY RUN · Store finished**.
   - Real success notices are never sent for a dry run.
-- **Known issues:** some stores can't clear a cart line through their API, so you may see one item left in the cart. Remove it by hand.
+- **Known issues:** Best Buy, Pokémon Center, Amazon and Crunchyroll cannot clear a cart line yet, so the test item stays in the cart. The log and the Dry run summary say so. Remove it by hand.
 
 ## Per store
 
@@ -43,20 +43,28 @@ For every store, the steps are the same:
 
 Success looks like the Dry run section above. If the step report shows a FAIL, it tells you which step failed and why.
 
-| Store | Status | Notes / known issues |
-|---|---|---|
-| Target | Ready | Full API flow. A challenge pauses into the **Challenge needs you** handoff (see below). Resumes at the step it paused. |
-| Walmart | Ready | A PerimeterX press-and-hold pauses into the handoff. Resumes by re-running the flow. Saved-card CVV may be asked. |
-| Best Buy | Ready | Queue/"please wait" drops are watched. A verification code may be needed; set up IMAP. |
-| Pokémon Center | Ready | Queue pages pause until you pass them. |
-| Amazon | Ready | Uses its own robot check (no PerimeterX). A captcha or 2FA pauses. Paste a fresh session if asked. |
-| Crunchyroll | Ready | |
-| Bandai (p-bandai) | Ready | |
-| TCGplayer | Ready | |
-| GameStop | Partly | Generic page flow; no dedicated store tests yet. Run a dry run first and send me the log if a step fails. |
-| Barnes & Noble | Partly | Generic page flow; no dedicated store tests yet. |
-| Costco | Partly | Generic page flow; uses the form already on the store page. Membership sign-in needed. |
-| Sam's Club | Partly | Generic page flow. |
+### Readiness table (0.2.46 audit)
+
+Every row below was run end to end in Dry run against recorded or mocked store responses, and the test checks that the place-order request is never sent and that the per-step report is complete. "Needs live" is what no automated test can prove, because it needs your real account on the real store.
+
+| Store | Status | Monitor | Login / session | Cart | Checkout dry run | Test item after a dry run | Needs live (your account) |
+|---|---|---|---|---|---|---|---|
+| Target | Ready | Product API: price, stock, image | Password or pasted session, plus Session-Sync / Save cookies | API add | Address, shipping, payment, then place simulated | **Removed** (cart line deleted) | Real sign-in, saved card, real challenge handoff |
+| Walmart | Ready | Product page data: price, stock, seller, image | Account browser sign-in; Session-Sync / Save cookies | GraphQL add | Address, shipping, payment, then place simulated | **Removed**, or a clear warning if Walmart refuses | Real sign-in, saved card CVV, real PerimeterX hold |
+| Best Buy | Ready | Product page and queue watching | Account browser sign-in; Session-Sync / Save cookies | API add | Shipping, payment, then place simulated | **Left in the cart** (warning in the log and the summary) | Real sign-in, emailed verification code (IMAP) |
+| Pokémon Center | Ready | Product page, queue pages pause | Account browser sign-in; Session-Sync / Save cookies | API add | Shipping, payment, then place simulated | **Left in the cart** (warning) | Real queue, real sign-in |
+| Amazon | Ready | Product page offers | Account browser sign-in; Session-Sync / Save cookies | Add form | Address, payment, then place simulated | **Left in the cart** (warning) | Real sign-in, 2FA, robot check |
+| Crunchyroll | Ready | Store product page | Account browser sign-in; Session-Sync / Save cookies | API add | Checkout steps, then place simulated | **Left in the cart** (warning) | Real sign-in |
+| Bandai (p-bandai) | Ready | Product page: stock and price | Account browser sign-in; Session-Sync / Save cookies | API add | Checkout steps, then place simulated | **Removed**, or a warning if the removal fails | Real sign-in, the payment page of Bandai's checkout partner |
+| TCGplayer | Ready | Product page and listings | Account browser sign-in; Session-Sync / Save cookies | Forms on the page | Address, shipping, payment, then place simulated | **Removed** through the page's remove control; otherwise a warning | Real sign-in, saved payment |
+| GameStop | Partly | Reads the page's price data (JSON-LD), purchase limit and "Currently Unavailable" text | Account browser sign-in; Session-Sync / Save cookies. Sign-in redirects are recognised | Forms on the page, quantity capped to the purchase limit | Same page flow, with the full report | **Removed** if the page shows a remove control; otherwise a warning | **Everything on the live site.** GameStop answers this build box with a Cloudflare check, so the page structure is unverified live. Any check pauses for you |
+| Costco | Partly | Real product pages: price, item number, image, in/out of stock from the page. Warehouse inventory is not read (Costco serves it from a separate API that Zzz AIO does not use) | Account browser sign-in on Costco's own sign-in page; Session-Sync / Save cookies | Page forms if present, otherwise the status says you add the item in the account window | Same page flow; if the page has no cart form the step is marked **needs you** | As GameStop | Membership sign-in, the real cart and checkout |
+| Sam's Club | Partly | Real product pages: price, ship-to-home stock, pickup-only detection, limit, image | Account browser sign-in; Session-Sync / Save cookies. The robot check page pauses for you | Page forms if present, otherwise **needs you** (Sam's builds the cart with scripts) | Same page flow | As GameStop | Membership sign-in, the real cart and checkout |
+| Barnes & Noble | Partly | Real product pages: price, edition by ISBN, in/out of stock, image. An ISBN opens the right edition | Account browser sign-in (Shopify sign-in is recognised); Session-Sync / Save cookies | Page forms if present, otherwise **needs you** (checkout moved to Shopify) | Same page flow | As GameStop | Real sign-in, the real cart and Shopify checkout |
+
+**What "needs you" means:** the monitor, price, stock and session part is done by Zzz AIO. The step that cannot be driven safely is shown in the task status in plain words (for example "Add the item and check out in the account window"), and the task pauses instead of failing.
+
+**Cart cleanup:** turn on **Settings → After a passed test, remove the test line from the cart** (off by default). With Dry run and that setting on, Zzz AIO removes the test item wherever the store allows it (Target, Walmart, Bandai, and the page stores when a remove control is on the page). Where it cannot, or when the setting is off, the log shows a "Heads up" line and the Dry run summary ends with "test item left in the cart". Remove that item by hand before a real run.
 
 **Every store:** a bot-check page pauses the task for a person. It never solves the check or tries to get around it. The integration test checks this for every store.
 
@@ -166,3 +174,9 @@ The task log (Logs page → Copy) and the store name. A screenshot of the step r
 - Once a place-order request has gone out, Zzz AIO does not rotate or retry that checkout, so an order cannot be placed twice. Dry run still rotates, since nothing is ever placed.
 - If the group has no healthy proxy left, the task stops with a message and sends the **Proxy blocked** Discord notice, even when that toggle is off, because a stopped task needs an alert.
 - Limits: a sign-in window that is already open keeps its old proxy until you reopen it. Mid-run rotation after a 407 or repeated block needs at least 2 proxies in the group; a monitor with one proxy keeps its normal backoff. The phone app's task form does not carry the new fields yet (the PC settings apply).
+
+## Eastern Time, cart warning and page stores (0.2.46)
+- **Eastern Time:** Drops (start and stop), Analytics and the phone app now show **Eastern Time** (New York / Florida, follows daylight saving). Saved drop times are stored as exact moments, so nothing you saved changed or moved. Recurring drop-window text such as `09:00-17:00` (Settings and task hours) keeps its digits and now means Eastern wall-clock time. Until 1 November 2026 Eastern and the old Atlantic setting are the same clock; after that, Eastern is one hour behind Atlantic, so re-check any window you want to line up with a Puerto Rico hour.
+- **Dry run cart warning:** every store now ends the dry run with a clear statement about the test item (removed, or left in the cart).
+- **GameStop, Costco, Sam's Club, Barnes & Noble:** product pages are read from the store's own structured data (price, item number, image, limit, ship-to-home stock). Sam's Club no longer reports in stock because of an Add to cart button elsewhere on the page. The sign-in pages of Costco, Sam's Club and Barnes & Noble are recognised, so an expired session is flagged instead of saved as signed in.
+- **Release signing:** the old public `tcgaio-release-keystore` build artifacts were deleted. Builds sign from the repository secrets, with the same certificate as before.

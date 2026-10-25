@@ -1,3 +1,4 @@
+import { expectDryRunReport, recorder } from "./helpers/dry-run"
 import { describe, expect, it } from "vitest"
 import { classifyChallenge } from "../src/engine/challenge"
 import type { HttpClient, HttpRequest, HttpResponse } from "../src/engine/http"
@@ -162,8 +163,9 @@ describe("tcgplayer direct", () => {
 
   it("checks out a Direct listing from the www.tcgplayer.com form and stops before place order", async () => {
     const fake = client((req) => tcgCheckout(req))
-    const result = await createTcgplayerModule().run(ctx(fake.http, { testMode: true }))
-    expect(result.outcome).toBe("tested")
+    const rec = recorder()
+    const result = await createTcgplayerModule().run(ctx(fake.http, { testMode: true, ...rec.part }))
+    expectDryRunReport(rec, result, { stages: ["monitor", "cart", "address", "shipping", "payment", "place"], cart: "left" })
     expect(fake.calls.some((call) => isFinalSubmit("tcgplayer", call))).toBe(false)
     expect(fake.calls.some((call) => call.url.includes("/checkout/place-order"))).toBe(false)
     const shopPosts = fake.calls.filter((call) => call.method === "POST" && new URL(call.url).hostname === "www.tcgplayer.com")

@@ -12,14 +12,20 @@ export interface PageSpec {
   bare: RegExp
   pathId: RegExp
   canonical: (id: string) => string
+  /** What the owner does when this store's cart or checkout page cannot be driven from here. */
+  ownerStep: string
 }
 
 export interface PageTarget {
   sku: string
   url: string
+  /** A specific edition or format asked for (Barnes & Noble ?ean=). */
+  variant?: string
 }
 
 export type PageAvailability = "IN_STOCK" | "PRE_ORDER" | "UNAVAILABLE"
+
+export type PageFulfillment = "ship" | "pickup" | "unknown"
 
 export interface PageReading {
   inStock: boolean
@@ -30,6 +36,12 @@ export interface PageReading {
   reason: string
   seller: string
   imageUrl?: string
+  /** How the page says it can reach the buyer. v1 buys ship-to-home only. */
+  fulfillment?: PageFulfillment
+  /** Per-account or per-member purchase limit the page states, when it states one. */
+  limit?: number
+  /** Which part of the page the reading came from. */
+  source?: "next-data" | "json-ld" | "page-text"
 }
 
 export const GAMESTOP: PageSpec = {
@@ -42,7 +54,8 @@ export const GAMESTOP: PageSpec = {
   cautiousOutOfStock: false,
   bare: /^\d{5,9}$/,
   pathId: /\/(\d{5,9})\.html$/i,
-  canonical: (id) => `https://www.gamestop.com/products/${id}.html`
+  canonical: (id) => `https://www.gamestop.com/products/${id}.html`,
+  ownerStep: "GameStop did not give Zzz AIO a cart form to submit. Add the item and check out in the account window; the stock check, price and session are already done. Dry run stops here."
 }
 
 export const BARNES_NOBLE: PageSpec = {
@@ -55,7 +68,8 @@ export const BARNES_NOBLE: PageSpec = {
   cautiousOutOfStock: false,
   bare: /^(?:\d{9}[\dXx]|\d{10,13})$/,
   pathId: /\/w\/(?:[^/]+\/)?(\d{9}[\dXx]|\d{10,13})\/?$/i,
-  canonical: (id) => `https://www.barnesandnoble.com/w/${id}`
+  canonical: (id) => barnesCanonical(id),
+  ownerStep: "Barnes & Noble moved sign-in and checkout to Shopify pages that Zzz AIO does not drive. Add the item and check out in the account window; the stock check, price and session are already done."
 }
 
 export const COSTCO: PageSpec = {
@@ -69,7 +83,8 @@ export const COSTCO: PageSpec = {
   bare: /^\d{5,12}$/,
   // Costco moved product pages to /p/-/<slug>/<id>; the old .product.<id>.html now 302s there.
   pathId: /(?:\.product\.(\d{5,12})\.html|\/p\/(?:[^/]+\/)*(\d{5,12}))\/?$/i,
-  canonical: (id) => `https://www.costco.com/p/-/product/${id}`
+  canonical: (id) => `https://www.costco.com/p/-/product/${id}`,
+  ownerStep: "Costco's cart and checkout call a separate API with its own keys that Zzz AIO does not use. Add the item and check out in the account window; the stock check, price and session are already done."
 }
 
 export const SAMS: PageSpec = {
@@ -82,7 +97,8 @@ export const SAMS: PageSpec = {
   cautiousOutOfStock: false,
   bare: /^\d{5,14}$/,
   pathId: /\/ip\/(?:[^/]+\/)?(\d{5,14})\/?$/i,
-  canonical: (id) => `https://www.samsclub.com/ip/${id}`
+  canonical: (id) => `https://www.samsclub.com/ip/${id}`,
+  ownerStep: "Sam's Club draws its cart and checkout in the page with scripts, so there is no form for Zzz AIO to submit. Add the item and check out in the account window; the stock check, price and session are already done."
 }
 
 export const PAGE_SPECS: readonly PageSpec[] = [GAMESTOP, BARNES_NOBLE, COSTCO, SAMS]
@@ -94,7 +110,11 @@ export function pageSpec(id: StoreId): PageSpec | undefined {
 export function parsePageTarget(spec: PageSpec, input: string): PageTarget | null {
   const text = input.trim()
   if (!text) return null
-  if (spec.bare.test(text)) return { sku: normalizeId(text), url: spec.canonical(normalizeId(text)) }
+  if (spec.bare.test(text)) {
+    const sku = normalizeId(text)
+    const variant = spec.id === "barnes-noble" ? isbn13(sku) : ""
+    return { sku, url: spec.canonical(sku), ...(variant ? { variant } : {}) }
+  }
   try {
     const url = new URL(text)
     if (url.protocol !== "https:") return null
@@ -103,7 +123,8 @@ export function parsePageTarget(spec: PageSpec, input: string): PageTarget | nul
     const id = match?.[1] || match?.[2] || ""
     const sku = id ? normalizeId(id) : ""
     if (!sku) return null
-    return { sku, url: `https://${spec.host}${url.pathname}` }
+    const ean = spec.id === "barnes-noble" ? url.searchParams.get("ean")?.trim() ?? "" : ""
+    return { sku, url: `https://${spec.host}${url.pathname}`, ...(/^97[89]\d{10}$/.test(ean) ? { variant: ean } : {}) }
   } catch {
     return null
   }
@@ -122,6 +143,8 @@ export function isPageChallenge(status: number, body: string): boolean {
   if (sample.includes("px-captcha")) return true
   if (sample.includes("are-you-human")) return true
   if (sample.includes("verify you are human")) return true
+  // Sam's Club robot check: "Let us know you're not a robot" / "you're human (no robots allowed)".
+  if (/not a robot|you(?:'|’|&#x27;|&#39;)re human|no robots allowed/.test(sample)) return true
   if (sample.includes("captcha") && !sample.includes("application/ld+json")) return true
   if ((status === 403 || status === 412) && !sample.includes('"@type"')) return true
   return false
@@ -135,37 +158,240 @@ export function isLoginWall(body: string): boolean {
 }
 
 /**
- * Product-page availability. InStock, LimitedAvailability, PreOrder, and PreSale
- * are purchasable. A visible Add to Cart control is too. Schema OutOfStock with
- * no add control is not treated as a live warehouse count.
+ * Product-page reading. The order of trust is: the store's own page data (Sam's Club
+ * Next.js data), then schema.org JSON-LD (Costco, Barnes & Noble, GameStop), then the page
+ * text. InStock, LimitedAvailability, PreOrder, and PreSale are purchasable. A visible Add to
+ * Cart control is too. Schema OutOfStock with no add control is not treated as a live warehouse count.
  */
-export function readPageOffer(spec: PageSpec, body: string, sku: string): PageReading {
-  const product = productRecord(body)
-  const offer = firstOffer(product?.offers)
-  const availability = text(offer?.availability || product?.availability).toLowerCase()
-  const title = text(product?.name)
-  const price = money(offer?.price ?? offer?.lowPrice ?? product?.price)
+export function readPageOffer(spec: PageSpec, body: string, sku: string, variant?: string): PageReading {
+  const next = spec.id === "sams" ? readSamsData(body) : null
+  const ld = readJsonLd(body, variant)
+  const meta = readMeta(body)
   const add = hasAddControl(body)
-  const preorder = /pre-?order|pre-?sale/.test(availability)
-  const schemaBuy = /instock|limitedavailability|pre-?order|pre-?sale/.test(availability)
-  const inStock = schemaBuy || add
-  const status: PageAvailability = !inStock ? "UNAVAILABLE" : preorder && !/instock|limitedavailability/.test(availability) ? "PRE_ORDER" : "IN_STOCK"
+  const title = next?.title || ld.title || cleanTitle(meta.title, spec) || undefined
+  const price = next?.price ?? ld.price ?? meta.price
+  const imageUrl = next?.image || ld.image || meta.image || undefined
+  const availability = ld.availability.toLowerCase()
+
+  let source: PageReading["source"] = ld.found ? "json-ld" : "page-text"
+  let fulfillment: PageFulfillment = "unknown"
+  let schemaBuy = /instock|limitedavailability|pre-?order|pre-?sale/.test(availability)
+  let preorder = /pre-?order|pre-?sale/.test(availability) && !/instock|limitedavailability/.test(availability)
+  let limit = next?.limit
+  let reasonOverride = ""
+
+  if (next) {
+    source = "next-data"
+    preorder = next.preorder
+    if (next.shipping !== undefined) {
+      fulfillment = next.shipping ? "ship" : next.pickup ? "pickup" : "unknown"
+      schemaBuy = next.shipping
+      if (!next.shipping && next.pickup) reasonOverride = `${title || sku} can only be picked up in a club right now. Zzz AIO buys ship-to-home only.`
+    } else {
+      schemaBuy = next.inStock
+      fulfillment = next.inStock ? "ship" : "unknown"
+    }
+  } else if (schemaBuy) fulfillment = "ship"
+  if (!limit && spec.id === "gamestop") limit = readLimit(body)
+
+  // The store's own product data is exact. An "Add to cart" button elsewhere on the page (a carousel
+  // of other items, for example) must not turn an out-of-stock product on.
+  const inStock = next ? schemaBuy : schemaBuy || add
+  if (!next && add && !schemaBuy && fulfillment === "unknown") fulfillment = "ship"
+  const status: PageAvailability = !inStock ? "UNAVAILABLE" : preorder ? "PRE_ORDER" : "IN_STOCK"
   const name = title || sku
   const priced = price !== undefined ? ` at $${price.toFixed(2)}` : ""
   const reason = inStock
     ? `${name} is ${status === "PRE_ORDER" ? "open for preorder" : "in stock"}${priced}.`
-    : spec.cautiousOutOfStock
-      ? `${name} has no add-to-cart control on the Costco page. Warehouse inventory was not read.`
-      : `${name} is not available on the product page.`
+    : reasonOverride
+      ? reasonOverride
+      : spec.cautiousOutOfStock
+        ? `${name} has no add-to-cart control on the Costco page. Warehouse inventory was not read.`
+        : `${name} is not available on the product page.`
   return {
     inStock,
     status,
-    title: title || undefined,
+    title,
     sku,
     price,
     reason,
-    seller: spec.name
+    seller: spec.name,
+    imageUrl,
+    fulfillment,
+    ...(limit ? { limit } : {}),
+    source
   }
+}
+
+interface SamsData {
+  title?: string
+  price?: number
+  image?: string
+  inStock: boolean
+  shipping?: boolean
+  pickup: boolean
+  preorder: boolean
+  limit?: number
+}
+
+/** The product object in the page's Next.js data. Nothing here needs a session. */
+function readSamsData(body: string): SamsData | null {
+  const match = body.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i)
+  if (!match) return null
+  const root = asRecord(safeJson(match[1] ?? ""))
+  const product = asRecord(asRecord(asRecord(asRecord(asRecord(root?.props)?.pageProps)?.initialData)?.data)?.product)
+  if (!product) return null
+  const options = Array.isArray(product.fulfillmentOptions) ? product.fulfillmentOptions.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item)) : []
+  const live = (value: unknown) => /^(?:IN_STOCK|AVAILABLE|LIMITED|LOW_STOCK|PRE_?ORDER)/i.test(text(value))
+  const ship = options.find((item) => /^(?:SHIPPING|DELIVERY)$/i.test(text(item.type)))
+  const pick = options.find((item) => /^PICKUP$/i.test(text(item.type)))
+  const status = text(asRecord(product.availabilityStatusV2)?.value) || text(product.availabilityStatus)
+  const priceInfo = asRecord(product.priceInfo)
+  const channel = Array.isArray(product.channelLevelPriceInfo) ? asRecord(asRecord(product.channelLevelPriceInfo[0])?.channelPriceInfo) : null
+  const price = money(asRecord(priceInfo?.currentPrice)?.price ?? asRecord(channel?.currentPrice)?.price)
+  const images = asRecord(product.imageInfo)
+  const first = Array.isArray(images?.allImages) ? asRecord(images.allImages[0]) : null
+  const image = text(first?.url) || text(images?.thumbnailUrl)
+  const limits = [Number(product.memberLimit), Number(product.orderLimit)].filter((value) => Number.isFinite(value) && value > 0)
+  return {
+    title: text(product.name) || undefined,
+    price,
+    image: image.startsWith("https://") ? image : undefined,
+    inStock: live(status),
+    shipping: ship ? live(ship.availabilityStatus) : undefined,
+    pickup: pick ? live(pick.availabilityStatus) : false,
+    preorder: asRecord(product.preOrder)?.isPreOrder === true,
+    limit: limits.length ? Math.min(...limits) : undefined
+  }
+}
+
+interface LdReading {
+  found: boolean
+  title?: string
+  price?: number
+  image?: string
+  availability: string
+}
+
+/**
+ * schema.org Product data. A ProductGroup (Barnes & Noble) lists one Product per format.
+ * The edition in the link wins. Otherwise a buyable physical format is used, then the first physical one.
+ */
+function readJsonLd(body: string, variant?: string): LdReading {
+  const nodes: Record<string, unknown>[] = []
+  for (const block of body.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) collectProducts(safeJson(block[1] ?? ""), nodes)
+  if (!nodes.length) return { found: false, availability: "" }
+  const readNode = (node: Record<string, unknown>): LdReading => {
+    const offer = firstOffer(node.offers)
+    const amount = priceOf(offer)
+    return {
+      found: true,
+      title: text(node.name) || undefined,
+      price: amount ?? money(node.price),
+      image: imageOf(node.image),
+      availability: text(offer?.availability || node.availability)
+    }
+  }
+  const variants = nodes.filter((node) => text(node["@type"]) !== "ProductGroup" && Boolean(node.offers))
+  const group = nodes.find((node) => text(node["@type"]) === "ProductGroup")
+  const own = variants.filter((node) => !isDigitalFormat(node))
+  const pool = own.length ? own : variants
+  let pick: Record<string, unknown> | undefined
+  if (variant) pick = variants.find((node) => text(node.sku) === variant || text(node.gtin13) === variant || text(node.url).includes(`ean=${variant}`))
+  if (!pick && group && pool.length > 1) pick = pool.find((node) => /instock|limitedavailability|pre-?order|pre-?sale/i.test(text(firstOffer(node.offers)?.availability))) ?? pool[0]
+  pick ??= pool[0] ?? nodes[0]
+  const reading = readNode(pick)
+  if (group && !reading.title) reading.title = text(group.name) || undefined
+  if (group && !reading.image) reading.image = imageOf(group.image)
+  const format = text(pick.bookFormat).replace(/^.*\//, "")
+  if (group && format && reading.title && new Set(variants.map((node) => text(node.bookFormat)).filter(Boolean)).size > 1) reading.title = `${reading.title} (${format})`
+  return reading
+}
+
+function collectProducts(node: unknown, out: Record<string, unknown>[]): void {
+  if (Array.isArray(node)) {
+    for (const item of node) collectProducts(item, out)
+    return
+  }
+  const record = asRecord(node)
+  if (!record) return
+  const type = Array.isArray(record["@type"]) ? record["@type"].map(text).join(" ") : text(record["@type"])
+  if (/\bProduct\b|\bProductGroup\b/.test(type)) {
+    out.push(record)
+    if (Array.isArray(record.hasVariant)) for (const item of record.hasVariant) collectProducts(item, out)
+  }
+  if (record["@graph"]) collectProducts(record["@graph"], out)
+}
+
+function isDigitalFormat(node: Record<string, unknown>): boolean {
+  const format = `${text(node.bookFormat)} ${text(node.additionalType)} ${text(node.name)}`.toLowerCase()
+  return /ebook|audiobook|nook|digital/.test(format)
+}
+
+/** A price from an offer: a plain price, a price range, or a list of price specifications. */
+function priceOf(offer: Record<string, unknown> | null): number | undefined {
+  if (!offer) return undefined
+  const direct = money(offer.price ?? offer.lowPrice)
+  if (direct !== undefined) return direct
+  const specs = Array.isArray(offer.priceSpecification) ? offer.priceSpecification : offer.priceSpecification ? [offer.priceSpecification] : []
+  const prices = specs.map((item) => money(asRecord(item)?.price)).filter((value): value is number => value !== undefined)
+  // The member price is the lowest. Zzz AIO reports what the signed-in member pays.
+  return prices.length ? Math.min(...prices) : undefined
+}
+
+function imageOf(value: unknown): string | undefined {
+  const first = Array.isArray(value) ? value[0] : value
+  const url = typeof first === "string" ? first : text(asRecord(first)?.url)
+  return url.startsWith("https://") && url.length < 400 ? url : undefined
+}
+
+function readMeta(body: string): { title?: string; image?: string; price?: number } {
+  const read = (name: string): string => {
+    for (const tag of body.slice(0, 200_000).match(/<meta\b[^>]*>/gi) ?? []) {
+      const key = tag.match(/\b(?:property|name)=["']([^"']+)["']/i)?.[1]?.toLowerCase()
+      if (key !== name) continue
+      const content = tag.match(/\bcontent=["']([^"']*)["']/i)?.[1]
+      if (content) return decodeEntities(content.trim())
+    }
+    return ""
+  }
+  const image = read("og:image")
+  const amount = money(read("product:price:amount") || read("og:price:amount"))
+  return { title: read("og:title") || undefined, image: image.startsWith("https://") ? image : undefined, price: amount }
+}
+
+function cleanTitle(value: string | undefined, spec: PageSpec): string {
+  const text = (value ?? "").replace(/\s*[|\-–]\s*(?:Costco|Samsclub\.com|GameStop|Barnes\s*&\s*Noble.*?)\s*$/i, "").trim()
+  return text && text.toLowerCase() !== spec.name.toLowerCase() ? text : ""
+}
+
+/** "Purchase Limit ... only 1 unit of this item may be purchased per account" on a GameStop page. */
+function readLimit(body: string): number | undefined {
+  const visible = body.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ")
+  const match = visible.match(/purchase limit[\s\S]{0,120}?\bonly\s+(\d{1,2})?\s*(?:unit|item|copy|copies)/i)
+  if (!match) return undefined
+  return match[1] ? Number(match[1]) : 1
+}
+
+function decodeEntities(value: string): string {
+  return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+}
+
+function barnesCanonical(id: string): string {
+  const ean = isbn13(id)
+  return ean ? `https://www.barnesandnoble.com/w/?ean=${ean}` : `https://www.barnesandnoble.com/w/${id}`
+}
+
+/** An ISBN-13 for a bare ISBN. A 10-digit number that is not a valid ISBN-10 is a Barnes & Noble work id. */
+function isbn13(id: string): string {
+  if (/^97[89]\d{10}$/.test(id)) return id
+  if (!/^\d{9}[\dXx]$/.test(id)) return ""
+  const digits = id.toUpperCase().split("").map((char) => (char === "X" ? 10 : Number(char)))
+  const sum = digits.reduce((total, digit, index) => total + digit * (10 - index), 0)
+  if (sum % 11 !== 0) return ""
+  const core = `978${id.slice(0, 9)}`
+  const check = (10 - (core.split("").reduce((total, char, index) => total + Number(char) * (index % 2 ? 3 : 1), 0) % 10)) % 10
+  return `${core}${check}`
 }
 
 export function hasAddControl(html: string): boolean {

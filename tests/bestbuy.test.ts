@@ -1,3 +1,4 @@
+import { expectDryRunReport, recorder } from "./helpers/dry-run"
 import { generateKeyPairSync, constants, privateDecrypt, createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
@@ -382,7 +383,9 @@ describe("best buy module", () => {
 
   it("runs payment and never sends place order in test mode", async () => {
     const fake = client((req) => happy(req))
-    const result = await createBestBuyModule().run(ctx(fake.http, { testMode: true }))
+    const rec = recorder()
+    const result = await createBestBuyModule().run(ctx(fake.http, { testMode: true, ...rec.part }))
+    expectDryRunReport(rec, result, { stages: ["monitor","cart","place"], cart: "left" })
     expect(result.outcome).toBe("tested")
     expect(fake.calls.some((call) => call.url.includes("/creditCard") || (call.body ?? "").includes("creditCard"))).toBe(true)
     expect(fake.calls.some((call) => isFinalSubmit("bestbuy", call))).toBe(false)

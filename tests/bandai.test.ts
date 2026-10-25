@@ -1,3 +1,4 @@
+import { expectDryRunReport, recorder } from "./helpers/dry-run"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { parseBulkTasks } from "../src/engine/bulk"
@@ -97,6 +98,7 @@ function happy(req: HttpRequest): HttpResponse {
   if (req.url.includes("/api/context/member")) return json(200, { isLoggedIn: true, csrfToken: "csrf-1" })
   if (req.url.includes("/api/products/")) return json(200, open)
   if (req.url.includes("/api/cart/addToCart")) return json(200, { items: [{ addedNewCart: true }], totalCartCount: 1 })
+  if (req.url.includes("/api/cart/removeCartLineItems")) return json(200, { totalCartCount: 0 })
   if (req.url.includes("/api/cart/detail")) {
     return json(200, {
       cartId: "cart-1",
@@ -175,6 +177,25 @@ describe("bandai checkout", () => {
     expect(fake.calls.some((call) => call.url.includes("/api/cart/sn-1/checkout"))).toBe(true)
     expect(fake.calls.some((call) => isFinalSubmit("bandai", call))).toBe(false)
     expect(marks.some((line) => line.startsWith("skip:") && line.includes("card number was not sent"))).toBe(true)
+  })
+
+  it("dry run report lists every step, removes the test line when asked, and warns when it could not", async () => {
+    const left = recorder()
+    const first = await createBandaiModule().run(ctx(client(happy).http, { testMode: true, ...left.part }))
+    expectDryRunReport(left, first, { stages: ["monitor", "cart", "address", "shipping", "payment", "place"], cart: "left" })
+
+    const fake = client(happy)
+    const clean = recorder()
+    const second = await createBandaiModule().run(ctx(fake.http, { testMode: true, clearCartAfterTest: true, ...clean.part }))
+    expectDryRunReport(clean, second, { stages: ["monitor", "cart", "address", "shipping", "payment", "place"], cart: "removed" })
+    expect(fake.calls.some((call) => call.method === "DELETE" && call.url.includes("/api/cart/removeCartLineItems"))).toBe(true)
+
+    const broken = client((req) => req.method === "DELETE" ? json(500, { error: "no" }) : happy(req))
+    const failed = recorder()
+    const third = await createBandaiModule().run(ctx(broken.http, { testMode: true, clearCartAfterTest: true, ...failed.part }))
+    expect(third.outcome).toBe("tested")
+    expect(failed.marks.some((mark) => mark.stage === "cart" && mark.result === "fail" && /by hand/i.test(mark.detail))).toBe(true)
+    expect(failed.logs.some((entry) => entry.level === "warn" && /still in your cart/i.test(entry.message))).toBe(true)
   })
 
   it("pauses on the storefront challenge before add to cart", async () => {

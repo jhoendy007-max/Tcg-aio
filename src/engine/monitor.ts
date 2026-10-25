@@ -1,6 +1,7 @@
 import type { HttpResponse } from "./http"
 import { STORE_GAP_MS } from "./polite"
 import type { Settings, StoreId } from "../shared/types"
+import { easternMinutes } from "./time"
 
 export interface WatchSnapshot {
   inStock: boolean
@@ -43,7 +44,7 @@ export interface RestockEvent {
 export interface RestockHint {
   store: StoreId
   sku: string
-  hourAst: number
+  hourEt: number
   samples: number
   warmupMin: number
   detail: string
@@ -201,31 +202,19 @@ export function parseDropWindows(text: string): DailyWindow[] {
     const line = raw.trim()
     if (!line) continue
     const match = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(line)
-    if (!match) throw new Error("Drop windows use Atlantic Time like 09:00-09:30, one per line.")
+    if (!match) throw new Error("Drop windows use Eastern Time like 09:00-09:30, one per line.")
     const start = Number(match[1]) * 60 + Number(match[2])
     const end = Number(match[3]) * 60 + Number(match[4])
     if (Number(match[1]) > 23 || Number(match[3]) > 23 || Number(match[2]) > 59 || Number(match[4]) > 59 || start === end) {
-      throw new Error("Drop windows use Atlantic Time like 09:00-09:30, one per line.")
+      throw new Error("Drop windows use Eastern Time like 09:00-09:30, one per line.")
     }
     windows.push({ start, end })
   }
   return windows
 }
 
-export function astMinutes(now: number): number {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "America/Puerto_Rico",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(now)
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0")
-  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0")
-  return hour * 60 + minute
-}
-
-export function astHour(now: number): number {
-  return Math.floor(astMinutes(now) / 60)
+export function easternHour(now: number): number {
+  return Math.floor(easternMinutes(now) / 60)
 }
 
 function covers(minute: number, window: DailyWindow): boolean {
@@ -234,7 +223,7 @@ function covers(minute: number, window: DailyWindow): boolean {
 }
 
 export function inDropWindow(now: number, daily: DailyWindow[], drops: DropWindow[]): boolean {
-  const minute = astMinutes(now)
+  const minute = easternMinutes(now)
   if (daily.some((window) => covers(minute, window))) return true
   return drops.some((drop) => {
     if (!drop.enabled) return false
@@ -278,7 +267,7 @@ export function monitorPlaces(settings: Pick<Settings, "targetZip" | "targetStor
 export function suggestWarmups(events: RestockEvent[] | null | undefined, _now = Date.now()): RestockHint[] {
   const groups = new Map<string, { store: StoreId; sku: string; hour: number; samples: number }>()
   for (const event of Array.isArray(events) ? events.filter((row) => row != null) : []) {
-    const hour = astHour(event.at)
+    const hour = easternHour(event.at)
     const key = `${event.store}:${event.sku}:${hour}`
     const group = groups.get(key) ?? { store: event.store, sku: event.sku, hour, samples: 0 }
     group.samples += 1
@@ -290,10 +279,10 @@ export function suggestWarmups(events: RestockEvent[] | null | undefined, _now =
     .map((group) => ({
       store: group.store,
       sku: group.sku,
-      hourAst: group.hour,
+      hourEt: group.hour,
       samples: group.samples,
       warmupMin: 15,
-      detail: `${group.sku} restocked ${group.samples} times around ${String(group.hour).padStart(2, "0")}:00 AST. Warm the session 15 minutes before that hour.`
+      detail: `${group.sku} restocked ${group.samples} times around ${String(group.hour).padStart(2, "0")}:00 ET. Warm the session 15 minutes before that hour.`
     }))
 }
 

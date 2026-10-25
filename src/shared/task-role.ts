@@ -129,7 +129,7 @@ export function structuralChange(existing: PublicTask, input: TaskInput): string
 export function inActiveHours(text: string, now = Date.now()): boolean {
   const windows = hourWindows(text)
   if (!windows.length) return true
-  const minute = minutesInAtlantic(now)
+  const minute = minutesInEastern(now)
   return windows.some((window) => covers(minute, window.start, window.end))
 }
 
@@ -236,7 +236,7 @@ const TEXT = {
     hintCheckout: "A checkout can wait for a monitor or a restock alert, or watch the product itself.",
     inherit: "Blank uses the store setting, then the global setting.",
     live: "Delays, caps, hours, links, and the webhook can change while this task is running.",
-    hoursHint: "Atlantic time. One 09:00-09:30 window per line. Blank means always.",
+    hoursHint: "Eastern time. One 09:00-09:30 window per line. Blank means always.",
     retailer: "Retailer",
     anySeller: "Any seller",
     direct: "Direct connection",
@@ -464,8 +464,8 @@ function covers(minute: number, start: number, end: number): boolean {
   return minute >= start || minute < end
 }
 
-function minutesInAtlantic(now: number): number {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Puerto_Rico", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(now))
+function minutesInEastern(now: number): number {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(now))
   const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0")
   const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0")
   return hour * 60 + minute

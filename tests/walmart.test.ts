@@ -1,3 +1,4 @@
+import { expectDryRunReport, recorder } from "./helpers/dry-run"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { DEFAULT_SETTINGS, type FullAccount, type FullProfile } from "../src/shared/types"
@@ -403,10 +404,29 @@ describe("walmart module", () => {
 
   it("runs payment and never sends place order in test mode", async () => {
     const fake = client((req) => happy(req))
-    const result = await createWalmartModule().run(ctx(fake.http, { testMode: true }))
+    const rec = recorder()
+    const result = await createWalmartModule().run(ctx(fake.http, { testMode: true, ...rec.part }))
+    expectDryRunReport(rec, result, { stages: ["monitor","cart","payment","place"], cart: "left" })
     expect(result.outcome).toBe("tested")
     expect(fake.calls.some((call) => call.url.includes("CreateAccountCreditCard"))).toBe(true)
     expect(fake.calls.some((call) => isFinalSubmit("walmart", call))).toBe(false)
+  })
+})
+
+describe("Walmart dry run cart cleanup (0.2.46)", () => {
+  it("reports the removal, and says so when Walmart refuses it", async () => {
+    const fake = client((req) => happy(req))
+    const rec = recorder()
+    const result = await createWalmartModule().run(ctx(fake.http, { testMode: true, clearCartAfterTest: true, ...rec.part }))
+    expectDryRunReport(rec, result, { stages: ["monitor", "cart", "payment", "place"], cart: "removed" })
+    expect(fake.calls.some((call) => call.url.includes("/updateItems/") && (call.body ?? "").includes('"quantity":0'))).toBe(true)
+
+    const refused = client((req) => req.url.includes("/updateItems/") && (req.body ?? "").includes('"quantity":0') ? json(200, { errors: [{ message: "CART_BUSY" }] }) : happy(req))
+    const failed = recorder()
+    const second = await createWalmartModule().run(ctx(refused.http, { testMode: true, clearCartAfterTest: true, ...failed.part }))
+    expect(second.outcome).toBe("tested")
+    expect(failed.marks.some((mark) => mark.stage === "cart" && mark.result === "fail" && /by hand/i.test(mark.detail))).toBe(true)
+    expect(failed.logs.some((entry) => entry.level === "warn" && /still in your cart/i.test(entry.message))).toBe(true)
   })
 })
 

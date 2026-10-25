@@ -420,7 +420,7 @@ export interface Settings {
   blockRetries: number
   /** Poll interval inside a drop window. The per-store gap is still the floor. */
   monitorFastDelayMs: number
-  /** Atlantic Time windows, one HH:MM-HH:MM per line. Scheduled drops count too. */
+  /** Eastern Time windows, one HH:MM-HH:MM per line. Scheduled drops count too. */
   dropWindows: string
   /** Extra ZIPs for stores whose ship-to-home stock changes by location. */
   monitorZips: string
@@ -992,7 +992,7 @@ export interface DropScheduleInput {
   id?: string
   name: string
   enabled: boolean
-  /** Epoch milliseconds, or `YYYY-MM-DDTHH:mm` interpreted as Atlantic Time. */
+  /** Epoch milliseconds, or `YYYY-MM-DDTHH:mm` interpreted as Eastern Time. */
   startAt: number | string
   stopAt?: number | string | null
   warmupMin: number
@@ -1049,7 +1049,7 @@ export interface CalendarEventInput {
   id?: string
   game: CalendarGame
   name: string
-  /** Epoch milliseconds, or `YYYY-MM-DDTHH:mm` in Atlantic Time. */
+  /** Epoch milliseconds, or `YYYY-MM-DDTHH:mm` in Eastern Time. */
   startAt: number | string
   store: StoreId
   sku: string
@@ -1116,7 +1116,7 @@ export interface AnalyticsReport {
     byStore: { store: StoreId; samples: number; blocked: number; blockRate: number; avgMs: number; p50Ms: number; p95Ms: number }[]
   }
   stockLog: { store: StoreId; sku: string; at: number; price: number | null; title: string; kind?: string; imageUrl?: string; url?: string }[]
-  restockHints: { store: StoreId; sku: string; hourAst: number; samples: number; warmupMin: number; detail: string }[]
+  restockHints: { store: StoreId; sku: string; hourEt: number; samples: number; warmupMin: number; detail: string }[]
 }
 
 export interface InventoryRow {

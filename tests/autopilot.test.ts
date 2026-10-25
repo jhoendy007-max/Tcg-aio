@@ -124,7 +124,7 @@ describe("autopilot", () => {
 
   it("starts from a learned hour when the last price is under the cap", () => {
     const due = learnedDue({
-      hints: [{ store: "target", sku: "88897904", hourAst: 8, samples: 2, warmupMin: 15, detail: "two restocks" }],
+      hints: [{ store: "target", sku: "88897904", hourEt: 8, samples: 2, warmupMin: 15, detail: "two restocks" }],
       templates: [template()],
       tasks: [],
       fired: [],
@@ -134,7 +134,7 @@ describe("autopilot", () => {
     })
     expect(due).toHaveLength(1)
     expect(learnedDue({
-      hints: [{ store: "target", sku: "88897904", hourAst: 8, samples: 2, warmupMin: 15, detail: "two restocks" }],
+      hints: [{ store: "target", sku: "88897904", hourEt: 8, samples: 2, warmupMin: 15, detail: "two restocks" }],
       templates: [template()],
       tasks: [],
       fired: [],

@@ -68,7 +68,7 @@ async function runPage(ctx: StoreRunContext, spec: PageSpec): Promise<StoreRunRe
   let waits = 0
 
   while (!ctx.signal.aborted) {
-    const stock = await readOffer(ctx, spec, jar, target.sku, target.url, challenge)
+    const stock = await readOffer(ctx, spec, jar, target.sku, target.url, challenge, target.variant)
     if (stock.kind === "retry") {
       ctx.detail(stock.reason)
       ctx.log("warn", stock.reason)
@@ -96,7 +96,7 @@ async function runPage(ctx: StoreRunContext, spec: PageSpec): Promise<StoreRunRe
         if (result.kind === "ok") return result
         return { kind: result.kind === "paused" ? "paused" : "failed", reason: result.reason }
       }
-    })
+    }, { limit: reading.limit })
     if (bought.outcome === "oos") {
       ctx.log("warn", bought.reason)
       ctx.phase("monitoring")
@@ -114,7 +114,8 @@ async function readOffer(
   jar: PageCookies,
   sku: string,
   page: string,
-  challenge: string
+  challenge: string,
+  variant?: string
 ): Promise<Step<OfferHit>> {
   const response = await sharedValue(ctx, monitorKey(spec.id, sku, "page", ctx.proxy), () =>
     store(ctx, spec, jar, { method: "GET", url: page, headers: pageHeaders(jar, spec.home) })
@@ -126,7 +127,7 @@ async function readOffer(
   }
   const blocked = monitorStatusReason(response.value.status, Boolean(ctx.proxy))
   if (blocked) return { kind: "retry", reason: blocked }
-  const reading = readPageOffer(spec, response.value.body, sku)
+  const reading = readPageOffer(spec, response.value.body, sku, variant)
   if (response.value.status === 404) {
     return {
       kind: "ok",
@@ -139,7 +140,7 @@ async function readOffer(
   if (response.value.status >= 400) {
     return { kind: "retry", reason: `Monitor returned HTTP ${response.value.status} without a product page.` }
   }
-  reading.imageUrl = productImage(response.value.body) || undefined
+  reading.imageUrl = reading.imageUrl || productImage(response.value.body) || undefined
   noteWatch(ctx, { ...reading, url: page })
   return { kind: "ok", value: { reading, html: response.value.body } }
 }
