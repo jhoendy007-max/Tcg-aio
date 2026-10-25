@@ -2,7 +2,7 @@
   "name": "tcgaio",
   "version": "0.2.46",
   "private": true,
-  "description": "Windows desktop checkout assistant for Pokémon TCG and One Piece TCG drops.",
+  "description": "Windows desktop checkout assistant for Pok\u00e9mon TCG and One Piece TCG drops.",
   "main": "./out/main/index.js",
   "author": "TCGAIO",
   "scripts": {
@@ -15,7 +15,8 @@
     "phone:relay": "tsx src/phone/relay-cli.ts",
     "bench:monitors": "tsx src/engine/bench-cli.ts",
     "pack:extension": "node scripts/pack-extension.mjs",
-    "license:server": "tsx license-server/cli.ts serve"
+    "license:server": "tsx license-server/cli.ts serve",
+    "verify:claw": "tsx src/browser/claw-check-cli.ts"
   },
   "dependencies": {
     "@noble/ciphers": "^1.3.0",
