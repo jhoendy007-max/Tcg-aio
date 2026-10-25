@@ -73,68 +73,20 @@ export function listStores(
 }
 
 /**
- * Browser lifecycle integration.
- *
- * Call this from the task execution loop in the component that owns `ctx`
- * and task status. The original registry module does not define either
- * interface, so browser creation is kept separate from registry construction.
+ * Runs a store module with a Clawbrowser profile attached. The profile is named
+ * after the account, so cookies and the Clawbrowser-assigned identity persist.
+ * Fingerprints are managed by Clawbrowser itself and are not set here.
  */
 export async function runStoreWithClawBrowser<
-  TContext extends {
-    proxy?: unknown
-    account?: {
-      sessionCookies?: unknown
-    }
-    fingerprint?: {
-      userAgent?: string
-      hardwareConcurrency?: number
-      deviceMemory?: number
-      width?: number
-      height?: number
-    }
-    page?: unknown
-    browserContext?: unknown
-  },
+  TContext extends { account?: { id?: string }; page?: unknown; browserContext?: unknown },
   TResult
->(
-  module: StoreModule,
-  ctx: TContext,
-  getTaskStatus: () => string
-): Promise<TResult> {
-  let browser: Awaited<ReturnType<typeof clawLaunch>> | undefined
-
+>(module: StoreModule, ctx: TContext, getTaskStatus: () => string): Promise<TResult> {
+  const browser = await clawLaunch({ profile: `acct-${ctx.account?.id || module.id}` })
   try {
-    const fingerprint = ctx.fingerprint
-
-    browser = await clawLaunch({
-      proxy: ctx.proxy,
-      fingerprint: fingerprint
-        ? {
-            userAgent: fingerprint.userAgent,
-            hardwareConcurrency: fingerprint.hardwareConcurrency,
-            deviceMemory: fingerprint.deviceMemory,
-            viewport: {
-              width: fingerprint.width ?? 1280,
-              height: fingerprint.height ?? 800
-            }
-          }
-        : undefined
-    })
-
-    const browserContext = browser.context
-    const page = await browserContext.newPage()
-
-    if (ctx.account?.sessionCookies) {
-      await browserContext.setCookies(ctx.account.sessionCookies)
-    }
-
-    ctx.browserContext = browserContext
-    ctx.page = page
-
+    ctx.browserContext = browser.context
+    ctx.page = browser.context.pages()[0] ?? (await browser.context.newPage())
     return (await module.run(ctx as never)) as TResult
   } finally {
-    if (getTaskStatus() !== "PAUSED" && browser) {
-      await browser.close()
-    }
+    if (getTaskStatus() !== "PAUSED") await browser.close()
   }
 }

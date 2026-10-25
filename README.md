@@ -248,6 +248,20 @@ An expired session tries the refresh token, then the password. A challenge at an
 7. The place-order form Amazon rendered (`/checkout/p/.../spc/place-order`, or `placeYourOrder1`) is submitted with the fields already on that form. Those fields are the purchase id and the CSRF token. The card number and CVV are not added. A declined saved payment fails without an order id. The order number is the `###-#######-#######` value on the thank-you page.
 8. On success, failure, or pause, the app posts to the Discord webhook when one is saved. The checkout page itself was not available during the live read-only check, so the place-order field names are locked by the fake HTTP client.
 
+## Clawbrowser engine
+
+Every store module talks to the store through [Clawbrowser](https://clawbrowser.ai). Clawbrowser is a Chromium runtime managed by `clawctl`; it exposes a CDP endpoint and keeps one isolated profile per account. The desktop app does not launch its own Chromium for task traffic.
+
+- Install `clawctl` and save the API key once: `clawctl install --json`, then `clawctl config set --api-key <key>`, then `clawctl start --profile work --url clawbrowser://verify/ --json`.
+- Put `clawctl` on `PATH`, or set `CLAWCTL_PATH` to the binary.
+- A task's requests use the profile `acct-<account id>`. Monitor-only tasks and tasks without an account share the profile `monitor`. Reusing a profile name keeps that account's cookies, storage, and identity between runs.
+- Profile identity and fingerprint belong to Clawbrowser (`clawctl rotate --profile <name>` gives a profile a fresh one). The app does not override fingerprint properties; Clawbrowser's own docs say CDP-level overrides create conflicting signals.
+- A proxy is bound to the profile in Clawbrowser. The per-task proxy in the app is not applied to Clawbrowser traffic.
+- `CLAW_MAX_PROFILES` (default `40`) caps live profiles on one PC. Extra tasks queue and start as profiles free up. Idle profiles close after two minutes.
+- Closing the app closes the profiles it started.
+
+Code: `src/browser/claw-launch.ts` starts a profile and attaches over CDP, `src/browser/claw-http.ts` is the `HttpClient` the task runner uses, and `src/browser/semaphore.ts` limits concurrent profile startups.
+
 ## Adding a store
 
 Each retailer is a `StoreModule` under `src/stores/<store>/`. The registry in `src/stores/registry.ts` is the only place that needs to know it exists. A module implements `run(ctx)` and returns `success`, `failed`, `paused`, or `stopped`. `ctx` provides the profile, account, the starting proxy, the proxy group, monitor settings, logger, and an HTTP client. Every store in the catalog has a module. `createStubModule` remains the fallback for a catalog id that has no module yet.
