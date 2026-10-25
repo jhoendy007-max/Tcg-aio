@@ -7,6 +7,7 @@ import { AlertService, relayRestockUrl as relayUrl } from "../engine/alerts"
 import { warmTaskMonitors } from "../engine/bench"
 import { defaultHttp } from "../engine/http"
 import { chromiumHttp } from "./chromium-http"
+import { ClawHttp } from "../browser/claw-http"
 import { refreshStoreSession } from "../engine/store-browser"
 import { postDiscord, postGroupDiscord } from "../engine/discord"
 import { migrateTaskWebhook, noticeAllowed } from "../engine/stock-alerts"
@@ -48,6 +49,7 @@ if (!gotLock) app.quit()
 
 let window: BrowserWindow | null = null
 let runner: TaskService | null = null
+let clawHttp: ClawHttp | undefined
 let phone: PhoneServer | null = null
 let alerts: AlertService | null = null
 let sessions: SessionBrowser | null = null
@@ -208,6 +210,9 @@ if (gotLock) void app.whenReady().then(async () => {
     if (notice.kind === "success") void reportCheckout(db, machineFingerprint(), notice.storeName, notice.sku)
     return delivered
   }
+  // Every store module talks to the store through a Clawbrowser profile.
+  // Live profile cap. Every task on one PC shares it; extra tasks wait their turn.
+  clawHttp = new ClawHttp(undefined, { maxLive: Number(process.env.CLAW_MAX_PROFILES) || 40 })
   runner = new TaskService(
     db,
     registry,
@@ -217,7 +222,7 @@ if (gotLock) void app.whenReady().then(async () => {
       else desktop.publishTask(projectTask(event.task, db.listProfiles(), db.listAccounts(), db.listProxyGroups()))
     },
     publish,
-    chromiumHttp,
+    clawHttp,
     gate,
     (input) => {
       sessionWindows.setCap(db.getSettings().sessionWindowCap)
@@ -333,6 +338,7 @@ app.on("second-instance", () => {
 })
 
 app.on("before-quit", () => {
+  void clawHttp?.closeAll()
   if (sessionTimer) clearInterval(sessionTimer)
   if (dropTimer) clearInterval(dropTimer)
   if (handsTimer) clearInterval(handsTimer)
@@ -407,7 +413,7 @@ async function tickDrops(db: Database, publish: (notice: Notice) => Promise<bool
       if (plan.action === "warm") {
         db.setSchedulePhase(plan.id, "warming")
         const matched = db.listTasks().filter((task) => plan.taskIds.includes(task.id))
-        await warmTaskMonitors(chromiumHttp, matched, db.listProxyGroups()).catch(() => undefined)
+        await warmTaskMonitors(clawHttp ?? chromiumHttp, matched, db.listProxyGroups()).catch(() => undefined)
         for (const accountId of plan.accountIds) {
           if (accountId) await warmTracked(db, accountId)
         }
